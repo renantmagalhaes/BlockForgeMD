@@ -30,51 +30,147 @@ interface TreeNode {
   path: string
   isFolder: boolean
   children: TreeNode[]
+  hasPage?: boolean
+  filePath?: string
   type?: string
   title?: string
+  frontMatter?: Record<string, string>
 }
 
 const buildTree = (files: FileRecord[]): TreeNode[] => {
   const root: TreeNode = { name: 'Root', path: '', isFolder: true, children: [] }
 
+  const nodeMap = new Map<string, {
+    filePath: string
+    title: string
+    type: string
+    frontMatter?: Record<string, string>
+  }>()
+
+  const folderPaths = new Set<string>()
+
+  // Helper to check if a path has children
+  const hasSubPages = (basePath: string) => {
+    return files.some(f => {
+      if (f.path === basePath) return false
+      return f.path.startsWith(basePath + '/')
+    })
+  }
+
   files.forEach((file) => {
-    const parts = file.path.split('/')
+    if (file.path.endsWith('/README.md')) {
+      const parentDir = file.path.substring(0, file.path.lastIndexOf('/'))
+      nodeMap.set(parentDir, {
+        filePath: file.path,
+        title: file.title,
+        type: file.type,
+        frontMatter: file.frontMatter
+      })
+      folderPaths.add(parentDir)
+    } else {
+      const cleanPath = file.path.endsWith('.md') ? file.path.slice(0, -3) : file.path
+      if (hasSubPages(cleanPath)) {
+        nodeMap.set(cleanPath, {
+          filePath: file.path,
+          title: file.title,
+          type: file.type,
+          frontMatter: file.frontMatter
+        })
+        folderPaths.add(cleanPath)
+      } else {
+        nodeMap.set(file.path, {
+          filePath: file.path,
+          title: file.title,
+          type: file.type,
+          frontMatter: file.frontMatter
+        })
+      }
+    }
+  })
+
+  // Build the hierarchical tree
+  nodeMap.forEach((meta, nodePath) => {
+    const parts = nodePath.split('/')
     let current = root
 
     parts.forEach((part, i) => {
       const isLast = i === parts.length - 1
       const currentPath = parts.slice(0, i + 1).join('/')
+      const isFolder = folderPaths.has(currentPath) || !isLast
 
-      let child = current.children.find((c) => c.name === part && c.isFolder === !isLast)
+      let child = current.children.find((c) => c.name === part && c.isFolder === isFolder)
       if (!child) {
         child = {
           name: part,
           path: currentPath,
-          isFolder: !isLast,
+          isFolder,
           children: [],
-          type: isLast ? file.type : undefined,
-          title: isLast ? file.title : part,
         }
         current.children.push(child)
       }
+
+      if (isLast) {
+        child.hasPage = true
+        child.filePath = meta.filePath
+        child.title = meta.title
+        child.type = meta.type
+        child.frontMatter = meta.frontMatter
+      }
+
       current = child
     })
   })
 
-  const sortTree = (nodes: TreeNode[]) => {
+  // Ensure folders that have no explicit README or merged file still appear as folders in the tree
+  files.forEach(file => {
+    const parts = file.path.split('/')
+    if (parts.length > 1) {
+      for (let i = 1; i < parts.length; i++) {
+        const parentPath = parts.slice(0, i).join('/')
+        let current = root
+        const parentParts = parentPath.split('/')
+        parentParts.forEach((part) => {
+          let child = current.children.find(c => c.name === part && c.isFolder)
+          if (!child) {
+            child = {
+              name: part,
+              path: parentParts.slice(0, parentParts.indexOf(part) + 1).join('/'),
+              isFolder: true,
+              children: []
+            }
+            current.children.push(child)
+          }
+          current = child
+        })
+      }
+    }
+  })
+
+  // Custom Sort function
+  const sortTree = (nodes: TreeNode[], isRoot = false) => {
     nodes.sort((a, b) => {
+      if (isRoot) {
+        const order = ['Documents', 'Tasks', 'Canvas']
+        const idxA = order.indexOf(a.name)
+        const idxB = order.indexOf(b.name)
+        if (idxA !== -1 && idxB !== -1) return idxA - idxB
+        if (idxA !== -1) return -1
+        if (idxB !== -1) return 1
+      }
       if (a.isFolder && !b.isFolder) return -1
       if (!a.isFolder && b.isFolder) return 1
-      return a.name.localeCompare(b.name)
+      const nameA = a.title || a.name
+      const nameB = b.title || b.name
+      return nameA.localeCompare(nameB)
     })
     nodes.forEach((node) => {
       if (node.children.length > 0) {
-        sortTree(node.children)
+        sortTree(node.children, false)
       }
     })
   }
 
-  sortTree(root.children)
+  sortTree(root.children, true)
   return root.children
 }
 
@@ -85,8 +181,9 @@ const TreeNodeComponent: React.FC<{
   collapsedPaths: Record<string, boolean>
   onToggleCollapse: (path: string) => void
   onSelectFile: (path: string) => void
-  onCreateInFolder: (type: 'document' | 'task' | 'canvas' | 'folder' | 'board' | 'diagram', parentPath?: string) => void
+  onCreateInFolder: (type: 'document' | 'task' | 'canvas' | 'folder' | 'board' | 'diagram' | null, parentPath?: string) => void
   onDeletePath: (path: string) => void
+  onContextMenu: (e: React.MouseEvent, node: TreeNode) => void
 }> = ({
   node,
   depth,
@@ -96,32 +193,57 @@ const TreeNodeComponent: React.FC<{
   onSelectFile,
   onCreateInFolder,
   onDeletePath,
+  onContextMenu,
 }) => {
-  const isCollapsed = !!collapsedPaths[node.path]
-  const isSelected = selectedPath === node.path
+  const getIsCollapsed = () => {
+    if (collapsedPaths[node.path] !== undefined) {
+      return collapsedPaths[node.path]
+    }
+    if (node.path === 'Documents') return false
+    if (node.path === 'Tasks' || node.path === 'Canvas') return true
+    return true
+  }
 
-  const handleFolderClick = (e: React.MouseEvent) => {
+  const isCollapsed = getIsCollapsed()
+  const isSelected = selectedPath && node.hasPage && node.filePath === selectedPath
+
+  const handleRowClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (node.hasPage && node.filePath) {
+      onSelectFile(node.filePath)
+    } else if (node.isFolder) {
+      onToggleCollapse(node.path)
+    }
+  }
+
+  const handleChevronClick = (e: React.MouseEvent) => {
     e.stopPropagation()
     onToggleCollapse(node.path)
   }
 
-  const handleFileClick = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    onSelectFile(node.path)
-  }
-
   const handleAddClick = (e: React.MouseEvent) => {
     e.stopPropagation()
-    onCreateInFolder(null as any, node.path)
+    const parentPath = node.filePath?.endsWith('.md') ? node.filePath.slice(0, -3) : node.path
+    onCreateInFolder(null, parentPath)
   }
 
   const handleDeleteClick = (e: React.MouseEvent) => {
     e.stopPropagation()
-    onDeletePath(node.path)
+    if (node.filePath) {
+      onDeletePath(node.filePath)
+    } else {
+      onDeletePath(node.path)
+    }
+  }
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    onContextMenu(e, node)
   }
 
   const getIcon = () => {
-    if (node.isFolder) {
+    if (node.isFolder && !node.hasPage) {
       return isCollapsed ? (
         <Folder size={14} className="text-slate-400 shrink-0" />
       ) : (
@@ -143,36 +265,39 @@ const TreeNodeComponent: React.FC<{
   return (
     <div className="flex flex-col select-none">
       <div
-        onClick={node.isFolder ? handleFolderClick : handleFileClick}
-        style={{ paddingLeft: `${depth * 10 + 6}px` }}
+        onClick={handleRowClick}
+        onContextMenu={handleContextMenu}
+        style={{ paddingLeft: `${depth * 8 + 6}px` }}
         className={`flex items-center justify-between group py-1 px-2 rounded-lg text-xs transition cursor-pointer hover:bg-slate-800/40 ${
           isSelected ? 'bg-slate-800 text-violet-400 font-semibold border border-slate-700/50' : 'text-slate-300'
         }`}
       >
         <div className="flex items-center gap-1.5 truncate">
           {node.isFolder && (
-            <span className="text-slate-500 shrink-0">
+            <span
+              onClick={handleChevronClick}
+              className="text-slate-500 hover:text-slate-200 p-0.5 hover:bg-slate-700/50 rounded transition shrink-0"
+            >
               {isCollapsed ? <ChevronRight size={10} /> : <ChevronDown size={10} />}
             </span>
           )}
+          {!node.isFolder && <span className="w-4 shrink-0" />}
           {getIcon()}
           <span className="truncate">{node.title || node.name}</span>
         </div>
 
         <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 shrink-0 ml-1">
-          {node.isFolder && (
-            <button
-              onClick={handleAddClick}
-              className="p-0.5 hover:bg-slate-700 hover:text-white rounded text-slate-500 transition cursor-pointer"
-              title="Add Inside Folder"
-            >
-              <Plus size={10} />
-            </button>
-          )}
+          <button
+            onClick={handleAddClick}
+            className="p-0.5 hover:bg-slate-700 hover:text-white rounded text-slate-500 transition cursor-pointer"
+            title="Create Sub-item"
+          >
+            <Plus size={10} />
+          </button>
           <button
             onClick={handleDeleteClick}
             className="p-0.5 hover:bg-red-900/50 hover:text-red-400 rounded text-slate-500 transition cursor-pointer"
-            title="Delete File"
+            title="Delete"
           >
             <Trash2 size={10} />
           </button>
@@ -192,6 +317,7 @@ const TreeNodeComponent: React.FC<{
               onSelectFile={onSelectFile}
               onCreateInFolder={onCreateInFolder}
               onDeletePath={onDeletePath}
+              onContextMenu={onContextMenu}
             />
           ))}
         </div>
@@ -240,13 +366,21 @@ export const App: React.FC = () => {
     return saved ? JSON.parse(saved) : ['Todo', 'In Progress', 'Done']
   })
 
-  // Unified creation modal states
   const [createModal, setCreateModal] = useState<{
     isOpen: boolean
     type: 'document' | 'task' | 'canvas' | 'folder' | 'board' | 'diagram' | null
     parentPath?: string
   }>({ isOpen: false, type: null })
   const [createNameInput, setCreateNameInput] = useState('')
+
+  // Right-click Context Menu states
+  const [contextMenu, setContextMenu] = useState<{
+    isOpen: boolean
+    x: number
+    y: number
+    path: string | null
+    isFolder: boolean
+  }>({ isOpen: false, x: 0, y: 0, path: null, isFolder: false })
 
   // Fetch all files from backend cache
   const fetchFiles = async () => {
@@ -315,6 +449,18 @@ export const App: React.FC = () => {
       eventSource.close()
     }
   }, [selectedPath, isSaving])
+
+  // Setup Window Click Listener to close context menu
+  useEffect(() => {
+    const handleWindowClick = () => {
+      setContextMenu((prev) => {
+        if (prev.isOpen) return { ...prev, isOpen: false }
+        return prev
+      })
+    }
+    window.addEventListener('click', handleWindowClick)
+    return () => window.removeEventListener('click', handleWindowClick)
+  }, [])
 
   // Save modified content back to backend disk
   const handleSaveFile = async (content: string) => {
@@ -645,6 +791,15 @@ Start writing note content here.
                   onSelectFile={fetchFileContent}
                   onCreateInFolder={handleCreateFile}
                   onDeletePath={handleDeleteFile}
+                  onContextMenu={(e, targetNode) => {
+                    setContextMenu({
+                      isOpen: true,
+                      x: e.clientX,
+                      y: e.clientY,
+                      path: targetNode.filePath || targetNode.path,
+                      isFolder: targetNode.isFolder
+                    })
+                  }}
                 />
               ))}
             </div>
@@ -918,6 +1073,110 @@ Start writing note content here.
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Right-click Context Menu */}
+      {contextMenu.isOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            top: `${contextMenu.y}px`,
+            left: `${contextMenu.x}px`,
+            zIndex: 99999,
+          }}
+          className="w-48 bg-[#161b22] border border-slate-800 rounded-xl shadow-2xl p-1.5 flex flex-col space-y-0.5 no-scrollbar select-none animate-in fade-in zoom-in-95 duration-100"
+        >
+          <div className="px-2.5 py-1 text-[9px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-850/60 mb-1 truncate">
+            {contextMenu.path}
+          </div>
+          
+          <button
+            onClick={() => {
+              const cleanParent = contextMenu.path?.endsWith('.md') ? contextMenu.path.slice(0, -3) : contextMenu.path
+              handleCreateFile('document', cleanParent || undefined)
+              setContextMenu((prev) => ({ ...prev, isOpen: false }))
+            }}
+            className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg text-xs transition cursor-pointer text-left w-full font-medium"
+          >
+            <FileText size={13} className="text-blue-400" />
+            New Page
+          </button>
+          
+          <button
+            onClick={() => {
+              const cleanParent = contextMenu.path?.endsWith('.md') ? contextMenu.path.slice(0, -3) : contextMenu.path
+              handleCreateFile('task', cleanParent || undefined)
+              setContextMenu((prev) => ({ ...prev, isOpen: false }))
+            }}
+            className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg text-xs transition cursor-pointer text-left w-full font-medium"
+          >
+            <CheckSquare size={13} className="text-amber-500" />
+            New Task
+          </button>
+
+          <button
+            onClick={() => {
+              const cleanParent = contextMenu.path?.endsWith('.md') ? contextMenu.path.slice(0, -3) : contextMenu.path
+              handleCreateFile('canvas', cleanParent || undefined)
+              setContextMenu((prev) => ({ ...prev, isOpen: false }))
+            }}
+            className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg text-xs transition cursor-pointer text-left w-full font-medium"
+          >
+            <Brush size={13} className="text-emerald-400" />
+            New Excalidraw
+          </button>
+
+          <button
+            onClick={() => {
+              const cleanParent = contextMenu.path?.endsWith('.md') ? contextMenu.path.slice(0, -3) : contextMenu.path
+              handleCreateFile('diagram', cleanParent || undefined)
+              setContextMenu((prev) => ({ ...prev, isOpen: false }))
+            }}
+            className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg text-xs transition cursor-pointer text-left w-full font-medium"
+          >
+            <Grid size={13} className="text-violet-400" />
+            New Draw.io
+          </button>
+
+          <button
+            onClick={() => {
+              const cleanParent = contextMenu.path?.endsWith('.md') ? contextMenu.path.slice(0, -3) : contextMenu.path
+              handleCreateFile('folder', cleanParent || undefined)
+              setContextMenu((prev) => ({ ...prev, isOpen: false }))
+            }}
+            className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg text-xs transition cursor-pointer text-left w-full font-medium"
+          >
+            <Folder size={13} className="text-slate-400" />
+            New Folder
+          </button>
+
+          <button
+            onClick={() => {
+              const cleanParent = contextMenu.path?.endsWith('.md') ? contextMenu.path.slice(0, -3) : contextMenu.path
+              handleCreateFile('board', cleanParent || undefined)
+              setContextMenu((prev) => ({ ...prev, isOpen: false }))
+            }}
+            className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg text-xs transition cursor-pointer text-left w-full font-medium"
+          >
+            <LayoutGrid size={13} className="text-rose-400" />
+            New Board
+          </button>
+
+          <div className="border-t border-slate-850/60 my-1" />
+
+          <button
+            onClick={() => {
+              if (contextMenu.path) {
+                handleDeleteFile(contextMenu.path)
+              }
+              setContextMenu((prev) => ({ ...prev, isOpen: false }))
+            }}
+            className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-red-950/40 text-slate-400 hover:text-red-400 rounded-lg text-xs transition cursor-pointer text-left w-full font-medium"
+          >
+            <Trash2 size={13} className="text-red-500" />
+            Delete Item
+          </button>
         </div>
       )}
     </div>
