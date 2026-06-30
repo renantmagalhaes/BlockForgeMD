@@ -13,9 +13,6 @@ import {
   FilePlus,
   Layers,
   ArrowRight,
-  Folder,
-  FolderOpen,
-  FolderPlus,
   Plus,
   X,
   Grid
@@ -37,6 +34,10 @@ interface TreeNode {
   frontMatter?: Record<string, string>
 }
 
+// ─── buildTree ───────────────────────────────────────────────────────────────
+// Notion-style: every page can have sub-pages.
+// A file at Documents/Note.md can have children at Documents/Note/SubNote.md.
+// No README.md folders — the parent page IS the node.
 const buildTree = (files: FileRecord[]): TreeNode[] => {
   const root: TreeNode = { name: 'Root', path: '', isFolder: true, children: [] }
 
@@ -47,48 +48,26 @@ const buildTree = (files: FileRecord[]): TreeNode[] => {
     frontMatter?: Record<string, string>
   }>()
 
-  const folderPaths = new Set<string>()
+  const hasChildren = (basePath: string) =>
+    files.some(f => f.path !== basePath && f.path.startsWith(basePath + '/'))
 
-  // Helper to check if a path has children
-  const hasSubPages = (basePath: string) => {
-    return files.some(f => {
-      if (f.path === basePath) return false
-      return f.path.startsWith(basePath + '/')
-    })
-  }
-
+  // Pass 1: determine node entries
   files.forEach((file) => {
+    // Legacy README.md support
     if (file.path.endsWith('/README.md')) {
-      const parentDir = file.path.substring(0, file.path.lastIndexOf('/'))
-      nodeMap.set(parentDir, {
-        filePath: file.path,
-        title: file.title,
-        type: file.type,
-        frontMatter: file.frontMatter
-      })
-      folderPaths.add(parentDir)
-    } else {
-      const cleanPath = file.path.endsWith('.md') ? file.path.slice(0, -3) : file.path
-      if (hasSubPages(cleanPath)) {
-        nodeMap.set(cleanPath, {
-          filePath: file.path,
-          title: file.title,
-          type: file.type,
-          frontMatter: file.frontMatter
-        })
-        folderPaths.add(cleanPath)
-      } else {
-        nodeMap.set(file.path, {
-          filePath: file.path,
-          title: file.title,
-          type: file.type,
-          frontMatter: file.frontMatter
-        })
-      }
+      const dir = file.path.slice(0, -'/README.md'.length)
+      nodeMap.set(dir, { filePath: file.path, title: file.title, type: file.type, frontMatter: file.frontMatter })
+      return
     }
+
+    const stem = file.path.endsWith('.md') ? file.path.slice(0, -3) : file.path
+    nodeMap.set(
+      hasChildren(stem) ? stem : file.path,
+      { filePath: file.path, title: file.title, type: file.type, frontMatter: file.frontMatter }
+    )
   })
 
-  // Build the hierarchical tree
+  // Pass 2: insert into tree
   nodeMap.forEach((meta, nodePath) => {
     const parts = nodePath.split('/')
     let current = root
@@ -96,16 +75,10 @@ const buildTree = (files: FileRecord[]): TreeNode[] => {
     parts.forEach((part, i) => {
       const isLast = i === parts.length - 1
       const currentPath = parts.slice(0, i + 1).join('/')
-      const isFolder = folderPaths.has(currentPath) || !isLast
 
-      let child = current.children.find((c) => c.name === part && c.isFolder === isFolder)
+      let child = current.children.find((c) => c.path === currentPath)
       if (!child) {
-        child = {
-          name: part,
-          path: currentPath,
-          isFolder,
-          children: [],
-        }
+        child = { name: part, path: currentPath, isFolder: false, children: [] }
         current.children.push(child)
       }
 
@@ -115,65 +88,90 @@ const buildTree = (files: FileRecord[]): TreeNode[] => {
         child.title = meta.title
         child.type = meta.type
         child.frontMatter = meta.frontMatter
+        child.isFolder = child.isFolder || files.some(f => {
+          const stem = f.path.endsWith('.md') ? f.path.slice(0, -3) : f.path
+          return stem.startsWith(currentPath + '/')
+        })
+      } else {
+        child.isFolder = true
       }
 
       current = child
     })
   })
 
-  // Ensure folders that have no explicit README or merged file still appear as folders in the tree
+  // Pass 3: ensure intermediate dirs appear
   files.forEach(file => {
     const parts = file.path.split('/')
     if (parts.length > 1) {
       for (let i = 1; i < parts.length; i++) {
         const parentPath = parts.slice(0, i).join('/')
-        let current = root
         const parentParts = parentPath.split('/')
-        parentParts.forEach((part) => {
-          let child = current.children.find(c => c.name === part && c.isFolder)
-          if (!child) {
-            child = {
-              name: part,
-              path: parentParts.slice(0, parentParts.indexOf(part) + 1).join('/'),
-              isFolder: true,
-              children: []
-            }
-            current.children.push(child)
+        let cur = root
+        parentParts.forEach((part, pi) => {
+          const cp = parentParts.slice(0, pi + 1).join('/')
+          let ch = cur.children.find(c => c.path === cp)
+          if (!ch) {
+            ch = { name: part, path: cp, isFolder: true, children: [] }
+            cur.children.push(ch)
+          } else {
+            ch.isFolder = true
           }
-          current = child
+          cur = ch
         })
       }
     }
   })
 
-  // Custom Sort function
   const sortTree = (nodes: TreeNode[], isRoot = false) => {
     nodes.sort((a, b) => {
       if (isRoot) {
         const order = ['Documents', 'Tasks', 'Canvas']
-        const idxA = order.indexOf(a.name)
-        const idxB = order.indexOf(b.name)
-        if (idxA !== -1 && idxB !== -1) return idxA - idxB
-        if (idxA !== -1) return -1
-        if (idxB !== -1) return 1
+        const ia = order.indexOf(a.name)
+        const ib = order.indexOf(b.name)
+        if (ia !== -1 && ib !== -1) return ia - ib
+        if (ia !== -1) return -1
+        if (ib !== -1) return 1
       }
       if (a.isFolder && !b.isFolder) return -1
       if (!a.isFolder && b.isFolder) return 1
-      const nameA = a.title || a.name
-      const nameB = b.title || b.name
-      return nameA.localeCompare(nameB)
+      return (a.title || a.name).localeCompare(b.title || b.name)
     })
-    nodes.forEach((node) => {
-      if (node.children.length > 0) {
-        sortTree(node.children, false)
-      }
-    })
+    nodes.forEach(n => { if (n.children.length > 0) sortTree(n.children) })
   }
 
   sortTree(root.children, true)
   return root.children
 }
 
+// Given a node, return the directory where new sub-items should be placed.
+// For any page with a filePath, sub-items go INSIDE that page (under its stem).
+// e.g. Documents/Note.md  → Documents/Note
+//      Documents/NoteA    → Documents/NoteA  (parent page, path is already the stem)
+//      Documents/MyFolder/README.md → Documents/MyFolder (legacy)
+// For section roots (Documents, Tasks, Canvas) with no filePath → use node.path.
+const getNodeParentPath = (node: TreeNode): string => {
+  if (!node.filePath) return node.path  // section root: Documents, Tasks, Canvas
+  if (node.filePath.endsWith('/README.md')) {
+    return node.filePath.slice(0, -'/README.md'.length)  // legacy folder
+  }
+  const stem = node.filePath.endsWith('.md') ? node.filePath.slice(0, -3) : node.filePath
+  return stem  // sub-pages nest under the page's own stem directory
+}
+
+// Compute parent path when creating from the right-click context menu.
+// Right-clicking any page → new item goes INSIDE that page (sub-page).
+const getContextParentPath = (path: string | null): string | undefined => {
+  if (!path) return undefined
+  if (path.endsWith('/README.md')) return path.slice(0, -'/README.md'.length)  // legacy folder
+  // For section roots (no slash at all: Documents, Tasks, Canvas)
+  if (!path.includes('/')) return path
+  // For any page: new item goes under its stem
+  const stem = path.endsWith('.md') ? path.slice(0, -3) : path
+  return stem
+}
+
+// ─── TreeNodeComponent ───────────────────────────────────────────────────────
 const TreeNodeComponent: React.FC<{
   node: TreeNode
   depth: number
@@ -181,7 +179,7 @@ const TreeNodeComponent: React.FC<{
   collapsedPaths: Record<string, boolean>
   onToggleCollapse: (path: string) => void
   onSelectFile: (path: string) => void
-  onCreateInFolder: (type: 'document' | 'task' | 'canvas' | 'folder' | 'board' | 'diagram' | null, parentPath?: string) => void
+  onCreateSubPage: (parentPath: string) => void
   onDeletePath: (path: string) => void
   onContextMenu: (e: React.MouseEvent, node: TreeNode) => void
 }> = ({
@@ -191,16 +189,13 @@ const TreeNodeComponent: React.FC<{
   collapsedPaths,
   onToggleCollapse,
   onSelectFile,
-  onCreateInFolder,
+  onCreateSubPage,
   onDeletePath,
   onContextMenu,
 }) => {
   const getIsCollapsed = () => {
-    if (collapsedPaths[node.path] !== undefined) {
-      return collapsedPaths[node.path]
-    }
+    if (collapsedPaths[node.path] !== undefined) return collapsedPaths[node.path]
     if (node.path === 'Documents') return false
-    if (node.path === 'Tasks' || node.path === 'Canvas') return true
     return true
   }
 
@@ -211,6 +206,10 @@ const TreeNodeComponent: React.FC<{
     e.stopPropagation()
     if (node.hasPage && node.filePath) {
       onSelectFile(node.filePath)
+      // If this page also has children, expand it so the tree is visible
+      if (node.isFolder) {
+        onToggleCollapse(node.path)
+      }
     } else if (node.isFolder) {
       onToggleCollapse(node.path)
     }
@@ -223,17 +222,12 @@ const TreeNodeComponent: React.FC<{
 
   const handleAddClick = (e: React.MouseEvent) => {
     e.stopPropagation()
-    const parentPath = node.filePath?.endsWith('.md') ? node.filePath.slice(0, -3) : node.path
-    onCreateInFolder(null, parentPath)
+    onCreateSubPage(getNodeParentPath(node) || node.path)
   }
 
   const handleDeleteClick = (e: React.MouseEvent) => {
     e.stopPropagation()
-    if (node.filePath) {
-      onDeletePath(node.filePath)
-    } else {
-      onDeletePath(node.path)
-    }
+    onDeletePath(node.filePath || node.path)
   }
 
   const handleContextMenu = (e: React.MouseEvent) => {
@@ -243,22 +237,11 @@ const TreeNodeComponent: React.FC<{
   }
 
   const getIcon = () => {
-    if (node.isFolder && !node.hasPage) {
-      return isCollapsed ? (
-        <Folder size={14} className="text-slate-400 shrink-0" />
-      ) : (
-        <FolderOpen size={14} className="text-violet-400 shrink-0" />
-      )
-    }
     switch (node.type) {
-      case 'task':
-        return <CheckSquare size={13} className="text-amber-500 shrink-0" />
-      case 'canvas':
-        return <Brush size={13} className="text-emerald-400 shrink-0" />
-      case 'board':
-        return <LayoutGrid size={13} className="text-violet-400 shrink-0" />
-      default:
-        return <FileText size={13} className="text-blue-400 shrink-0" />
+      case 'task':   return <CheckSquare size={13} className="text-amber-500 shrink-0" />
+      case 'canvas': return <Brush size={13} className="text-emerald-400 shrink-0" />
+      case 'board':  return <LayoutGrid size={13} className="text-violet-400 shrink-0" />
+      default:       return <FileText size={13} className="text-blue-400 shrink-0" />
     }
   }
 
@@ -273,15 +256,16 @@ const TreeNodeComponent: React.FC<{
         }`}
       >
         <div className="flex items-center gap-1.5 truncate">
-          {node.isFolder && (
+          {node.isFolder ? (
             <span
               onClick={handleChevronClick}
               className="text-slate-500 hover:text-slate-200 p-0.5 hover:bg-slate-700/50 rounded transition shrink-0"
             >
               {isCollapsed ? <ChevronRight size={10} /> : <ChevronDown size={10} />}
             </span>
+          ) : (
+            <span className="w-4 shrink-0" />
           )}
-          {!node.isFolder && <span className="w-4 shrink-0" />}
           {getIcon()}
           <span className="truncate">{node.title || node.name}</span>
         </div>
@@ -290,7 +274,7 @@ const TreeNodeComponent: React.FC<{
           <button
             onClick={handleAddClick}
             className="p-0.5 hover:bg-slate-700 hover:text-white rounded text-slate-500 transition cursor-pointer"
-            title="Create Sub-item"
+            title="Add Sub-page"
           >
             <Plus size={10} />
           </button>
@@ -315,7 +299,7 @@ const TreeNodeComponent: React.FC<{
               collapsedPaths={collapsedPaths}
               onToggleCollapse={onToggleCollapse}
               onSelectFile={onSelectFile}
-              onCreateInFolder={onCreateInFolder}
+              onCreateSubPage={onCreateSubPage}
               onDeletePath={onDeletePath}
               onContextMenu={onContextMenu}
             />
@@ -326,6 +310,7 @@ const TreeNodeComponent: React.FC<{
   )
 }
 
+// ─── FileRecord ───────────────────────────────────────────────────────────────
 interface FileRecord {
   path: string
   title: string
@@ -338,19 +323,14 @@ interface FileRecord {
 const splitFrontMatter = (content: string) => {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/)
   if (match) {
-    return {
-      frontMatterStr: match[1],
-      body: match[2].replace(/^\r?\n+/, ''),
-    }
+    return { frontMatterStr: match[1], body: match[2].replace(/^\r?\n+/, '') }
   }
-  return {
-    frontMatterStr: '',
-    body: content,
-  }
+  return { frontMatterStr: '', body: content }
 }
 
 const API_BASE = import.meta.env.DEV ? 'http://localhost:8080' : ''
 
+// ─── App ──────────────────────────────────────────────────────────────────────
 export const App: React.FC = () => {
   const [files, setFiles] = useState<FileRecord[]>([])
   const [activeView, setActiveView] = useState<'board' | 'editor'>('board')
@@ -368,28 +348,21 @@ export const App: React.FC = () => {
 
   const [createModal, setCreateModal] = useState<{
     isOpen: boolean
-    type: 'document' | 'task' | 'canvas' | 'folder' | 'board' | 'diagram' | null
+    type: 'document' | 'task' | 'canvas' | 'board' | 'diagram' | null
     parentPath?: string
   }>({ isOpen: false, type: null })
   const [createNameInput, setCreateNameInput] = useState('')
 
-  // Right-click Context Menu states
   const [contextMenu, setContextMenu] = useState<{
-    isOpen: boolean
-    x: number
-    y: number
-    path: string | null
-    isFolder: boolean
+    isOpen: boolean; x: number; y: number; path: string | null; isFolder: boolean
   }>({ isOpen: false, x: 0, y: 0, path: null, isFolder: false })
 
-  // Fetch all files from backend cache
   const fetchFiles = async () => {
     try {
       setSyncError(false)
       const res = await fetch(`${API_BASE}/api/files`)
       if (!res.ok) throw new Error('Failed to fetch files')
-      const data = await res.json()
-      setFiles(data || [])
+      setFiles((await res.json()) || [])
     } catch (e) {
       console.error('Error fetching files', e)
       setSyncError(true)
@@ -398,7 +371,6 @@ export const App: React.FC = () => {
     }
   }
 
-  // Fetch specific file details (content)
   const fetchFileContent = async (path: string) => {
     try {
       const res = await fetch(`${API_BASE}/api/file?path=${encodeURIComponent(path)}`)
@@ -408,77 +380,41 @@ export const App: React.FC = () => {
       setSelectedContent(body)
       setCurrentFrontMatterStr(frontMatterStr)
       setSelectedPath(path)
-      if (data.meta && data.meta.type === 'board') {
-        setActiveView('board')
-      } else {
-        setActiveView('editor')
-      }
+      setActiveView(data.meta?.type === 'board' ? 'board' : 'editor')
     } catch (e) {
       console.error('Error loading file content', e)
     }
   }
 
-  // Setup Server-Sent Events (SSE) for Real-Time Sync
   useEffect(() => {
     fetchFiles()
-
-    const sseUrl = `${API_BASE}/api/sync/events`
-    console.log('Connecting to SSE:', sseUrl)
-    const eventSource = new EventSource(sseUrl)
-
-    eventSource.addEventListener('file_update', (e: any) => {
-      console.log('Live-sync: file updated on disk:', e.data)
-      fetchFiles() // Re-fetch list
-      
-      // If we are currently editing the updated file, reload its content (unless we are in the middle of saving)
-      if (selectedPath && selectedPath === e.data && !isSaving) {
-        fetchFileContent(selectedPath)
-      }
+    const es = new EventSource(`${API_BASE}/api/sync/events`)
+    es.addEventListener('file_update', (e: any) => {
+      fetchFiles()
+      if (selectedPath && selectedPath === e.data && !isSaving) fetchFileContent(selectedPath)
     })
-
-    eventSource.onerror = () => {
-      console.warn('SSE connection failed. Retrying...')
-      setSyncError(true)
-    }
-
-    eventSource.onopen = () => {
-      setSyncError(false)
-    }
-
-    return () => {
-      eventSource.close()
-    }
+    es.onerror = () => setSyncError(true)
+    es.onopen = () => setSyncError(false)
+    return () => es.close()
   }, [selectedPath, isSaving])
 
-  // Setup Window Click Listener to close context menu
   useEffect(() => {
-    const handleWindowClick = () => {
-      setContextMenu((prev) => {
-        if (prev.isOpen) return { ...prev, isOpen: false }
-        return prev
-      })
-    }
-    window.addEventListener('click', handleWindowClick)
-    return () => window.removeEventListener('click', handleWindowClick)
+    const close = () => setContextMenu(p => p.isOpen ? { ...p, isOpen: false } : p)
+    window.addEventListener('click', close)
+    return () => window.removeEventListener('click', close)
   }, [])
 
-  // Save modified content back to backend disk
   const handleSaveFile = async (content: string) => {
     if (!selectedPath) return
     setIsSaving(true)
-    const fullContent = currentFrontMatterStr
-      ? `---\n${currentFrontMatterStr}\n---\n\n${content}`
-      : content
-
+    const full = currentFrontMatterStr ? `---\n${currentFrontMatterStr}\n---\n\n${content}` : content
     try {
       const res = await fetch(`${API_BASE}/api/file`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: selectedPath, content: fullContent }),
+        body: JSON.stringify({ path: selectedPath, content: full }),
       })
       if (!res.ok) throw new Error('Failed to save file')
-      const data = await res.json()
-      console.log('File saved successfully:', data)
       setSelectedContent(content)
       fetchFiles()
     } catch (e) {
@@ -489,201 +425,81 @@ export const App: React.FC = () => {
     }
   }
 
-  // Move card in Kanban board (updates front matter)
   const handleMoveCard = async (path: string, newStatus: string) => {
     try {
-      const res = await fetch(`${API_BASE}/api/file/front-matter`, {
+      await fetch(`${API_BASE}/api/file/front-matter`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          path,
-          updates: { status: newStatus },
-        }),
+        body: JSON.stringify({ path, updates: { status: newStatus } }),
       })
-      if (!res.ok) throw new Error('Failed to update card status')
       fetchFiles()
-    } catch (e) {
-      console.error('Error moving Kanban card', e)
-    }
+    } catch (e) { console.error('Error moving Kanban card', e) }
   }
 
-  // Update front-matter fields generic handler
   const handleUpdateFrontMatter = async (path: string, updates: Record<string, any>) => {
     try {
-      const res = await fetch(`${API_BASE}/api/file/front-matter`, {
+      await fetch(`${API_BASE}/api/file/front-matter`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path, updates }),
       })
-      if (!res.ok) throw new Error('Failed to update front matter')
       fetchFiles()
-    } catch (e) {
-      console.error('Error updating front matter', e)
-    }
+    } catch (e) { console.error('Error updating front matter', e) }
   }
 
-  // Create task directly in a specific column status
   const handleCreateTaskWithStatus = async (title: string, status: string) => {
     const sanitizedName = title.replace(/[^a-zA-Z0-9\s-]/g, '').trim().replace(/\s+/g, '-')
     if (!sanitizedName) return
-
     const path = `Tasks/${sanitizedName}.md`
-    const content = `---
-title: ${title}
-type: task
-status: ${status}
-priority: Medium
-dueDate: ${new Date().toISOString().split('T')[0]}
-assignee: Unassigned
-tags: []
----
-
-# ${title}
-
-Task created directly from Kanban Board.
-`
+    const content = `---\ntitle: ${title}\ntype: task\nstatus: ${status}\npriority: Medium\ndueDate: ${new Date().toISOString().split('T')[0]}\nassignee: Unassigned\ntags: []\n---\n\n# ${title}\n\nTask created directly from Kanban Board.\n`
     try {
-      const res = await fetch(`${API_BASE}/api/file`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path, content }),
-      })
-      if (!res.ok) throw new Error('Failed to create task')
+      await fetch(`${API_BASE}/api/file`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path, content }) })
       fetchFiles()
-    } catch (e) {
-      console.error('Error creating task', e)
-    }
+    } catch (e) { console.error('Error creating task', e) }
   }
 
-  // Update board columns metadata in board markdown front-matter
   const handleUpdateBoardColumns = async (path: string, newColumns: string[]) => {
     try {
-      const res = await fetch(`${API_BASE}/api/file/front-matter`, {
+      await fetch(`${API_BASE}/api/file/front-matter`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          path,
-          updates: { columns: newColumns },
-        }),
+        body: JSON.stringify({ path, updates: { columns: newColumns } }),
       })
-      if (!res.ok) throw new Error('Failed to update board columns')
       fetchFiles()
-    } catch (e) {
-      console.error('Error updating board columns', e)
-    }
+    } catch (e) { console.error('Error updating board columns', e) }
   }
 
-  // Open custom creation modal
-  const handleCreateFile = async (type: 'document' | 'task' | 'canvas' | 'folder' | 'board' | 'diagram' | null, parentPath?: string) => {
-    setCreateModal({
-      isOpen: true,
-      type,
-      parentPath,
-    })
+  const handleCreateFile = (type: 'document' | 'task' | 'canvas' | 'board' | 'diagram' | null, parentPath?: string) => {
+    setCreateModal({ isOpen: true, type, parentPath })
     setCreateNameInput('')
   }
 
-  // Execute actual item creation from modal details
   const handleCreateConfirm = async () => {
     const { type, parentPath } = createModal
     if (!type) return
     const title = createNameInput.trim()
     if (!title) return
-
-    const sanitizedName = title.replace(/[^a-zA-Z0-9\s-]/g, '').trim().replace(/\s+/g, '-')
-    if (!sanitizedName) return
+    const name = title.replace(/[^a-zA-Z0-9\s-]/g, '').trim().replace(/\s+/g, '-')
+    if (!name) return
 
     let path = ''
     let content = ''
 
     if (type === 'diagram') {
-      path = parentPath ? `${parentPath}/${sanitizedName}.drawio.md` : `Canvas/${sanitizedName}.drawio.md`
-      content = `---
-title: ${title}
-type: canvas
-editor: drawio
----
-
-# Draw.io Diagram
-Below is the embedded diagram layout in XML. Do not modify the code block manually.
-
-\`\`\`xml
-<mxfile host="app.diagrams.net"><diagram id="1" name="Page-1"><mxGraphModel dx="1000" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0"><root><mxCell id="0" /><mxCell id="1" parent="0" /></root></mxGraphModel></diagram></mxfile>
-\`\`\`
-`
+      path = parentPath ? `${parentPath}/${name}.drawio.md` : `Canvas/${name}.drawio.md`
+      content = `---\ntitle: ${title}\ntype: canvas\neditor: drawio\n---\n\n# Draw.io Diagram\nBelow is the embedded diagram layout in XML.\n\n\`\`\`xml\n<mxfile host="app.diagrams.net"><diagram id="1" name="Page-1"><mxGraphModel dx="1000" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0"><root><mxCell id="0" /><mxCell id="1" parent="0" /></root></mxGraphModel></diagram></mxfile>\n\`\`\`\n`
     } else if (type === 'board') {
-      path = parentPath ? `${parentPath}/${sanitizedName}.board.md` : `Documents/${sanitizedName}.board.md`
-      content = `---
-title: ${title}
-type: board
-columns: ["Todo", "In Progress", "Done"]
----
-
-# ${title} Kanban Board
-
-Customizable Kanban layout. Create, edit, and move status columns.
-`
-    } else if (type === 'folder') {
-      path = parentPath ? `${parentPath}/${sanitizedName}/README.md` : `Documents/${sanitizedName}/README.md`
-      content = `---
-title: ${title} Folder
-type: document
----
-
-# ${title} Folder
-
-Folder created recursively on disk. Add subnotes or tasks here.
-`
+      path = parentPath ? `${parentPath}/${name}.board.md` : `Documents/${name}.board.md`
+      content = `---\ntitle: ${title}\ntype: board\ncolumns: ["Todo", "In Progress", "Done"]\n---\n\n# ${title} Kanban Board\n\nCustomizable Kanban layout.\n`
     } else if (type === 'task') {
-      path = parentPath ? `${parentPath}/${sanitizedName}.md` : `Tasks/${sanitizedName}.md`
-      content = `---
-title: ${title}
-type: task
-status: Todo
-priority: Medium
-dueDate: ${new Date().toISOString().split('T')[0]}
-assignee: Unassigned
-tags: []
----
-
-# ${title}
-
-Describe the task details here.
-`
+      path = parentPath ? `${parentPath}/${name}.md` : `Tasks/${name}.md`
+      content = `---\ntitle: ${title}\ntype: task\nstatus: Todo\npriority: Medium\ndueDate: ${new Date().toISOString().split('T')[0]}\nassignee: Unassigned\ntags: []\n---\n\n# ${title}\n\nDescribe the task details here.\n`
     } else if (type === 'canvas') {
-      path = parentPath ? `${parentPath}/${sanitizedName}.excalidraw.md` : `Canvas/${sanitizedName}.excalidraw.md`
-      content = `---
-title: ${title}
-type: canvas
-editor: excalidraw
----
-
-# Drawing Canvas
-Below is the embedded drawing data. Do not modify the code block manually.
-
-\`\`\`json
-{
-  "type": "excalidraw",
-  "version": 2,
-  "elements": [],
-  "appState": {
-    "viewBackgroundColor": "#121212",
-    "theme": "dark"
-  }
-}
-\`\`\`
-`
+      path = parentPath ? `${parentPath}/${name}.excalidraw.md` : `Canvas/${name}.excalidraw.md`
+      content = `---\ntitle: ${title}\ntype: canvas\neditor: excalidraw\n---\n\n# Drawing Canvas\nBelow is the embedded drawing data.\n\n\`\`\`json\n{\n  "type": "excalidraw",\n  "version": 2,\n  "elements": [],\n  "appState": {"viewBackgroundColor": "#121212","theme": "dark"}\n}\n\`\`\`\n`
     } else {
-      path = parentPath ? `${parentPath}/${sanitizedName}.md` : `Documents/${sanitizedName}.md`
-      content = `---
-title: ${title}
-type: document
----
-
-# ${title}
-
-Start writing note content here.
-`
+      path = parentPath ? `${parentPath}/${name}.md` : `Documents/${name}.md`
+      content = `---\ntitle: ${title}\ntype: document\n---\n\n# ${title}\n\nStart writing note content here.\n`
     }
 
     try {
@@ -693,12 +509,9 @@ Start writing note content here.
         body: JSON.stringify({ path, content }),
       })
       if (!res.ok) throw new Error('Failed to create file')
-      
       setCreateModal({ isOpen: false, type: null })
       setCreateNameInput('')
       fetchFiles()
-      
-      // Auto select and load the new file content immediately
       fetchFileContent(path)
     } catch (e) {
       console.error('Error creating file', e)
@@ -706,43 +519,26 @@ Start writing note content here.
     }
   }
 
-  // Delete current active file
   const handleDeleteFile = async (path: string) => {
     if (!confirm('Are you sure you want to delete this file permanently from disk?')) return
     try {
-      const res = await fetch(`${API_BASE}/api/file?path=${encodeURIComponent(path)}`, {
-        method: 'DELETE',
-      })
+      const res = await fetch(`${API_BASE}/api/file?path=${encodeURIComponent(path)}`, { method: 'DELETE' })
       if (!res.ok) throw new Error('Failed to delete file')
       fetchFiles()
-      if (selectedPath === path) {
-        setSelectedPath(null)
-        setActiveView('board')
-      }
-    } catch (e) {
-      console.error('Error deleting file', e)
-    }
+      if (selectedPath === path) { setSelectedPath(null); setActiveView('board') }
+    } catch (e) { console.error('Error deleting file', e) }
   }
 
-
-
-  const getActiveFile = () => {
-    return files.find((f) => f.path === selectedPath)
-  }
-
-  const activeFile = getActiveFile()
+  const activeFile = files.find((f) => f.path === selectedPath)
 
   return (
     <div className="flex h-screen bg-[#0d1117] text-slate-100 font-sans overflow-hidden">
-      {/* Sidebar Navigation */}
+      {/* ── Sidebar ──────────────────────────────────────────────────────── */}
       <div className="w-64 bg-[#161b22] border-r border-slate-800 flex flex-col justify-between">
-        {/* Logo and Global board toggle */}
         <div>
           <div className="p-5 border-b border-slate-800">
             <div className="flex items-center gap-2">
-              <div className="h-8 w-8 rounded-lg bg-gradient-to-tr from-violet-600 to-blue-500 flex items-center justify-center font-bold text-white shadow-lg">
-                BF
-              </div>
+              <div className="h-8 w-8 rounded-lg bg-gradient-to-tr from-violet-600 to-blue-500 flex items-center justify-center font-bold text-white shadow-lg">BF</div>
               <div>
                 <h1 className="font-bold text-sm tracking-tight">BlockForgeMD</h1>
                 <span className="text-[10px] text-slate-500 font-mono">Local-First Vault</span>
@@ -752,12 +548,9 @@ Start writing note content here.
 
           <div className="p-3">
             <button
-              onClick={() => {
-                setActiveView('board')
-                setSelectedPath(null)
-              }}
+              onClick={() => { setActiveView('board'); setSelectedPath(null) }}
               className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition font-medium cursor-pointer ${
-                activeView === 'board'
+                activeView === 'board' && !selectedPath
                   ? 'bg-violet-600/10 text-violet-400 border border-violet-500/20'
                   : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
               }`}
@@ -767,16 +560,15 @@ Start writing note content here.
             </button>
           </div>
 
-          {/* Scrolled items list (Workspace Explorer Tree) */}
           <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2 max-h-[calc(100vh-280px)] no-scrollbar">
             <div className="px-3 py-1 text-xs font-semibold text-slate-500 uppercase tracking-wider flex justify-between items-center">
               <span>Workspace Explorer</span>
               <button
-                onClick={() => handleCreateFile('folder')}
+                onClick={() => handleCreateFile('document')}
                 className="hover:text-white text-slate-500 transition cursor-pointer"
-                title="Create Root Folder"
+                title="New Document"
               >
-                <FolderPlus size={12} className="inline mr-1" />
+                <FilePlus size={12} className="inline mr-1" />
               </button>
             </div>
             <div className="mt-1 space-y-0.5">
@@ -789,7 +581,7 @@ Start writing note content here.
                   collapsedPaths={collapsedPaths}
                   onToggleCollapse={(path) => setCollapsedPaths((prev) => ({ ...prev, [path]: !prev[path] }))}
                   onSelectFile={fetchFileContent}
-                  onCreateInFolder={handleCreateFile}
+                  onCreateSubPage={(parentPath) => handleCreateFile(null, parentPath)}
                   onDeletePath={handleDeleteFile}
                   onContextMenu={(e, targetNode) => {
                     setContextMenu({
@@ -797,7 +589,7 @@ Start writing note content here.
                       x: e.clientX,
                       y: e.clientY,
                       path: targetNode.filePath || targetNode.path,
-                      isFolder: targetNode.isFolder
+                      isFolder: targetNode.isFolder,
                     })
                   }}
                 />
@@ -806,57 +598,38 @@ Start writing note content here.
           </div>
         </div>
 
-        {/* Action Panel Bottom */}
         <div className="p-4 border-t border-slate-800 bg-[#161b22]/50 space-y-3">
           <div className="grid grid-cols-3 gap-2">
-            <button
-              onClick={() => handleCreateFile('document')}
-              className="flex flex-col items-center justify-center py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg transition text-[10px] font-semibold cursor-pointer"
-              title="Add Page"
-            >
-              <FilePlus size={16} className="text-blue-400 mb-1" />
-              Doc
-            </button>
-            <button
-              onClick={() => handleCreateFile('task')}
-              className="flex flex-col items-center justify-center py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg transition text-[10px] font-semibold cursor-pointer"
-              title="Add Task"
-            >
-              <CheckSquare size={16} className="text-amber-500 mb-1" />
-              Task
-            </button>
-            <button
-              onClick={() => handleCreateFile('canvas')}
-              className="flex flex-col items-center justify-center py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg transition text-[10px] font-semibold cursor-pointer"
-              title="Add Canvas"
-            >
-              <Brush size={16} className="text-emerald-400 mb-1" />
-              Canvas
-            </button>
+            {[
+              { type: 'document' as const, label: 'Doc',    icon: <FilePlus    size={16} className="text-blue-400 mb-1"    /> },
+              { type: 'task'     as const, label: 'Task',   icon: <CheckSquare size={16} className="text-amber-500 mb-1"   /> },
+              { type: 'canvas'   as const, label: 'Canvas', icon: <Brush       size={16} className="text-emerald-400 mb-1" /> },
+            ].map(({ type, label, icon }) => (
+              <button
+                key={type}
+                onClick={() => handleCreateFile(type)}
+                className="flex flex-col items-center justify-center py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg transition text-[10px] font-semibold cursor-pointer"
+              >
+                {icon}
+                {label}
+              </button>
+            ))}
           </div>
 
-          {/* Sync status indicators */}
           <div className="flex items-center justify-between text-[10px] border-t border-slate-800/60 pt-3">
-            <div className="flex items-center gap-1 text-slate-500">
-              <Database size={10} />
-              <span>SQLite Cache</span>
-            </div>
+            <div className="flex items-center gap-1 text-slate-500"><Database size={10} /><span>SQLite Cache</span></div>
             {isSyncing ? (
               <span className="text-amber-500 animate-pulse">Syncing...</span>
             ) : syncError ? (
-              <span className="text-red-400 flex items-center gap-0.5">
-                <AlertCircle size={8} /> Offline
-              </span>
+              <span className="text-red-400 flex items-center gap-0.5"><AlertCircle size={8} /> Offline</span>
             ) : (
-              <span className="text-emerald-500 flex items-center gap-0.5">
-                <CloudLightning size={8} /> Live Synced
-              </span>
+              <span className="text-emerald-500 flex items-center gap-0.5"><CloudLightning size={8} /> Live Synced</span>
             )}
           </div>
         </div>
       </div>
 
-      {/* Main Panel Content Area */}
+      {/* ── Main Panel ───────────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col overflow-hidden bg-[#0d1117]">
         {activeView === 'board' ? (
           <div className="flex-1 p-6 overflow-hidden">
@@ -874,10 +647,7 @@ Start writing note content here.
               onUpdateColumns={
                 selectedPath && activeFile?.type === 'board'
                   ? (newCols) => handleUpdateBoardColumns(selectedPath, newCols)
-                  : async (newCols) => {
-                      setDefaultColumns(newCols)
-                      localStorage.setItem('blockforge_default_columns', JSON.stringify(newCols))
-                    }
+                  : async (newCols) => { setDefaultColumns(newCols); localStorage.setItem('blockforge_default_columns', JSON.stringify(newCols)) }
               }
             />
           </div>
@@ -885,42 +655,23 @@ Start writing note content here.
           <div className="flex-1 p-6 flex flex-col overflow-hidden">
             <div className="flex justify-between items-center mb-4">
               <div className="flex items-center gap-1.5 text-xs text-slate-400">
-                <button
-                  onClick={() => setActiveView('board')}
-                  className="hover:text-violet-400 hover:underline transition"
-                >
-                  Workspace
-                </button>
+                <button onClick={() => setActiveView('board')} className="hover:text-violet-400 hover:underline transition">Workspace</button>
                 <ChevronRight size={12} />
                 <span className="font-mono text-slate-500">{selectedPath}</span>
               </div>
-
-              {/* Delete Button */}
               <button
                 onClick={() => handleDeleteFile(selectedPath)}
                 className="flex items-center gap-1 px-3 py-1 hover:bg-red-500/10 text-slate-500 hover:text-red-400 border border-transparent hover:border-red-500/20 text-xs font-semibold rounded-lg transition cursor-pointer"
-                title="Delete File Permanently"
               >
-                <Trash2 size={12} />
-                Delete
+                <Trash2 size={12} /> Delete
               </button>
             </div>
 
             <div className="flex-1 overflow-hidden">
               {activeFile.type === 'canvas' && activeFile.frontMatter?.editor === 'drawio' ? (
-                <Diagram
-                  filePath={selectedPath}
-                  initialContent={selectedContent}
-                  onSave={handleSaveFile}
-                  isSaving={isSaving}
-                />
+                <Diagram filePath={selectedPath} initialContent={selectedContent} onSave={handleSaveFile} isSaving={isSaving} />
               ) : activeFile.type === 'canvas' ? (
-                <Canvas
-                  filePath={selectedPath}
-                  initialContent={selectedContent}
-                  onSave={handleSaveFile}
-                  isSaving={isSaving}
-                />
+                <Canvas filePath={selectedPath} initialContent={selectedContent} onSave={handleSaveFile} isSaving={isSaving} />
               ) : (
                 <Editor
                   filePath={selectedPath}
@@ -930,6 +681,7 @@ Start writing note content here.
                   frontMatter={activeFile?.frontMatter}
                   onUpdateFrontMatter={(updates) => handleUpdateFrontMatter(selectedPath, updates)}
                   boardColumns={defaultColumns}
+                  onCreateSubPage={(parentPath) => handleCreateFile('document', parentPath)}
                 />
               )}
             </div>
@@ -941,10 +693,7 @@ Start writing note content here.
                 <Layers size={32} />
               </div>
               <h2 className="text-xl font-bold text-slate-100 mb-2">Welcome to BlockForgeMD</h2>
-              <p className="text-sm text-slate-400 mb-6">
-                A high-performance, local-first alternative to Notion. All files are saved as standard Markdown on your disk.
-              </p>
-
+              <p className="text-sm text-slate-400 mb-6">A high-performance, local-first alternative to Notion. All files saved as Markdown on disk.</p>
               <div className="w-full space-y-3">
                 <button
                   onClick={() => setActiveView('board')}
@@ -959,19 +708,12 @@ Start writing note content here.
                   </div>
                   <ArrowRight size={14} className="text-slate-500" />
                 </button>
-
                 <div className="grid grid-cols-2 gap-3 text-xs">
-                  <button
-                    onClick={() => handleCreateFile('document')}
-                    className="flex flex-col items-center justify-center p-4 bg-[#161b22]/50 hover:bg-slate-800 border border-slate-800 rounded-xl transition cursor-pointer"
-                  >
+                  <button onClick={() => handleCreateFile('document')} className="flex flex-col items-center justify-center p-4 bg-[#161b22]/50 hover:bg-slate-800 border border-slate-800 rounded-xl transition cursor-pointer">
                     <FileText size={20} className="text-blue-400 mb-2" />
                     <span className="font-semibold text-slate-300">Create Document</span>
                   </button>
-                  <button
-                    onClick={() => handleCreateFile('canvas')}
-                    className="flex flex-col items-center justify-center p-4 bg-[#161b22]/50 hover:bg-slate-800 border border-slate-800 rounded-xl transition cursor-pointer"
-                  >
+                  <button onClick={() => handleCreateFile('canvas')} className="flex flex-col items-center justify-center p-4 bg-[#161b22]/50 hover:bg-slate-800 border border-slate-800 rounded-xl transition cursor-pointer">
                     <Brush size={20} className="text-emerald-400 mb-2" />
                     <span className="font-semibold text-slate-300">Create Canvas</span>
                   </button>
@@ -981,62 +723,52 @@ Start writing note content here.
           </div>
         )}
       </div>
-      {/* Creation Modal */}
+
+      {/* ── Creation Modal ────────────────────────────────────────────────── */}
       {createModal.isOpen && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-[#161b22] border border-slate-800 rounded-2xl max-w-md w-full shadow-2xl p-6 overflow-hidden animate-in zoom-in-95 duration-150">
             <div className="flex justify-between items-center mb-4">
               <h3 className="font-bold text-base text-slate-100">
-                Create New Item
+                {createModal.parentPath
+                  ? `New item inside "${createModal.parentPath.split('/').pop()}"`
+                  : 'Create New Item'}
               </h3>
-              <button
-                onClick={() => setCreateModal({ isOpen: false, type: null })}
-                className="text-slate-500 hover:text-slate-300 transition cursor-pointer"
-              >
+              <button onClick={() => setCreateModal({ isOpen: false, type: null })} className="text-slate-500 hover:text-slate-300 transition cursor-pointer">
                 <X size={16} />
               </button>
             </div>
 
             <div className="space-y-4">
-              {/* Type Selection Grid */}
               <div className="space-y-2">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                  Select Item Type
-                </label>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Select Item Type</label>
                 <div className="grid grid-cols-3 gap-2">
                   {[
-                    { id: 'document', label: 'Doc', icon: <FileText size={16} className="text-blue-400" /> },
-                    { id: 'task', label: 'Task', icon: <CheckSquare size={16} className="text-amber-500" /> },
-                    { id: 'canvas', label: 'Excalidraw', icon: <Brush size={16} className="text-emerald-400" /> },
-                    { id: 'diagram', label: 'Draw.io', icon: <Grid size={16} className="text-violet-400" /> },
-                    { id: 'folder', label: 'Folder', icon: <Folder size={16} className="text-slate-400" /> },
-                    { id: 'board', label: 'Board', icon: <LayoutGrid size={16} className="text-rose-400" /> },
-                  ].map((item) => {
-                    const isSelected = createModal.type === item.id
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => setCreateModal((prev) => ({ ...prev, type: item.id as any }))}
-                        className={`flex flex-col items-center justify-center p-3 rounded-xl border text-[11px] font-medium transition cursor-pointer ${
-                          isSelected
-                            ? 'bg-violet-600/10 border-violet-500 text-violet-300'
-                            : 'bg-slate-900/50 border-slate-850 hover:bg-slate-800 text-slate-400 hover:text-slate-200'
-                        }`}
-                      >
-                        <div className="mb-1.5">{item.icon}</div>
-                        {item.label}
-                      </button>
-                    )
-                  })}
+                    { id: 'document', label: 'Doc',        icon: <FileText    size={16} className="text-blue-400"    /> },
+                    { id: 'task',     label: 'Task',       icon: <CheckSquare size={16} className="text-amber-500"   /> },
+                    { id: 'canvas',   label: 'Excalidraw', icon: <Brush       size={16} className="text-emerald-400" /> },
+                    { id: 'diagram',  label: 'Draw.io',    icon: <Grid        size={16} className="text-violet-400"  /> },
+                    { id: 'board',    label: 'Board',      icon: <LayoutGrid  size={16} className="text-rose-400"    /> },
+                  ].map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setCreateModal((prev) => ({ ...prev, type: item.id as any }))}
+                      className={`flex flex-col items-center justify-center p-3 rounded-xl border text-[11px] font-medium transition cursor-pointer ${
+                        createModal.type === item.id
+                          ? 'bg-violet-600/10 border-violet-500 text-violet-300'
+                          : 'bg-slate-900/50 border-slate-850 hover:bg-slate-800 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <div className="mb-1.5">{item.icon}</div>
+                      {item.label}
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              {/* Name Input */}
               <div className="space-y-2">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                  Name / Title
-                </label>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Name / Title</label>
                 <input
                   type="text"
                   placeholder="Enter name..."
@@ -1048,138 +780,65 @@ Start writing note content here.
                 />
               </div>
 
-              {/* Path Context */}
               <div className="text-[10px] text-slate-500 font-mono">
                 Location: <strong className="text-slate-400">{createModal.parentPath ? `${createModal.parentPath}/` : 'Root (/)'}</strong>
               </div>
 
-              {/* Action Buttons */}
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-850">
-                <button
-                  type="button"
-                  onClick={() => setCreateModal({ isOpen: false, type: null })}
-                  className="px-4 py-2 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-lg text-xs font-semibold transition cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  disabled={!createModal.type || !createNameInput.trim()}
-                  onClick={handleCreateConfirm}
-                  className="px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white rounded-lg text-xs font-semibold shadow transition cursor-pointer"
-                >
-                  Create Item
-                </button>
+                <button type="button" onClick={() => setCreateModal({ isOpen: false, type: null })} className="px-4 py-2 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-lg text-xs font-semibold transition cursor-pointer">Cancel</button>
+                <button type="button" disabled={!createModal.type || !createNameInput.trim()} onClick={handleCreateConfirm} className="px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white rounded-lg text-xs font-semibold shadow transition cursor-pointer">Create Item</button>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Right-click Context Menu */}
+      {/* ── Context Menu ─────────────────────────────────────────────────── */}
       {contextMenu.isOpen && (
         <div
-          style={{
-            position: 'fixed',
-            top: `${contextMenu.y}px`,
-            left: `${contextMenu.x}px`,
-            zIndex: 99999,
-          }}
+          style={{ position: 'fixed', top: `${contextMenu.y}px`, left: `${contextMenu.x}px`, zIndex: 99999 }}
           className="w-48 bg-[#161b22] border border-slate-800 rounded-xl shadow-2xl p-1.5 flex flex-col space-y-0.5 no-scrollbar select-none animate-in fade-in zoom-in-95 duration-100"
         >
           <div className="px-2.5 py-1 text-[9px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-850/60 mb-1 truncate">
             {contextMenu.path}
           </div>
-          
-          <button
-            onClick={() => {
-              const cleanParent = contextMenu.path?.endsWith('.md') ? contextMenu.path.slice(0, -3) : contextMenu.path
-              handleCreateFile('document', cleanParent || undefined)
-              setContextMenu((prev) => ({ ...prev, isOpen: false }))
-            }}
-            className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg text-xs transition cursor-pointer text-left w-full font-medium"
-          >
-            <FileText size={13} className="text-blue-400" />
-            New Page
-          </button>
-          
-          <button
-            onClick={() => {
-              const cleanParent = contextMenu.path?.endsWith('.md') ? contextMenu.path.slice(0, -3) : contextMenu.path
-              handleCreateFile('task', cleanParent || undefined)
-              setContextMenu((prev) => ({ ...prev, isOpen: false }))
-            }}
-            className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg text-xs transition cursor-pointer text-left w-full font-medium"
-          >
-            <CheckSquare size={13} className="text-amber-500" />
-            New Task
-          </button>
 
-          <button
-            onClick={() => {
-              const cleanParent = contextMenu.path?.endsWith('.md') ? contextMenu.path.slice(0, -3) : contextMenu.path
-              handleCreateFile('canvas', cleanParent || undefined)
-              setContextMenu((prev) => ({ ...prev, isOpen: false }))
-            }}
-            className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg text-xs transition cursor-pointer text-left w-full font-medium"
-          >
-            <Brush size={13} className="text-emerald-400" />
-            New Excalidraw
-          </button>
-
-          <button
-            onClick={() => {
-              const cleanParent = contextMenu.path?.endsWith('.md') ? contextMenu.path.slice(0, -3) : contextMenu.path
-              handleCreateFile('diagram', cleanParent || undefined)
-              setContextMenu((prev) => ({ ...prev, isOpen: false }))
-            }}
-            className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg text-xs transition cursor-pointer text-left w-full font-medium"
-          >
-            <Grid size={13} className="text-violet-400" />
-            New Draw.io
-          </button>
-
-          <button
-            onClick={() => {
-              const cleanParent = contextMenu.path?.endsWith('.md') ? contextMenu.path.slice(0, -3) : contextMenu.path
-              handleCreateFile('folder', cleanParent || undefined)
-              setContextMenu((prev) => ({ ...prev, isOpen: false }))
-            }}
-            className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg text-xs transition cursor-pointer text-left w-full font-medium"
-          >
-            <Folder size={13} className="text-slate-400" />
-            New Folder
-          </button>
-
-          <button
-            onClick={() => {
-              const cleanParent = contextMenu.path?.endsWith('.md') ? contextMenu.path.slice(0, -3) : contextMenu.path
-              handleCreateFile('board', cleanParent || undefined)
-              setContextMenu((prev) => ({ ...prev, isOpen: false }))
-            }}
-            className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg text-xs transition cursor-pointer text-left w-full font-medium"
-          >
-            <LayoutGrid size={13} className="text-rose-400" />
-            New Board
-          </button>
+          {(
+            [
+              { type: 'document', label: 'New Sub-page',  icon: <FileText    size={13} className="text-blue-400"    /> },
+              { type: 'task',     label: 'New Task',       icon: <CheckSquare size={13} className="text-amber-500"   /> },
+              { type: 'canvas',   label: 'New Excalidraw', icon: <Brush       size={13} className="text-emerald-400" /> },
+              { type: 'diagram',  label: 'New Draw.io',    icon: <Grid        size={13} className="text-violet-400"  /> },
+              { type: 'board',    label: 'New Board',      icon: <LayoutGrid  size={13} className="text-rose-400"    /> },
+            ] as const
+          ).map(({ type, label, icon }) => (
+            <button
+              key={type}
+              onClick={() => {
+                const parent = getContextParentPath(contextMenu.path)
+                handleCreateFile(type, parent)
+                setContextMenu(p => ({ ...p, isOpen: false }))
+              }}
+              className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg text-xs transition cursor-pointer text-left w-full font-medium"
+            >
+              {icon}{label}
+            </button>
+          ))}
 
           <div className="border-t border-slate-850/60 my-1" />
-
           <button
             onClick={() => {
-              if (contextMenu.path) {
-                handleDeleteFile(contextMenu.path)
-              }
-              setContextMenu((prev) => ({ ...prev, isOpen: false }))
+              if (contextMenu.path) handleDeleteFile(contextMenu.path)
+              setContextMenu(p => ({ ...p, isOpen: false }))
             }}
             className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-red-950/40 text-slate-400 hover:text-red-400 rounded-lg text-xs transition cursor-pointer text-left w-full font-medium"
           >
-            <Trash2 size={13} className="text-red-500" />
-            Delete Item
+            <Trash2 size={13} className="text-red-500" /> Delete Item
           </button>
         </div>
       )}
     </div>
   )
 }
+
 export default App

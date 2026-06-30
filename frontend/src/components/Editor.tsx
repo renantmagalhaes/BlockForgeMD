@@ -91,6 +91,7 @@ interface EditorProps {
   frontMatter?: Record<string, string>
   onUpdateFrontMatter?: (updates: Record<string, any>) => Promise<void>
   boardColumns: string[]
+  onCreateSubPage?: (parentPath: string) => void
 }
 
 interface HistoryVersion {
@@ -112,6 +113,7 @@ const COMMANDS = [
   { id: 'callout', label: 'Callout Box', desc: 'Highlighted info box', search: 'callout note alert warning info' },
   { id: 'table', label: 'Table Grid', desc: 'Insert a 2x2 grid table', search: 'table grid columns cell' },
   { id: 'code', label: 'Code Block', desc: 'Monospace fenced code block', search: 'code block script pre' },
+  { id: 'subpage', label: 'Sub-page', desc: 'Create a sub-page inside this page', search: 'subpage sub page child nested' },
 ]
 
 export const Editor: React.FC<EditorProps> = ({
@@ -122,6 +124,7 @@ export const Editor: React.FC<EditorProps> = ({
   frontMatter,
   onUpdateFrontMatter,
   boardColumns,
+  onCreateSubPage,
 }) => {
   // Slash command states
   const [commandActive, setCommandActive] = useState(false)
@@ -398,6 +401,18 @@ export const Editor: React.FC<EditorProps> = ({
       case 'code':
         editor.chain().focus().insertContent('<pre><code>\n// Code here\n</code></pre>').run()
         break
+      case 'subpage': {
+        // Derive the parent path from the current filePath:
+        // Documents/Note.md → sub-pages go in Documents/Note/
+        let parentPath = filePath
+        if (parentPath.endsWith('/README.md')) {
+          parentPath = parentPath.slice(0, -'/README.md'.length)
+        } else if (parentPath.endsWith('.md')) {
+          parentPath = parentPath.slice(0, -3)
+        }
+        onCreateSubPage?.(parentPath)
+        break
+      }
     }
     setCommandActive(false)
   }
