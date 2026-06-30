@@ -1,0 +1,523 @@
+package server
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"blockforgemd/internal/db"
+	"blockforgemd/internal/parser"
+	"blockforgemd/internal/watcher"
+
+	"github.com/go-chi/chi/v5"
+)
+
+type Server struct {
+	db         *db.DB
+	watcher    *watcher.Watcher
+	rootPath   string
+	clients    map[chan string]bool
+	clientsMu  sync.Mutex
+	router     *chi.Mux
+}
+
+func NewServer(rootPath string, database *db.DB, w *watcher.Watcher) *Server {
+	s := &Server{
+		db:       database,
+		watcher:  w,
+		rootPath: rootPath,
+		clients:  make(map[chan string]bool),
+		router:   chi.NewRouter(),
+	}
+
+	s.setupRoutes()
+	go s.listenForWatcherUpdates()
+
+	return s
+}
+
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.router.ServeHTTP(w, r)
+}
+
+func (s *Server) setupRoutes() {
+	// CORS Middleware
+	s.router.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			if r.Method == "OPTIONS" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	})
+
+	// API Endpoints
+	s.router.Route("/api", func(r chi.Router) {
+		r.Get("/files", s.handleListFiles)
+		r.Get("/file", s.handleGetFile)
+		r.Post("/file", s.handleSaveFile)
+		r.Delete("/file", s.handleDeleteFile)
+		r.Patch("/file/front-matter", s.handleUpdateFrontMatter)
+		r.Patch("/file/task", s.handleUpdateTaskStatus)
+		r.Get("/file/history", s.handleGetFileHistory)
+		r.Post("/file/rollback", s.handleRollbackFile)
+		r.Get("/sync/events", s.handleSSE)
+	})
+}
+
+// listenForWatcherUpdates streams updates from the watcher to active SSE clients
+func (s *Server) listenForWatcherUpdates() {
+	for path := range s.watcher.Updates {
+		s.broadcastEvent(path)
+	}
+}
+
+func (s *Server) broadcastEvent(path string) {
+	s.clientsMu.Lock()
+	defer s.clientsMu.Unlock()
+	for clientChan := range s.clients {
+		select {
+		case clientChan <- path:
+		default:
+		}
+	}
+}
+
+// SSE handler for real-time synchronization
+func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	clientChan := make(chan string, 10)
+
+	s.clientsMu.Lock()
+	s.clients[clientChan] = true
+	s.clientsMu.Unlock()
+
+	defer func() {
+		s.clientsMu.Lock()
+		delete(s.clients, clientChan)
+		s.clientsMu.Unlock()
+		close(clientChan)
+	}()
+
+	notify := r.Context().Done()
+
+	// Send initial connection event
+	fmt.Fprintf(w, "event: connected\ndata: {}\n\n")
+	flusher.Flush()
+
+	for {
+		select {
+		case path := <-clientChan:
+			fmt.Fprintf(w, "event: file_update\ndata: %s\n\n", path)
+			flusher.Flush()
+		case <-notify:
+			return
+		}
+	}
+}
+
+// handleListFiles returns all indexed file records
+func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request) {
+	records, err := s.db.ListFiles()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	respondJSON(w, records)
+}
+
+// handleGetFile reads a markdown file and returns its content plus parsed metadata
+func (s *Server) handleGetFile(w http.ResponseWriter, r *http.Request) {
+	relPath := r.URL.Query().Get("path")
+	if relPath == "" {
+		http.Error(w, "missing path parameter", http.StatusBadRequest)
+		return
+	}
+
+	fullPath := filepath.Join(s.rootPath, relPath)
+	contentBytes, err := os.ReadFile(fullPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to read file: %v", err), http.StatusNotFound)
+		return
+	}
+
+	meta, err := s.db.GetFile(relPath)
+	if err != nil {
+		// File might not be indexed yet, parse on the fly
+		res, parseErr := parser.ParseFile(s.rootPath, relPath)
+		if parseErr == nil {
+			meta = &res.Record
+			meta.FrontMatter = make(map[string]string)
+			for k, v := range res.FrontMatter {
+				meta.FrontMatter[k] = fmt.Sprintf("%v", v)
+			}
+		} else {
+			meta = &db.FileRecord{Path: relPath, Title: filepath.Base(relPath), Type: "document"}
+		}
+	}
+
+	tasks, _ := s.db.GetTasksForFile(relPath)
+
+	response := map[string]interface{}{
+		"meta":    meta,
+		"content": string(contentBytes),
+		"tasks":   tasks,
+	}
+	respondJSON(w, response)
+}
+
+// handleSaveFile creates or overwrites a markdown file
+func (s *Server) handleSaveFile(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Path == "" {
+		http.Error(w, "missing path", http.StatusBadRequest)
+		return
+	}
+
+	fullPath := filepath.Join(s.rootPath, req.Path)
+	dir := filepath.Dir(fullPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		http.Error(w, fmt.Sprintf("failed to create directory: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Trigger version history backup before overwriting
+	s.saveFileBackup(req.Path, req.Content)
+
+	// Lock watcher bypass
+	s.watcher.LockPath(req.Path)
+	defer s.watcher.UnlockPath(req.Path)
+
+	err := os.WriteFile(fullPath, []byte(req.Content), 0644)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to write file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Manually index the file to ensure DB is up to date immediately
+	res, err := parser.ParseFile(s.rootPath, req.Path)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to parse file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	err = s.db.UpsertFile(res.Record, res.FrontMatter, res.Tasks)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to update cache: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	s.broadcastEvent(req.Path)
+	respondJSON(w, map[string]interface{}{"status": "success", "file": res.Record})
+}
+
+// handleDeleteFile deletes a markdown file from disk and deletes cache entries
+func (s *Server) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
+	relPath := r.URL.Query().Get("path")
+	if relPath == "" {
+		http.Error(w, "missing path parameter", http.StatusBadRequest)
+		return
+	}
+
+	fullPath := filepath.Join(s.rootPath, relPath)
+	s.watcher.LockPath(relPath)
+	defer s.watcher.UnlockPath(relPath)
+
+	err := os.Remove(fullPath)
+	if err != nil && !os.IsNotExist(err) {
+		http.Error(w, fmt.Sprintf("failed to delete file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	err = s.db.DeleteFile(relPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to delete cache: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	s.broadcastEvent(relPath)
+	respondJSON(w, map[string]string{"status": "deleted"})
+}
+
+// handleUpdateFrontMatter edits front matter fields directly (e.g. Kanban drag and drop)
+func (s *Server) handleUpdateFrontMatter(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Path    string                 `json:"path"`
+		Updates map[string]interface{} `json:"updates"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Path == "" {
+		http.Error(w, "missing path", http.StatusBadRequest)
+		return
+	}
+
+	s.watcher.LockPath(req.Path)
+	defer s.watcher.UnlockPath(req.Path)
+
+	newHash, err := parser.UpdateFrontMatterInFile(s.rootPath, req.Path, req.Updates)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to update front matter: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Re-index file metadata
+	res, err := parser.ParseFile(s.rootPath, req.Path)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to parse file: %v", err), http.StatusInternalServerError)
+		return
+	}
+	res.Record.ContentHash = newHash
+
+	err = s.db.UpsertFile(res.Record, res.FrontMatter, res.Tasks)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to update cache: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	s.broadcastEvent(req.Path)
+	respondJSON(w, map[string]interface{}{"status": "success", "file": res.Record})
+}
+
+// handleUpdateTaskStatus toggles standard markdown checklist tasks status on save
+func (s *Server) handleUpdateTaskStatus(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Path       string `json:"path"`
+		LineNumber int    `json:"lineNumber"`
+		Completed  bool   `json:"completed"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Path == "" || req.LineNumber <= 0 {
+		http.Error(w, "missing path or invalid lineNumber", http.StatusBadRequest)
+		return
+	}
+
+	s.watcher.LockPath(req.Path)
+	defer s.watcher.UnlockPath(req.Path)
+
+	newHash, err := parser.UpdateTaskStatusInFile(s.rootPath, req.Path, req.LineNumber, req.Completed)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to update task: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Re-index file metadata
+	res, err := parser.ParseFile(s.rootPath, req.Path)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to parse file: %v", err), http.StatusInternalServerError)
+		return
+	}
+	res.Record.ContentHash = newHash
+
+	err = s.db.UpsertFile(res.Record, res.FrontMatter, res.Tasks)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to update cache: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	s.broadcastEvent(req.Path)
+	respondJSON(w, map[string]interface{}{"status": "success", "file": res.Record})
+}
+
+func respondJSON(w http.ResponseWriter, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		log.Printf("Failed to write JSON response: %v", err)
+	}
+}
+
+func (s *Server) MountFrontend(fs http.FileSystem) {
+	// Simple static file routing fallback
+	s.router.Handle("/*", http.StripPrefix("/", http.FileServer(fs)))
+}
+
+// saveFileBackup creates a timestamped copy of a file if it has changed
+func (s *Server) saveFileBackup(relPath, newContent string) {
+	fullPath := filepath.Join(s.rootPath, relPath)
+	oldBytes, err := os.ReadFile(fullPath)
+	if err != nil {
+		// File does not exist yet, no backup needed
+		return
+	}
+
+	if string(oldBytes) == newContent {
+		// Content hasn't changed, skip backup
+		return
+	}
+
+	escapedPath := url.PathEscape(relPath)
+	backupDir := filepath.Join(s.rootPath, ".blockforge", "history", escapedPath)
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		log.Printf("History: failed to create backup dir: %v", err)
+		return
+	}
+
+	timestamp := time.Now().Unix()
+	backupFilePath := filepath.Join(backupDir, fmt.Sprintf("%d.md", timestamp))
+	if err := os.WriteFile(backupFilePath, oldBytes, 0644); err != nil {
+		log.Printf("History: failed to write backup: %v", err)
+		return
+	}
+
+	// Prune history to limit of 20 backups
+	entries, err := os.ReadDir(backupDir)
+	if err == nil && len(entries) > 20 {
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].Name() < entries[j].Name()
+		})
+		for i := 0; i < len(entries)-20; i++ {
+			os.Remove(filepath.Join(backupDir, entries[i].Name()))
+		}
+	}
+}
+
+type historyVersion struct {
+	Timestamp int64  `json:"timestamp"`
+	Date      string `json:"date"`
+	Size      int64  `json:"size"`
+}
+
+func (s *Server) handleGetFileHistory(w http.ResponseWriter, r *http.Request) {
+	relPath := r.URL.Query().Get("path")
+	if relPath == "" {
+		http.Error(w, "missing path parameter", http.StatusBadRequest)
+		return
+	}
+
+	escapedPath := url.PathEscape(relPath)
+	backupDir := filepath.Join(s.rootPath, ".blockforge", "history", escapedPath)
+
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		// Return empty list if no history folder exists yet
+		respondJSON(w, []historyVersion{})
+		return
+	}
+
+	var versions []historyVersion
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+
+		name := strings.TrimSuffix(entry.Name(), ".md")
+		timestamp, err := strconv.ParseInt(name, 10, 64)
+		if err != nil {
+			continue
+		}
+
+		date := time.Unix(timestamp, 0).Format("2006-01-02 15:04:05")
+		versions = append(versions, historyVersion{
+			Timestamp: timestamp,
+			Date:      date,
+			Size:      info.Size(),
+		})
+	}
+
+	// Sort newest first
+	sort.Slice(versions, func(i, j int) bool {
+		return versions[i].Timestamp > versions[j].Timestamp
+	})
+
+	respondJSON(w, versions)
+}
+
+func (s *Server) handleRollbackFile(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Path      string `json:"path"`
+		Timestamp int64  `json:"timestamp"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Path == "" || req.Timestamp == 0 {
+		http.Error(w, "missing path or timestamp", http.StatusBadRequest)
+		return
+	}
+
+	escapedPath := url.PathEscape(req.Path)
+	backupFilePath := filepath.Join(s.rootPath, ".blockforge", "history", escapedPath, fmt.Sprintf("%d.md", req.Timestamp))
+
+	backupBytes, err := os.ReadFile(backupFilePath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("backup snapshot not found: %v", err), http.StatusNotFound)
+		return
+	}
+
+	fullPath := filepath.Join(s.rootPath, req.Path)
+
+	// Save active as a backup snapshot before rolling back (so we can undo a rollback!)
+	s.saveFileBackup(req.Path, string(backupBytes))
+
+	s.watcher.LockPath(req.Path)
+	defer s.watcher.UnlockPath(req.Path)
+
+	if err := os.WriteFile(fullPath, backupBytes, 0644); err != nil {
+		http.Error(w, fmt.Sprintf("failed to rollback file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Re-parse and update DB
+	res, err := parser.ParseFile(s.rootPath, req.Path)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to parse rolled-back file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	err = s.db.UpsertFile(res.Record, res.FrontMatter, res.Tasks)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to update cache: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	s.broadcastEvent(req.Path)
+	respondJSON(w, map[string]interface{}{"status": "success", "file": res.Record, "content": string(backupBytes)})
+}

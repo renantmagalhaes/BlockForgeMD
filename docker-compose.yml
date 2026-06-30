@@ -1,0 +1,16 @@
+services:
+  blockforgemd:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: blockforgemd
+    ports:
+      - "8080:8080"
+    volumes:
+      # Map a folder named 'vault' in the current host directory to /workspace inside the container.
+      # This is where all your flat Markdown files, Kanban tasks, and drawings will reside.
+      - ./vault:/workspace
+    restart: unless-stopped
+    # Optional environment configurations or variables can be defined here if you extend the backend
+    environment:
+      - TZ=UTC

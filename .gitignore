@@ -1,0 +1,33 @@
+# OS files
+.DS_Store
+Thumbs.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Local workspace files (User flat files and SQLite caches)
+vault/
+.blockforge/
+backend/vault/
+
+# Go Backend builds and dependencies
+backend/blockforgemd-backend
+backend/blockforgemd-backend.exe
+backend/web-dist/
+
+# Frontend builds and dependencies
+frontend/node_modules/
+frontend/dist/
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/.pnpm-debug.log*
+
+# IDEs
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
