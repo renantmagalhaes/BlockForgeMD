@@ -21,27 +21,40 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
   const [rotation, setRotation] = useState(0) // degrees (0, 90, 180, 270)
   const [isSaving, setIsSaving] = useState(false)
 
+  // Viewer Pan States (Drag to Pan when zoomed in)
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 })
+  const [isPanning, setIsPanning] = useState(false)
+  const panStartRef = useRef({ x: 0, y: 0 })
+
   // Drawing Tools States
-  const [tool, setTool] = useState<'draw' | 'crop' | 'none'>('none')
+  const [tool, setTool] = useState<'draw' | 'highlight' | 'rect' | 'arrow' | 'circle' | 'text' | 'crop' | 'none'>('none')
   const [color, setColor] = useState('#ef4444') // Tailwind red-500
   const [lineWidth, setLineWidth] = useState(4)
 
-  // Canvas Refs & Drawing State
+  // Canvas Refs & State
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const isDrawingRef = useRef(false)
   const lastPosRef = useRef({ x: 0, y: 0 })
+  const pointsRef = useRef<{ x: number; y: number }[]>([])
   const [undoStack, setUndoStack] = useState<string[]>([])
   
-  // Crop States (relative to canvas pixels)
-  const [cropStart, setCropStart] = useState<{ x: number; y: number } | null>(null)
-  const [cropEnd, setCropEnd] = useState<{ x: number; y: number } | null>(null)
-  const [isCroppingDrag, setIsCroppingDrag] = useState(false)
+  // Drag Shape & Crop Coordinates (relative to canvas pixels)
+  const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null)
+  const [dragCurrent, setDragCurrent] = useState<{ x: number; y: number } | null>(null)
+  const savedImageDataRef = useRef<ImageData | null>(null)
+
+  // Helper to convert hex color to RGBA
+  const hexToRgba = (hex: string, alpha: number) => {
+    const r = parseInt(hex.slice(1, 3), 16)
+    const g = parseInt(hex.slice(3, 5), 16)
+    const b = parseInt(hex.slice(5, 7), 16)
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`
+  }
 
   // Load image into Canvas when entering Edit Mode
   useEffect(() => {
     if (isEditing) {
       const img = new Image()
-      // Avoid CORS issue by setting crossOrigin
       img.crossOrigin = 'anonymous'
       img.src = src.startsWith('/') ? `${apiBase}${src}` : src
       img.onload = () => {
@@ -50,18 +63,16 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
         const ctx = canvas.getContext('2d')
         if (!ctx) return
 
-        // Set canvas dimensions to match the image
         canvas.width = img.naturalWidth
         canvas.height = img.naturalHeight
         
         ctx.clearRect(0, 0, canvas.width, canvas.height)
         ctx.drawImage(img, 0, 0)
         
-        // Push initial state to undo stack
         setUndoStack([canvas.toDataURL()])
         setRotation(0)
-        setCropStart(null)
-        setCropEnd(null)
+        setDragStart(null)
+        setDragCurrent(null)
       }
     }
   }, [isEditing, src, apiBase])
@@ -94,13 +105,12 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
     }
   }
 
-  // Draw Functions
+  // Convert Client coordinates to Canvas pixels
   const getCanvasCoordinates = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current
     if (!canvas) return { x: 0, y: 0 }
     
     const rect = canvas.getBoundingClientRect()
-    // Calculate client coordinates
     let clientX = 0
     let clientY = 0
     
@@ -113,34 +123,83 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
       clientY = e.clientY
     }
     
-    // Scale standard coordinates to actual canvas drawing resolution
     const x = ((clientX - rect.left) / rect.width) * canvas.width
     const y = ((clientY - rect.top) / rect.height) * canvas.height
     return { x, y }
   }
 
+  // Draw Arrow Helper
+  const drawArrow = (ctx: CanvasRenderingContext2D, start: { x: number; y: number }, end: { x: number; y: number }, strokeColor: string, width: number) => {
+    ctx.strokeStyle = strokeColor
+    ctx.fillStyle = strokeColor
+    ctx.lineWidth = width
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+
+    // Draw main line
+    ctx.beginPath()
+    ctx.moveTo(start.x, start.y)
+    ctx.lineTo(end.x, end.y)
+    ctx.stroke()
+
+    // Calculate angle & draw arrowhead
+    const angle = Math.atan2(end.y - start.y, end.x - start.x)
+    const headLength = width * 3 + 6
+
+    ctx.beginPath()
+    ctx.moveTo(end.x, end.y)
+    ctx.lineTo(
+      end.x - headLength * Math.cos(angle - Math.PI / 6),
+      end.y - headLength * Math.sin(angle - Math.PI / 6)
+    )
+    ctx.lineTo(
+      end.x - headLength * Math.cos(angle + Math.PI / 6),
+      end.y - headLength * Math.sin(angle + Math.PI / 6)
+    )
+    ctx.closePath()
+    ctx.fill()
+  }
+
+  // Mouse Handlers on Canvas
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const coords = getCanvasCoordinates(e)
-    
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
     if (tool === 'draw') {
       isDrawingRef.current = true
       lastPosRef.current = coords
-    } else if (tool === 'crop') {
-      setCropStart(coords)
-      setCropEnd(coords)
-      setIsCroppingDrag(true)
+    } else if (tool === 'highlight') {
+      isDrawingRef.current = true
+      savedImageDataRef.current = ctx.getImageData(0, 0, canvas.width, canvas.height)
+      pointsRef.current = [coords]
+    } else if (tool === 'rect' || tool === 'arrow' || tool === 'circle' || tool === 'crop') {
+      // Cache canvas image state before shape preview drags
+      savedImageDataRef.current = ctx.getImageData(0, 0, canvas.width, canvas.height)
+      setDragStart(coords)
+      setDragCurrent(coords)
+    } else if (tool === 'text') {
+      const text = prompt('Enter text to insert:')
+      if (text) {
+        ctx.font = `bold ${lineWidth * 4 + 14}px sans-serif`
+        ctx.fillStyle = color
+        ctx.textBaseline = 'middle'
+        ctx.fillText(text, coords.x, coords.y)
+        saveHistory()
+      }
     }
   }
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const coords = getCanvasCoordinates(e)
-    
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
     if (tool === 'draw' && isDrawingRef.current) {
-      const canvas = canvasRef.current
-      if (!canvas) return
-      const ctx = canvas.getContext('2d')
-      if (!ctx) return
-      
       ctx.beginPath()
       ctx.strokeStyle = color
       ctx.lineWidth = lineWidth
@@ -149,10 +208,52 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
       ctx.moveTo(lastPosRef.current.x, lastPosRef.current.y)
       ctx.lineTo(coords.x, coords.y)
       ctx.stroke()
-      
       lastPosRef.current = coords
-    } else if (tool === 'crop' && isCroppingDrag) {
-      setCropEnd(coords)
+    } else if (tool === 'highlight' && isDrawingRef.current && savedImageDataRef.current) {
+      ctx.putImageData(savedImageDataRef.current, 0, 0)
+      pointsRef.current.push(coords)
+
+      ctx.beginPath()
+      ctx.strokeStyle = hexToRgba(color, 0.22) // Softer, transparent alpha
+      ctx.lineWidth = lineWidth * 5 // Make highlighter wider
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
+      
+      if (pointsRef.current.length > 0) {
+        ctx.moveTo(pointsRef.current[0].x, pointsRef.current[0].y)
+        for (let i = 1; i < pointsRef.current.length; i++) {
+          ctx.lineTo(pointsRef.current[i].x, pointsRef.current[i].y)
+        }
+        ctx.stroke()
+      }
+    } else if ((tool === 'rect' || tool === 'arrow' || tool === 'circle' || tool === 'crop') && dragStart && savedImageDataRef.current) {
+      setDragCurrent(coords)
+
+      // Restore clean canvas state before drawing temporary shape preview
+      ctx.putImageData(savedImageDataRef.current, 0, 0)
+      
+      const x = Math.min(dragStart.x, coords.x)
+      const y = Math.min(dragStart.y, coords.y)
+      const w = Math.abs(dragStart.x - coords.x)
+      const h = Math.abs(dragStart.y - coords.y)
+
+      ctx.strokeStyle = color
+      ctx.lineWidth = lineWidth
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
+
+      if (tool === 'rect') {
+        ctx.strokeRect(x, y, w, h)
+      } else if (tool === 'arrow') {
+        drawArrow(ctx, dragStart, coords, color, lineWidth)
+      } else if (tool === 'circle') {
+        const radius = Math.sqrt(w * w + h * h) / 2
+        const cx = (dragStart.x + coords.x) / 2
+        const cy = (dragStart.y + coords.y) / 2
+        ctx.beginPath()
+        ctx.arc(cx, cy, radius, 0, 2 * Math.PI)
+        ctx.stroke()
+      }
     }
   }
 
@@ -160,28 +261,48 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
     if (tool === 'draw' && isDrawingRef.current) {
       isDrawingRef.current = false
       saveHistory()
-    } else if (tool === 'crop' && isCroppingDrag) {
-      setIsCroppingDrag(false)
+    } else if (tool === 'highlight' && isDrawingRef.current) {
+      isDrawingRef.current = false
+      savedImageDataRef.current = null
+      pointsRef.current = []
+      saveHistory()
+    } else if ((tool === 'rect' || tool === 'arrow' || tool === 'circle') && dragStart) {
+      savedImageDataRef.current = null
+      setDragStart(null)
+      setDragCurrent(null)
+      saveHistory()
+    } else if (tool === 'crop') {
+      savedImageDataRef.current = null
+      // Keep dragStart/dragCurrent for crop selection overlay box rendering
     }
   }
 
-  // Touch handlers for mobile/draw tablets
+  // Touch Handlers for tablets/mobile
   const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
     const coords = getCanvasCoordinates(e)
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
     if (tool === 'draw') {
       isDrawingRef.current = true
       lastPosRef.current = coords
+    } else if (tool === 'highlight') {
+      isDrawingRef.current = true
+      savedImageDataRef.current = ctx.getImageData(0, 0, canvas.width, canvas.height)
+      pointsRef.current = [coords]
     }
   }
 
   const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
     const coords = getCanvasCoordinates(e)
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
     if (tool === 'draw' && isDrawingRef.current) {
-      const canvas = canvasRef.current
-      if (!canvas) return
-      const ctx = canvas.getContext('2d')
-      if (!ctx) return
-      
       ctx.beginPath()
       ctx.strokeStyle = color
       ctx.lineWidth = lineWidth
@@ -189,8 +310,24 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
       ctx.moveTo(lastPosRef.current.x, lastPosRef.current.y)
       ctx.lineTo(coords.x, coords.y)
       ctx.stroke()
-      
       lastPosRef.current = coords
+    } else if (tool === 'highlight' && isDrawingRef.current && savedImageDataRef.current) {
+      ctx.putImageData(savedImageDataRef.current, 0, 0)
+      pointsRef.current.push(coords)
+
+      ctx.beginPath()
+      ctx.strokeStyle = hexToRgba(color, 0.22)
+      ctx.lineWidth = lineWidth * 5
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
+      
+      if (pointsRef.current.length > 0) {
+        ctx.moveTo(pointsRef.current[0].x, pointsRef.current[0].y)
+        for (let i = 1; i < pointsRef.current.length; i++) {
+          ctx.lineTo(pointsRef.current[i].x, pointsRef.current[i].y)
+        }
+        ctx.stroke()
+      }
     }
   }
 
@@ -198,17 +335,21 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
     if (tool === 'draw' && isDrawingRef.current) {
       isDrawingRef.current = false
       saveHistory()
+    } else if (tool === 'highlight' && isDrawingRef.current) {
+      isDrawingRef.current = false
+      savedImageDataRef.current = null
+      pointsRef.current = []
+      saveHistory()
     }
   }
 
-  // Image manipulation functions
+  // Rotates canvas image 90deg clockwise
   const rotateClockwise = () => {
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    // Create a temporary canvas to hold current image
     const tempCanvas = document.createElement('canvas')
     tempCanvas.width = canvas.width
     tempCanvas.height = canvas.height
@@ -216,11 +357,9 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
     if (!tempCtx) return
     tempCtx.drawImage(canvas, 0, 0)
 
-    // Swap dimensions
     canvas.width = tempCanvas.height
     canvas.height = tempCanvas.width
 
-    // Translate and rotate
     ctx.translate(canvas.width / 2, canvas.height / 2)
     ctx.rotate((90 * Math.PI) / 180)
     ctx.drawImage(tempCanvas, -tempCanvas.width / 2, -tempCanvas.height / 2)
@@ -228,19 +367,20 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
     saveHistory()
   }
 
+  // Crop Canvas Function
   const applyCrop = () => {
-    if (!cropStart || !cropEnd) return
+    if (!dragStart || !dragCurrent) return
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    const x = Math.min(cropStart.x, cropEnd.x)
-    const y = Math.min(cropStart.y, cropEnd.y)
-    const w = Math.abs(cropStart.x - cropEnd.x)
-    const h = Math.abs(cropStart.y - cropEnd.y)
+    const x = Math.min(dragStart.x, dragCurrent.x)
+    const y = Math.min(dragStart.y, dragCurrent.y)
+    const w = Math.abs(dragStart.x - dragCurrent.x)
+    const h = Math.abs(dragStart.y - dragCurrent.y)
 
-    if (w < 5 || h < 5) return // Ignore tiny crops
+    if (w < 5 || h < 5) return
 
     const tempCanvas = document.createElement('canvas')
     tempCanvas.width = w
@@ -254,13 +394,37 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
     ctx.clearRect(0, 0, w, h)
     ctx.drawImage(tempCanvas, 0, 0)
 
-    setCropStart(null)
-    setCropEnd(null)
+    setDragStart(null)
+    setDragCurrent(null)
     setTool('none')
     saveHistory()
   }
 
-  // Upload/Save changes to server
+  // Viewer Panning Handlers
+  const handleViewerMouseDown = (e: React.MouseEvent) => {
+    if (isEditing) return
+    e.preventDefault()
+    setIsPanning(true)
+    panStartRef.current = {
+      x: e.clientX - panOffset.x,
+      y: e.clientY - panOffset.y,
+    }
+  }
+
+  const handleViewerMouseMove = (e: React.MouseEvent) => {
+    if (!isPanning || isEditing) return
+    e.preventDefault()
+    setPanOffset({
+      x: e.clientX - panStartRef.current.x,
+      y: e.clientY - panStartRef.current.y,
+    } )
+  }
+
+  const handleViewerMouseUp = () => {
+    setIsPanning(false)
+  }
+
+  // Save/Upload Changes to Backend
   const handleSave = async () => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -272,13 +436,11 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
         return
       }
 
-      // Generate a mock png file
       const file = new File([blob], 'edited-image.png', { type: 'image/png' })
       const formData = new FormData()
       formData.append('file', file)
 
       try {
-        // Strip out optional query params from target path to overwrite correctly
         const cleanSrc = src.split('?')[0]
         const res = await fetch(`${apiBase}/api/upload?overwritePath=${encodeURIComponent(cleanSrc)}`, {
           method: 'POST',
@@ -288,7 +450,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
         if (!res.ok) throw new Error('Failed to overwrite image asset')
         const data = await res.json()
         
-        // Force refresh URL with cache-buster timestamp
+        // Add cache buster parameter to trigger refresh in editor
         const cacheBustedUrl = `${data.url}?t=${Date.now()}`
         onSave(cacheBustedUrl)
         onClose()
@@ -301,21 +463,19 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
     }, 'image/png')
   }
 
-  // Render crop indicator overlay box
+  // Calculate crop indicator overlay bounding box coordinates
   const getCropBoxStyles = () => {
-    if (!cropStart || !cropEnd || !canvasRef.current) return null
+    if (tool !== 'crop' || !dragStart || !dragCurrent || !canvasRef.current) return null
     const canvas = canvasRef.current
     
-    // Scale client coords matching canvas element layout
     const rect = canvas.getBoundingClientRect()
-    
     const scaleX = rect.width / canvas.width
     const scaleY = rect.height / canvas.height
 
-    const x1 = cropStart.x * scaleX
-    const y1 = cropStart.y * scaleY
-    const x2 = cropEnd.x * scaleX
-    const y2 = cropEnd.y * scaleY
+    const x1 = dragStart.x * scaleX
+    const y1 = dragStart.y * scaleY
+    const x2 = dragCurrent.x * scaleX
+    const y2 = dragCurrent.y * scaleY
 
     const left = Math.min(x1, x2)
     const top = Math.min(y1, y2)
@@ -364,17 +524,17 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
         <div className="flex items-center justify-between px-6 py-3 bg-slate-950 border-b border-slate-850 text-sm">
           <div className="flex items-center space-x-4">
             <button
-              onClick={() => setIsEditing(false)}
+              onClick={() => { setIsEditing(false); setTool('none'); }}
               className={`px-3 py-1.5 rounded-lg font-semibold transition-all ${
-                !isEditing ? 'bg-violet-600 text-white shadow' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-905'
+                !isEditing ? 'bg-violet-600 text-white shadow' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
               }`}
             >
               Viewer
             </button>
             <button
-              onClick={() => setIsEditing(true)}
+              onClick={() => { setIsEditing(true); setTool('none'); }}
               className={`px-3 py-1.5 rounded-lg font-semibold transition-all ${
-                isEditing ? 'bg-violet-600 text-white shadow' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-905'
+                isEditing ? 'bg-violet-600 text-white shadow' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
               }`}
             >
               Editor Markup
@@ -408,7 +568,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
                   </svg>
                 </button>
                 <button
-                  onClick={() => { setZoom(1.0); setRotation(0); }}
+                  onClick={() => { setZoom(1.0); setRotation(0); setPanOffset({ x: 0, y: 0 }); }}
                   className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 hover:bg-slate-800 text-xs text-slate-300 font-semibold"
                 >
                   Reset
@@ -424,69 +584,110 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
                 </button>
               </>
             ) : (
-              // Editor markup tool options
-              <div className="flex items-center space-x-5">
-                {/* Tools selector */}
-                <div className="flex items-center space-x-1.5 bg-slate-900 p-1 rounded-lg border border-slate-800">
+              // Editor Tools
+              <div className="flex items-center space-x-4">
+                {/* Tools Grid */}
+                <div className="flex items-center space-x-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
                   <button
-                    onClick={() => { setTool('none'); setCropStart(null); setCropEnd(null); }}
-                    className={`px-2.5 py-1 rounded text-xs font-semibold ${
+                    onClick={() => { setTool('none'); setDragStart(null); setDragCurrent(null); }}
+                    className={`px-2 py-1 rounded text-xs font-semibold ${
                       tool === 'none' ? 'bg-slate-800 text-violet-400' : 'text-slate-400 hover:text-slate-200'
                     }`}
                   >
-                    Select / Pan
+                    Select/Pan
                   </button>
                   <button
-                    onClick={() => { setTool('draw'); setCropStart(null); setCropEnd(null); }}
-                    className={`px-2.5 py-1 rounded text-xs font-semibold ${
+                    onClick={() => { setTool('draw'); setDragStart(null); setDragCurrent(null); }}
+                    className={`px-2 py-1 rounded text-xs font-semibold ${
                       tool === 'draw' ? 'bg-slate-800 text-violet-400' : 'text-slate-400 hover:text-slate-200'
                     }`}
                   >
-                    Pen Draw
+                    Pen
                   </button>
                   <button
-                    onClick={() => setTool('crop')}
-                    className={`px-2.5 py-1 rounded text-xs font-semibold ${
+                    onClick={() => { setTool('highlight'); setDragStart(null); setDragCurrent(null); }}
+                    className={`px-2 py-1 rounded text-xs font-semibold ${
+                      tool === 'highlight' ? 'bg-slate-800 text-violet-400' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Highlight
+                  </button>
+                  <button
+                    onClick={() => { setTool('arrow'); setDragStart(null); setDragCurrent(null); }}
+                    className={`px-2 py-1 rounded text-xs font-semibold ${
+                      tool === 'arrow' ? 'bg-slate-800 text-violet-400' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Arrow
+                  </button>
+                  <button
+                    onClick={() => { setTool('rect'); setDragStart(null); setDragCurrent(null); }}
+                    className={`px-2 py-1 rounded text-xs font-semibold ${
+                      tool === 'rect' ? 'bg-slate-800 text-violet-400' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Rect
+                  </button>
+                  <button
+                    onClick={() => { setTool('circle'); setDragStart(null); setDragCurrent(null); }}
+                    className={`px-2 py-1 rounded text-xs font-semibold ${
+                      tool === 'circle' ? 'bg-slate-800 text-violet-400' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Circle
+                  </button>
+                  <button
+                    onClick={() => { setTool('text'); setDragStart(null); setDragCurrent(null); }}
+                    className={`px-2 py-1 rounded text-xs font-semibold ${
+                      tool === 'text' ? 'bg-slate-800 text-violet-400' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Text
+                  </button>
+                  <button
+                    onClick={() => { setTool('crop'); setDragStart(null); setDragCurrent(null); }}
+                    className={`px-2 py-1 rounded text-xs font-semibold ${
                       tool === 'crop' ? 'bg-slate-800 text-violet-400' : 'text-slate-400 hover:text-slate-200'
                     }`}
                   >
-                    Crop Box
+                    Crop
                   </button>
                 </div>
 
-                {tool === 'draw' && (
+                {/* Colors and brush width */}
+                {tool !== 'none' && tool !== 'crop' && (
                   <>
                     {/* Brush Colors */}
-                    <div className="flex items-center space-x-1.5">
+                    <div className="flex items-center space-x-1">
                       {['#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#ffffff', '#000000'].map((c) => (
                         <button
                           key={c}
                           onClick={() => setColor(c)}
                           style={{ backgroundColor: c }}
-                          className={`w-5 h-5 rounded-full border ${
+                          className={`w-4.5 h-4.5 rounded-full border ${
                             color === c ? 'ring-2 ring-violet-500 border-white' : 'border-slate-700'
                           }`}
                         />
                       ))}
                     </div>
 
-                    {/* Brush Size */}
-                    <div className="flex items-center space-x-2">
-                      <span className="text-xs text-slate-400 font-mono">Size</span>
+                    {/* Width slider */}
+                    <div className="flex items-center space-x-1.5 border-l border-slate-800 pl-3">
+                      <span className="text-[10px] text-slate-500 uppercase font-mono">Size</span>
                       <input
                         type="range"
                         min="1"
                         max="20"
                         value={lineWidth}
                         onChange={(e) => setLineWidth(Number(e.target.value))}
-                        className="w-20 accent-violet-500 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer"
+                        className="w-16 accent-violet-500 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer"
                       />
-                      <span className="text-xs font-mono w-4 text-slate-400">{lineWidth}px</span>
+                      <span className="text-xs font-mono w-4 text-slate-450">{lineWidth}</span>
                     </div>
                   </>
                 )}
 
-                {tool === 'crop' && cropStart && cropEnd && (
+                {tool === 'crop' && dragStart && dragCurrent && (
                   <button
                     onClick={applyCrop}
                     className="px-3 py-1 bg-violet-600 hover:bg-violet-750 text-white rounded text-xs font-bold transition shadow"
@@ -495,15 +696,16 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
                   </button>
                 )}
 
-                {/* Operations */}
-                <div className="flex items-center space-x-2 border-l border-slate-800 pl-4">
+                {/* Undo / Rotate buttons */}
+                <div className="flex items-center space-x-1.5 border-l border-slate-800 pl-3">
                   <button
                     onClick={rotateClockwise}
                     className="p-1.5 rounded bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300"
                     title="Rotate Image 90° Clockwise"
                   >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 7.89M9 11l3-3 3 3m-3-3v12" />
+                    {/* Clean rotate right SVG */}
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M21.5 2v6h-6M21.34 15.57a10 10 0 11-.57-8.38l.56-1.9" />
                     </svg>
                   </button>
                   <button
@@ -523,13 +725,21 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
         </div>
 
         {/* Workspace Canvas / View Container */}
-        <div className="flex-1 bg-slate-950 overflow-auto flex items-center justify-center p-6 relative">
+        <div 
+          className="flex-1 bg-slate-950 overflow-hidden flex items-center justify-center relative select-none"
+          onMouseDown={handleViewerMouseDown}
+          onMouseMove={handleViewerMouseMove}
+          onMouseUp={handleViewerMouseUp}
+          onMouseLeave={handleViewerMouseUp}
+        >
           {!isEditing ? (
             // Viewer Window
             <div 
-              className="transition-transform duration-100 ease-out select-none flex items-center justify-center"
+              className={`transition-transform duration-75 ease-out select-none flex items-center justify-center ${
+                isPanning ? 'cursor-grabbing' : 'cursor-grab'
+              }`}
               style={{
-                transform: `scale(${zoom}) rotate(${rotation}deg)`,
+                transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoom}) rotate(${rotation}deg)`,
               }}
             >
               <img
@@ -556,7 +766,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
                 }`}
               />
 
-              {/* Crop indicator box overlay */}
+              {/* Crop indicator overlay */}
               {tool === 'crop' && cropStyles && (
                 <div
                   style={cropStyles}
@@ -571,8 +781,8 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
         <div className="px-6 py-4 border-t border-slate-800 bg-slate-900/50 backdrop-blur-sm flex items-center justify-between">
           <div className="text-xs text-slate-400">
             {isEditing 
-              ? 'Draw with the Pen tool or drag crop box to modify this asset directly in the vault.'
-              : 'Switch to Editor Markup to draw, annotate, crop, or rotate this image.'}
+              ? 'Draw lines, highlights, arrows, rectangles, circles or text directly. Click Save Changes to update the note.'
+              : 'Zoom using controls. Click and drag the image to pan around when zoomed in.'}
           </div>
           
           <div className="flex items-center space-x-3">

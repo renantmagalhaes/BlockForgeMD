@@ -3,6 +3,7 @@ import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
 import Image from '@tiptap/extension-image'
+import { ImageEditorModal } from './ImageEditorModal'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { Table } from '@tiptap/extension-table'
@@ -162,6 +163,9 @@ export const Editor: React.FC<EditorProps> = ({
   // Tag manager input state
   const [newTagInput, setNewTagInput] = useState('')
 
+  // Image Viewer & Editor state
+  const [editingImageSrc, setEditingImageSrc] = useState<string | null>(null)
+
   // Mention states
   const [mentionActive, setMentionActive] = useState(false)
   const [mentionQuery, setMentionQuery] = useState('')
@@ -252,6 +256,15 @@ export const Editor: React.FC<EditorProps> = ({
               event.preventDefault()
               event.stopPropagation()
               onSelectFile?.(href)
+              return true
+            }
+          }
+          if (target.nodeName === 'IMG') {
+            const src = target.getAttribute('src')
+            if (src) {
+              event.preventDefault()
+              event.stopPropagation()
+              setEditingImageSrc(src)
               return true
             }
           }
@@ -498,6 +511,29 @@ export const Editor: React.FC<EditorProps> = ({
       console.error('Failed to upload pasted/dropped image', e)
       alert('Failed to upload image to assets directory.')
     }
+  }
+
+  const handleImageSave = (newUrl: string) => {
+    if (!editor) return
+
+    const oldBaseUrl = editingImageSrc ? editingImageSrc.split('?')[0] : ''
+    
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === 'image') {
+        const nodeBaseUrl = node.attrs.src.split('?')[0]
+        if (nodeBaseUrl === oldBaseUrl) {
+          editor.view.dispatch(
+            editor.state.tr.setNodeMarkup(pos, undefined, {
+              ...node.attrs,
+              src: newUrl,
+            })
+          )
+        }
+      }
+    })
+
+    // Trigger auto-save immediately to save modified markdown content
+    executeAutoSave()
   }
 
   const getFilteredCommands = () => {
@@ -1096,6 +1132,16 @@ export const Editor: React.FC<EditorProps> = ({
         >
           No matching pages found
         </div>
+      )}
+
+      {editingImageSrc && (
+        <ImageEditorModal
+          src={editingImageSrc}
+          notePath={filePath}
+          apiBase={API_BASE}
+          onClose={() => setEditingImageSrc(null)}
+          onSave={handleImageSave}
+        />
       )}
     </div>
   )

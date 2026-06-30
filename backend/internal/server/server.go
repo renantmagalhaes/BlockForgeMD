@@ -544,6 +544,41 @@ func (s *Server) handleUploadAsset(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
+	// Parse optional overwritePath query param
+	overwritePath := r.URL.Query().Get("overwritePath")
+	if overwritePath != "" {
+		// Strip query parameters
+		if idx := strings.Index(overwritePath, "?"); idx != -1 {
+			overwritePath = overwritePath[:idx]
+		}
+		// Clean prefixes
+		overwritePath = strings.TrimPrefix(overwritePath, "/")
+		overwritePath = strings.TrimPrefix(overwritePath, "assets/")
+
+		dstPath := filepath.Join(s.rootPath, "assets", filepath.Clean(overwritePath))
+		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+			http.Error(w, "Failed to create assets directory: " + err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+		if err != nil {
+			http.Error(w, "Failed to open asset file for overwriting: " + err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer dst.Close()
+
+		if _, err := io.Copy(dst, file); err != nil {
+			http.Error(w, "Failed to write asset bytes: " + err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		respondJSON(w, map[string]string{
+			"url": "/" + filepath.Join("assets", filepath.ToSlash(overwritePath)),
+		})
+		return
+	}
+
 	// Parse optional notePath query param
 	notePath := r.URL.Query().Get("notePath")
 	var parentDir string
