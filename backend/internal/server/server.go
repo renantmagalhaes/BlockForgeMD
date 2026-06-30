@@ -551,6 +551,12 @@ func (s *Server) handleUploadAsset(w http.ResponseWriter, r *http.Request) {
 		if idx := strings.Index(overwritePath, "?"); idx != -1 {
 			overwritePath = overwritePath[:idx]
 		}
+		// Clean fully qualified HTTP URLs if passed
+		if strings.HasPrefix(overwritePath, "http://") || strings.HasPrefix(overwritePath, "https://") {
+			if u, err := url.Parse(overwritePath); err == nil {
+				overwritePath = u.Path
+			}
+		}
 		// Clean prefixes
 		overwritePath = strings.TrimPrefix(overwritePath, "/")
 		overwritePath = strings.TrimPrefix(overwritePath, "assets/")

@@ -513,19 +513,29 @@ export const Editor: React.FC<EditorProps> = ({
     }
   }
 
+  const getRelativePath = (url: string) => {
+    try {
+      const parsed = new URL(url, window.location.origin)
+      return parsed.pathname
+    } catch (e) {
+      return url.startsWith('/') ? url : '/' + url
+    }
+  }
+
   const handleImageSave = (newUrl: string) => {
     if (!editor) return
 
-    const oldBaseUrl = editingImageSrc ? editingImageSrc.split('?')[0] : ''
+    const oldBaseUrl = getRelativePath(editingImageSrc || '').split('?')[0]
+    const newRelativeUrl = getRelativePath(newUrl)
     
     editor.state.doc.descendants((node, pos) => {
       if (node.type.name === 'image') {
-        const nodeBaseUrl = node.attrs.src.split('?')[0]
+        const nodeBaseUrl = getRelativePath(node.attrs.src).split('?')[0]
         if (nodeBaseUrl === oldBaseUrl) {
           editor.view.dispatch(
             editor.state.tr.setNodeMarkup(pos, undefined, {
               ...node.attrs,
-              src: newUrl,
+              src: newRelativeUrl,
             })
           )
         }
@@ -1136,7 +1146,7 @@ export const Editor: React.FC<EditorProps> = ({
 
       {editingImageSrc && (
         <ImageEditorModal
-          src={editingImageSrc}
+          src={getRelativePath(editingImageSrc)}
           notePath={filePath}
           apiBase={API_BASE}
           onClose={() => setEditingImageSrc(null)}
