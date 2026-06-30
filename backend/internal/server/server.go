@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -74,8 +75,15 @@ func (s *Server) setupRoutes() {
 		r.Patch("/file/task", s.handleUpdateTaskStatus)
 		r.Get("/file/history", s.handleGetFileHistory)
 		r.Post("/file/rollback", s.handleRollbackFile)
+		r.Post("/upload", s.handleUploadAsset)
 		r.Get("/sync/events", s.handleSSE)
 	})
+
+	// Serve assets directly from the vault's assets directory
+	s.router.Handle("/assets/*", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fs := http.StripPrefix("/assets", http.FileServer(http.Dir(filepath.Join(s.rootPath, "assets"))))
+		fs.ServeHTTP(w, r)
+	}))
 }
 
 // listenForWatcherUpdates streams updates from the watcher to active SSE clients
@@ -520,4 +528,99 @@ func (s *Server) handleRollbackFile(w http.ResponseWriter, r *http.Request) {
 
 	s.broadcastEvent(req.Path)
 	respondJSON(w, map[string]interface{}{"status": "success", "file": res.Record, "content": string(backupBytes)})
+}
+
+func (s *Server) handleUploadAsset(w http.ResponseWriter, r *http.Request) {
+	// Max upload size: 20MB
+	if err := r.ParseMultipartForm(20 << 20); err != nil {
+		http.Error(w, "Upload size limit exceeded", http.StatusBadRequest)
+		return
+	}
+
+	file, handler, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "Error retrieving the file from form-data (field 'file')", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	// Parse optional notePath query param
+	notePath := r.URL.Query().Get("notePath")
+	var parentDir string
+	if notePath != "" {
+		parentDir = filepath.Dir(notePath)
+		if parentDir == "." || parentDir == "/" {
+			parentDir = ""
+		}
+	}
+
+	// Ensure assets destination directory exists
+	assetsDir := filepath.Join(s.rootPath, "assets")
+	destSubdir := filepath.Join(assetsDir, parentDir)
+	if err := os.MkdirAll(destSubdir, 0755); err != nil {
+		http.Error(w, "Failed to create assets directory: " + err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Sanitize base filename and append a nanosecond timestamp
+	ext := filepath.Ext(handler.Filename)
+	base := strings.TrimSuffix(handler.Filename, ext)
+	base = strings.ReplaceAll(base, " ", "_")
+	
+	cleanBase := ""
+	for _, char := range base {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '_' || char == '-' {
+			cleanBase += string(char)
+		}
+	}
+	if cleanBase == "" {
+		cleanBase = "image"
+	}
+
+	// Extract and clean note's base name
+	var noteBase string
+	if notePath != "" {
+		noteFile := filepath.Base(notePath)
+		noteExt := filepath.Ext(noteFile)
+		noteName := strings.TrimSuffix(noteFile, noteExt)
+		cleanNoteName := ""
+		for _, char := range noteName {
+			if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '_' || char == '-' {
+				cleanNoteName += string(char)
+			}
+		}
+		noteBase = cleanNoteName
+	}
+
+	var filename string
+	if noteBase != "" {
+		filename = fmt.Sprintf("%s-%s-%d%s", noteBase, cleanBase, time.Now().UnixNano(), ext)
+	} else {
+		filename = fmt.Sprintf("%s-%d%s", cleanBase, time.Now().UnixNano(), ext)
+	}
+	dstPath := filepath.Join(destSubdir, filename)
+
+	dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		http.Error(w, "Failed to create asset file: " + err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, file); err != nil {
+		http.Error(w, "Failed to save asset bytes: " + err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Construct relative URL path
+	var urlPath string
+	if parentDir != "" {
+		urlPath = fmt.Sprintf("/assets/%s/%s", filepath.ToSlash(parentDir), filename)
+	} else {
+		urlPath = fmt.Sprintf("/assets/%s", filename)
+	}
+
+	respondJSON(w, map[string]string{
+		"url": urlPath,
+	})
 }

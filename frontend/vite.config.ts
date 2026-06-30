@@ -8,5 +8,6 @@ export default defineConfig({
   build: {
     outDir: '../backend/web-dist',
     emptyOutDir: true,
+    assetsDir: 'frontend-assets',
   }
 })

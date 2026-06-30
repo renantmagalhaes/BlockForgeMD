@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import {
   FileText,
   CheckSquare,
@@ -346,6 +346,8 @@ export const App: React.FC = () => {
     return saved ? JSON.parse(saved) : ['Todo', 'In Progress', 'Done']
   })
 
+  const subpageCallbackRef = useRef<((newPath: string, title: string) => string) | null>(null)
+
   const [createModal, setCreateModal] = useState<{
     isOpen: boolean
     type: 'document' | 'task' | 'canvas' | 'board' | 'diagram' | null
@@ -469,7 +471,12 @@ export const App: React.FC = () => {
     } catch (e) { console.error('Error updating board columns', e) }
   }
 
-  const handleCreateFile = (type: 'document' | 'task' | 'canvas' | 'board' | 'diagram' | null, parentPath?: string) => {
+  const handleCreateFile = (
+    type: 'document' | 'task' | 'canvas' | 'board' | 'diagram' | null,
+    parentPath?: string,
+    onCreated?: (newPath: string, title: string) => string
+  ) => {
+    subpageCallbackRef.current = onCreated || null
     setCreateModal({ isOpen: true, type, parentPath })
     setCreateNameInput('')
   }
@@ -509,6 +516,20 @@ export const App: React.FC = () => {
         body: JSON.stringify({ path, content }),
       })
       if (!res.ok) throw new Error('Failed to create file')
+
+      // Save parent link first if subpage was created via editor command
+      if (subpageCallbackRef.current && selectedPath) {
+        const callback = subpageCallbackRef.current
+        subpageCallbackRef.current = null
+        const parentNewContent = callback(path, title)
+        const saveRes = await fetch(`${API_BASE}/api/file`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: selectedPath, content: parentNewContent }),
+        })
+        if (!saveRes.ok) console.warn('Failed to auto-save parent file with subpage link')
+      }
+
       setCreateModal({ isOpen: false, type: null })
       setCreateNameInput('')
       fetchFiles()
@@ -681,7 +702,9 @@ export const App: React.FC = () => {
                   frontMatter={activeFile?.frontMatter}
                   onUpdateFrontMatter={(updates) => handleUpdateFrontMatter(selectedPath, updates)}
                   boardColumns={defaultColumns}
-                  onCreateSubPage={(parentPath) => handleCreateFile('document', parentPath)}
+                  onCreateSubPage={(parentPath, onCreated) => handleCreateFile('document', parentPath, onCreated)}
+                  onSelectFile={fetchFileContent}
+                  files={files}
                 />
               )}
             </div>

@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
+import Link from '@tiptap/extension-link'
+import Image from '@tiptap/extension-image'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { Table } from '@tiptap/extension-table'
@@ -30,7 +32,10 @@ import {
   AlertCircle,
   Hash,
   Activity,
-  Plus
+  Plus,
+  FileText,
+  LayoutGrid,
+  Brush
 } from 'lucide-react'
 
 // Configure Turndown for clean Markdown serialization
@@ -83,6 +88,15 @@ turndownService.addRule('tables', {
   }
 })
 
+interface FileRecord {
+  path: string
+  title: string
+  type: string
+  contentHash: string
+  updatedAt: string
+  frontMatter?: Record<string, string>
+}
+
 interface EditorProps {
   filePath: string
   initialContent: string
@@ -91,7 +105,9 @@ interface EditorProps {
   frontMatter?: Record<string, string>
   onUpdateFrontMatter?: (updates: Record<string, any>) => Promise<void>
   boardColumns: string[]
-  onCreateSubPage?: (parentPath: string) => void
+  onCreateSubPage?: (parentPath: string, onCreated: (newPath: string, title: string) => string) => void
+  onSelectFile?: (path: string) => void
+  files: FileRecord[]
 }
 
 interface HistoryVersion {
@@ -125,6 +141,8 @@ export const Editor: React.FC<EditorProps> = ({
   onUpdateFrontMatter,
   boardColumns,
   onCreateSubPage,
+  onSelectFile,
+  files,
 }) => {
   // Slash command states
   const [commandActive, setCommandActive] = useState(false)
@@ -144,10 +162,20 @@ export const Editor: React.FC<EditorProps> = ({
   // Tag manager input state
   const [newTagInput, setNewTagInput] = useState('')
 
+  // Mention states
+  const [mentionActive, setMentionActive] = useState(false)
+  const [mentionQuery, setMentionQuery] = useState('')
+  const [mentionCoords, setMentionCoords] = useState({ top: 0, left: 0 })
+  const [mentionSelectedIndex, setMentionSelectedIndex] = useState(0)
+
   // Avoid stale closures in TipTap callback handlers via refs
   const commandActiveRef = useRef(commandActive)
   const selectedIndexRef = useRef(selectedIndex)
   const commandQueryRef = useRef(commandQuery)
+
+  const mentionActiveRef = useRef(mentionActive)
+  const mentionSelectedIndexRef = useRef(mentionSelectedIndex)
+  const mentionQueryRef = useRef(mentionQuery)
 
   const getHTMLFromMarkdown = (markdown: string) => {
     if (!markdown.trim()) return '<p></p>'
@@ -159,6 +187,17 @@ export const Editor: React.FC<EditorProps> = ({
     extensions: [
       StarterKit.configure({
         codeBlock: false,
+      }),
+      Link.configure({
+        openOnClick: false,
+        HTMLAttributes: {
+          class: 'mention-link text-violet-400 font-semibold underline hover:text-violet-300 cursor-pointer',
+        },
+      }),
+      Image.configure({
+        HTMLAttributes: {
+          class: 'max-w-full rounded-xl border border-slate-800 shadow-lg my-4',
+        },
       }),
       TaskList,
       TaskItem.configure({
@@ -176,32 +215,103 @@ export const Editor: React.FC<EditorProps> = ({
       attributes: {
         class: 'prose prose-invert max-w-none focus:outline-none min-h-[450px] text-slate-200 px-4 py-2',
       },
+      handlePaste: (_view, event) => {
+        const items = event.clipboardData?.items
+        if (!items) return false
+        let hasImage = false
+        for (let i = 0; i < items.length; i++) {
+          if (items[i].type.indexOf('image') !== -1) {
+            const file = items[i].getAsFile()
+            if (file) {
+              hasImage = true
+              uploadImageAndInsert(file)
+            }
+          }
+        }
+        return hasImage
+      },
+      handleDrop: (_view, event, _slice, moved) => {
+        if (moved) return false
+        const files = event.dataTransfer?.files
+        if (!files || files.length === 0) return false
+        let hasImage = false
+        for (let i = 0; i < files.length; i++) {
+          if (files[i].type.indexOf('image') !== -1) {
+            hasImage = true
+            uploadImageAndInsert(files[i])
+          }
+        }
+        return hasImage
+      },
+      handleClick: (view, _pos, event) => {
+        let target = event.target as HTMLElement | null
+        while (target && target !== view.dom) {
+          if (target.nodeName === 'A') {
+            const href = target.getAttribute('href')
+            if (href) {
+              event.preventDefault()
+              event.stopPropagation()
+              onSelectFile?.(href)
+              return true
+            }
+          }
+          target = target.parentElement
+        }
+        return false
+      },
       handleKeyDown: (_view, event) => {
-        if (!commandActiveRef.current) return false
+        if (commandActiveRef.current) {
+          const filtered = getFilteredCommands()
+          if (filtered.length > 0) {
+            if (event.key === 'ArrowDown') {
+              event.preventDefault()
+              setSelectedIndex((prev) => (prev + 1) % filtered.length)
+              return true
+            }
+            if (event.key === 'ArrowUp') {
+              event.preventDefault()
+              setSelectedIndex((prev) => (prev - 1 + filtered.length) % filtered.length)
+              return true
+            }
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              executeCommand(filtered[selectedIndexRef.current].id)
+              return true
+            }
+            if (event.key === 'Escape') {
+              event.preventDefault()
+              setCommandActive(false)
+              return true
+            }
+          }
+        }
 
-        const filtered = getFilteredCommands()
-        if (filtered.length === 0) return false
+        if (mentionActiveRef.current) {
+          const filtered = getFilteredMentions()
+          if (filtered.length > 0) {
+            if (event.key === 'ArrowDown') {
+              event.preventDefault()
+              setMentionSelectedIndex((prev) => (prev + 1) % filtered.length)
+              return true
+            }
+            if (event.key === 'ArrowUp') {
+              event.preventDefault()
+              setMentionSelectedIndex((prev) => (prev - 1 + filtered.length) % filtered.length)
+              return true
+            }
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              executeMention(filtered[mentionSelectedIndexRef.current])
+              return true
+            }
+            if (event.key === 'Escape') {
+              event.preventDefault()
+              setMentionActive(false)
+              return true
+            }
+          }
+        }
 
-        if (event.key === 'ArrowDown') {
-          event.preventDefault()
-          setSelectedIndex((prev) => (prev + 1) % filtered.length)
-          return true
-        }
-        if (event.key === 'ArrowUp') {
-          event.preventDefault()
-          setSelectedIndex((prev) => (prev - 1 + filtered.length) % filtered.length)
-          return true
-        }
-        if (event.key === 'Enter') {
-          event.preventDefault()
-          executeCommand(filtered[selectedIndexRef.current].id)
-          return true
-        }
-        if (event.key === 'Escape') {
-          event.preventDefault()
-          setCommandActive(false)
-          return true
-        }
         return false
       }
     },
@@ -215,9 +325,13 @@ export const Editor: React.FC<EditorProps> = ({
     commandActiveRef.current = commandActive
     selectedIndexRef.current = selectedIndex
     commandQueryRef.current = commandQuery
+
+    mentionActiveRef.current = mentionActive
+    mentionSelectedIndexRef.current = mentionSelectedIndex
+    mentionQueryRef.current = mentionQuery
   })
 
-  // Watch for text patterns (e.g. typing /)
+  // Watch for text patterns (e.g. typing / or @)
   useEffect(() => {
     if (!editor) return
 
@@ -225,24 +339,38 @@ export const Editor: React.FC<EditorProps> = ({
       const { selection } = editor.state
       const textBeforeCursor = editor.state.doc.textBetween(
         Math.max(0, selection.from - 20),
-        selection.from
+        selection.from,
+        '\n'
       )
       
-      const match = textBeforeCursor.match(/\/([a-zA-Z0-9]*)$/)
-      if (match) {
+      const slashMatch = textBeforeCursor.match(/(?:^|\s)\/([a-zA-Z0-9]*)$/)
+      const mentionMatch = textBeforeCursor.match(/(?:^|\s)@([a-zA-Z0-9\s-]*)$/)
+
+      if (slashMatch) {
         setCommandActive(true)
-        setCommandQuery(match[1])
+        setCommandQuery(slashMatch[1])
+        setMentionActive(false)
         try {
           const coords = editor.view.coordsAtPos(selection.from)
           setCommandCoords({
             top: coords.bottom + 8,
             left: coords.left,
           })
-        } catch (e) {
-          // Fallback positioning
-        }
+        } catch (e) {}
+      } else if (mentionMatch) {
+        setMentionActive(true)
+        setMentionQuery(mentionMatch[1])
+        setCommandActive(false)
+        try {
+          const coords = editor.view.coordsAtPos(selection.from)
+          setMentionCoords({
+            top: coords.bottom + 8,
+            left: coords.left,
+          })
+        } catch (e) {}
       } else {
         setCommandActive(false)
+        setMentionActive(false)
       }
     }
 
@@ -352,6 +480,26 @@ export const Editor: React.FC<EditorProps> = ({
     }
   }
 
+  const uploadImageAndInsert = async (file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+
+    try {
+      const res = await fetch(`${API_BASE}/api/upload?notePath=${encodeURIComponent(filePath)}`, {
+        method: 'POST',
+        body: formData,
+      })
+      if (!res.ok) throw new Error('Upload failed')
+      const data = await res.json()
+      if (data.url && editor) {
+        editor.chain().focus().setImage({ src: data.url }).run()
+      }
+    } catch (e) {
+      console.error('Failed to upload pasted/dropped image', e)
+      alert('Failed to upload image to assets directory.')
+    }
+  }
+
   const getFilteredCommands = () => {
     const query = commandQuery.toLowerCase()
     return COMMANDS.filter(
@@ -410,11 +558,58 @@ export const Editor: React.FC<EditorProps> = ({
         } else if (parentPath.endsWith('.md')) {
           parentPath = parentPath.slice(0, -3)
         }
-        onCreateSubPage?.(parentPath)
+        onCreateSubPage?.(parentPath, (newFilePath: string, newTitle: string) => {
+          editor.chain()
+            .focus()
+            .insertContent(`<a href="${newFilePath}">${newTitle}</a> `)
+            .run()
+          const html = editor.getHTML()
+          const markdown = turndownService.turndown(html)
+          return markdown
+        })
         break
       }
     }
     setCommandActive(false)
+  }
+
+  const getFileIcon = (type: string) => {
+    switch (type) {
+      case 'task':   return <CheckSquare size={13} className="text-amber-500 shrink-0" />
+      case 'canvas': return <Brush size={13} className="text-emerald-400 shrink-0" />
+      case 'board':  return <LayoutGrid size={13} className="text-violet-400 shrink-0" />
+      default:       return <FileText size={13} className="text-blue-400 shrink-0" />
+    }
+  }
+
+  const getFilteredMentions = () => {
+    const query = mentionQuery.toLowerCase().trim()
+    const otherFiles = files.filter(f => f.path !== filePath)
+    if (!query) return otherFiles
+    return otherFiles.filter(
+      (f) =>
+        f.title.toLowerCase().includes(query) ||
+        f.path.toLowerCase().includes(query)
+    )
+  }
+
+  const executeMention = (file: FileRecord) => {
+    if (!editor) return
+
+    const { selection } = editor.state
+    const queryLength = mentionQuery.length + 1 // +1 for the '@'
+
+    editor.chain()
+      .focus()
+      .deleteRange({ from: selection.from - queryLength, to: selection.from })
+      .run()
+
+    editor.chain()
+      .focus()
+      .insertContent(`<a href="${file.path}">${file.title || file.path.split('/').pop() || 'Untitled'}</a> `)
+      .run()
+
+    setMentionActive(false)
   }
 
   // Tags Array helper
@@ -847,6 +1042,59 @@ export const Editor: React.FC<EditorProps> = ({
               </div>
             )
           })}
+        </div>
+      )}
+
+      {/* Floating Mention Popup Menu */}
+      {mentionActive && getFilteredMentions().length > 0 && (
+        <div
+          style={{
+            position: 'fixed',
+            top: `${mentionCoords.top}px`,
+            left: `${mentionCoords.left}px`,
+            zIndex: 9999,
+          }}
+          className="w-80 max-h-72 overflow-y-auto bg-[#161b22] border border-slate-700/80 rounded-xl shadow-2xl p-1.5 flex flex-col space-y-0.5 no-scrollbar select-none animate-in fade-in zoom-in-95 duration-100"
+        >
+          <div className="px-2.5 py-1.5 text-[9px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-800/40 mb-1">
+            Link to Page
+          </div>
+          {getFilteredMentions().map((file, i) => {
+            const isSelected = i === mentionSelectedIndex
+            const icon = getFileIcon(file.type)
+            return (
+              <div
+                key={file.path}
+                onClick={() => executeMention(file)}
+                onMouseEnter={() => setMentionSelectedIndex(i)}
+                className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer transition ${
+                  isSelected ? 'bg-violet-600/15 text-violet-300 border border-violet-500/20' : 'text-slate-300 hover:bg-slate-800/40'
+                }`}
+              >
+                <div className="shrink-0">
+                  {icon}
+                </div>
+                <div className="flex flex-col min-w-0">
+                  <span className="text-xs font-semibold truncate">{file.title || file.path.split('/').pop() || 'Untitled'}</span>
+                  <span className="text-[9px] text-slate-500 font-mono truncate">{file.path}</span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {mentionActive && getFilteredMentions().length === 0 && (
+        <div
+          style={{
+            position: 'fixed',
+            top: `${mentionCoords.top}px`,
+            left: `${mentionCoords.left}px`,
+            zIndex: 9999,
+          }}
+          className="w-80 bg-[#161b22] border border-slate-700/80 rounded-xl shadow-2xl p-3 text-center text-slate-500 text-xs select-none"
+        >
+          No matching pages found
         </div>
       )}
     </div>

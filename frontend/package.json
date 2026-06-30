@@ -13,6 +13,8 @@
     "@excalidraw/excalidraw": "^0.18.1",
     "@hello-pangea/dnd": "^18.0.1",
     "@tailwindcss/vite": "^4.3.2",
+    "@tiptap/extension-image": "^3.27.1",
+    "@tiptap/extension-link": "^3.27.1",
     "@tiptap/extension-table": "^3.27.1",
     "@tiptap/extension-table-cell": "^3.27.1",
     "@tiptap/extension-table-header": "^3.27.1",
