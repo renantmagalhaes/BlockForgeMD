@@ -350,9 +350,46 @@ const CalloutComponent = (props: any) => {
   const [labelValue, setLabelValue] = useState(label)
   const labelInputRef = useRef<HTMLInputElement>(null)
 
+  const emojiPickerRef = useRef<HTMLDivElement>(null)
+  const colorPickerRef = useRef<HTMLDivElement>(null)
+
   // Sync label from props
   React.useEffect(() => { setLabelValue(label) }, [label])
   React.useEffect(() => { if (editingLabel) labelInputRef.current?.focus() }, [editingLabel])
+
+  // Handle click outside & escape key
+  useEffect(() => {
+    if (!emojiPickerOpen && !colorPickerOpen) return
+
+    const handleMouseDown = (e: MouseEvent) => {
+      if (emojiPickerOpen && emojiPickerRef.current && !emojiPickerRef.current.contains(e.target as any)) {
+        const trigger = e.target as HTMLElement
+        if (!trigger.closest('[title="Change emoji"]')) {
+          setEmojiPickerOpen(false)
+        }
+      }
+      if (colorPickerOpen && colorPickerRef.current && !colorPickerRef.current.contains(e.target as any)) {
+        const trigger = e.target as HTMLElement
+        if (!trigger.closest('[title="Change color"]')) {
+          setColorPickerOpen(false)
+        }
+      }
+    }
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setEmojiPickerOpen(false)
+        setColorPickerOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleMouseDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [emojiPickerOpen, colorPickerOpen])
 
   const bg = hexToRgba(color, 0.07)
   const textColor = color
@@ -459,6 +496,7 @@ const CalloutComponent = (props: any) => {
         {/* Emoji picker dropdown */}
         {emojiPickerOpen && (
           <div
+            ref={emojiPickerRef}
             style={{
               position: 'absolute', top: '100%', left: 0, zIndex: 9999,
               boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
@@ -479,6 +517,7 @@ const CalloutComponent = (props: any) => {
         {/* Color picker dropdown */}
         {colorPickerOpen && (
           <div
+            ref={colorPickerRef}
             style={{
               position: 'absolute', top: '100%', left: 0, zIndex: 9999,
               background: '#161b22', border: '1px solid #30363d',
@@ -1340,6 +1379,7 @@ export const Editor: React.FC<EditorProps> = ({
   const emojiActiveRef = useRef(emojiActive)
   const emojiSelectedIndexRef = useRef(emojiSelectedIndex)
   const emojiQueryRef = useRef(emojiQuery)
+  const inlineEmojiPickerRef = useRef<HTMLDivElement>(null)
 
   // Link paste non-blocking toast state
   const [pasteInfo, setPasteInfo] = useState<{ url: string; from: number; to: number; x: number; y: number } | null>(null)
@@ -1370,6 +1410,30 @@ export const Editor: React.FC<EditorProps> = ({
       document.removeEventListener('mousedown', handler)
     }
   }, [pasteInfo])
+
+  // Click outside & Escape key to close inline emoji picker
+  useEffect(() => {
+    if (!emojiActive) return
+    const handleMouseDown = (e: MouseEvent) => {
+      if (inlineEmojiPickerRef.current && !inlineEmojiPickerRef.current.contains(e.target as any)) {
+        setEmojiActive(false)
+      }
+    }
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setEmojiActive(false)
+      }
+    }
+    const t = setTimeout(() => {
+      document.addEventListener('mousedown', handleMouseDown)
+      document.addEventListener('keydown', handleKeyDown)
+    }, 50)
+    return () => {
+      clearTimeout(t)
+      document.removeEventListener('mousedown', handleMouseDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [emojiActive])
 
   const toEmbedUrl = (url: string) => {
     // YouTube Watch URLs
@@ -1561,6 +1625,11 @@ export const Editor: React.FC<EditorProps> = ({
             }
           }
           if (target.nodeName === 'IMG') {
+            // Skip images inside the emoji picker or callout header
+            if (target.closest('.epr-main') || target.closest('[data-callout]')) {
+              target = target.parentElement
+              continue
+            }
             const src = target.getAttribute('src')
             if (src) {
               event.preventDefault()
@@ -2636,35 +2705,26 @@ export const Editor: React.FC<EditorProps> = ({
       )}
 
       {/* Floating Emoji Suggestions Popup Menu */}
-      {emojiActive && getFilteredEmojis().length > 0 && (
+      {emojiActive && (
         <div
+          ref={inlineEmojiPickerRef}
           style={{
             position: 'fixed',
             top: `${emojiCoords.top}px`,
             left: `${emojiCoords.left}px`,
             zIndex: 9999,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
           }}
-          className="w-56 max-h-72 overflow-y-auto bg-[#161b22] border border-slate-700/80 rounded-xl shadow-2xl p-1.5 flex flex-col space-y-0.5 no-scrollbar select-none animate-in fade-in zoom-in-95 duration-100"
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
         >
-          <div className="px-2.5 py-1.5 text-[9px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-800/40 mb-1">
-            Emoji Matches
-          </div>
-          {getFilteredEmojis().map((emojiItem, i) => {
-            const isSelected = i === emojiSelectedIndex
-            return (
-              <div
-                key={emojiItem.char}
-                onClick={() => executeEmoji(emojiItem.char)}
-                onMouseEnter={() => setEmojiSelectedIndex(i)}
-                className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg cursor-pointer transition ${
-                  isSelected ? 'bg-violet-600/15 text-violet-300 border border-violet-500/20' : 'text-slate-300 hover:bg-slate-800/40'
-                }`}
-              >
-                <span className="text-lg leading-none shrink-0">{emojiItem.char}</span>
-                <span className="text-xs font-medium truncate text-slate-400">:{emojiItem.name.split(' ')[0]}:</span>
-              </div>
-            )
-          })}
+          <EmojiPicker
+            theme={Theme.DARK}
+            lazyLoadEmojis={true}
+            onEmojiClick={(emojiData) => {
+              executeEmoji(emojiData.emoji)
+            }}
+          />
         </div>
       )}
 
