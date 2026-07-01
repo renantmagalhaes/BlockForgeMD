@@ -1,5 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react'
-import { useEditor, EditorContent } from '@tiptap/react'
+import { useEditor, EditorContent, NodeViewWrapper, ReactNodeViewRenderer } from '@tiptap/react'
+import { Node, mergeAttributes } from '@tiptap/core'
+import { Excalidraw } from '@excalidraw/excalidraw'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
 import Image from '@tiptap/extension-image'
@@ -36,7 +38,11 @@ import {
   Plus,
   FileText,
   LayoutGrid,
-  Brush
+  Brush,
+  Maximize2,
+  AlignLeft,
+  AlignCenter,
+  ArrowLeftRight
 } from 'lucide-react'
 
 // Configure Turndown for clean Markdown serialization
@@ -89,6 +95,413 @@ turndownService.addRule('tables', {
   }
 })
 
+// Custom rule for iframes in Turndown
+turndownService.addRule('iframe', {
+  filter: (node) => node.nodeName.toLowerCase() === 'iframe',
+  replacement: (_content, node) => {
+    const src = (node as HTMLElement).getAttribute('src') || ''
+    const width = (node as HTMLElement).getAttribute('width') || '100%'
+    const height = (node as HTMLElement).getAttribute('height') || '450px'
+    const frameborder = (node as HTMLElement).getAttribute('frameborder') || '0'
+    const allowfullscreen = (node as HTMLElement).getAttribute('allowfullscreen') || 'true'
+    return `\n<iframe src="${src}" width="${width}" height="${height}" frameborder="${frameborder}" allowfullscreen="${allowfullscreen}"></iframe>\n`
+  }
+})
+
+// Custom rule for draw.io embeds in Turndown
+turndownService.addRule('drawio', {
+  filter: (node) => node.nodeName.toLowerCase() === 'drawio',
+  replacement: (_content, node) => {
+    const path = (node as HTMLElement).getAttribute('path') || ''
+    return `\n<drawio path="${path}">drawio-canvas</drawio>\n`
+  }
+})
+
+// Custom rule for excalidraw embeds in Turndown
+turndownService.addRule('excalidraw', {
+  filter: (node) => node.nodeName.toLowerCase() === 'excalidraw',
+  replacement: (_content, node) => {
+    const path = (node as HTMLElement).getAttribute('path') || ''
+    return `\n<excalidraw path="${path}">excalidraw-canvas</excalidraw>\n`
+  }
+})
+
+const IframeViewerComponent = (props: any) => {
+  const { src, width, height } = props.node.attrs
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [isResizing, setIsResizing] = useState(false)
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault()
+    setIsResizing(true)
+  }
+
+  useEffect(() => {
+    if (!isResizing) return
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!containerRef.current) return
+      const rect = containerRef.current.getBoundingClientRect()
+      
+      const newWidth = Math.max(200, Math.min(e.clientX - rect.left, window.innerWidth - rect.left - 40))
+      const newHeight = Math.max(150, e.clientY - rect.top)
+
+      props.updateAttributes({
+        width: `${newWidth}px`,
+        height: `${newHeight}px`
+      })
+    }
+
+    const handleMouseUp = () => {
+      setIsResizing(false)
+    }
+
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [isResizing, props])
+
+  return (
+    <NodeViewWrapper 
+      ref={containerRef}
+      style={{ width: width || '100%', height: height || '450px' }}
+      className="iframe-embed my-4 border border-slate-800 rounded-xl overflow-hidden shadow-lg bg-[#0d1117] relative group flex flex-col"
+    >
+      {/* Header bar */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-slate-800 bg-[#161b22]/50 select-none h-9 shrink-0">
+        <div className="flex items-center space-x-2">
+          <span className="text-violet-400">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
+            </svg>
+          </span>
+          <span className="text-xs font-semibold text-slate-350 truncate">Embedded Web Frame: {src}</span>
+        </div>
+      </div>
+
+      {/* Frame wrapper container */}
+      <div className="relative w-full flex-1 min-w-[200px] min-h-[110px]">
+        {isResizing && <div className="absolute inset-0 z-10 bg-transparent" />}
+
+        <iframe
+          src={src}
+          className="w-full h-full border-none"
+          title="Iframe Embed"
+          allowFullScreen
+        />
+
+        {/* Resize handle */}
+        <div
+          onMouseDown={handleMouseDown}
+          className="absolute bottom-1 right-1 w-4 h-4 cursor-se-resize flex items-end justify-end p-0.5 z-20 hover:scale-110 active:scale-95 transition"
+        >
+          <svg className="w-3.5 h-3.5 text-slate-400 hover:text-violet-400" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 19H5m14-6H11m8-6h-5" />
+          </svg>
+        </div>
+      </div>
+    </NodeViewWrapper>
+  )
+}
+
+export const IframeNode = Node.create({
+  name: 'iframe',
+  group: 'block',
+  selectable: true,
+  draggable: true,
+  atom: true,
+
+  addAttributes() {
+    return {
+      src: {
+        default: null,
+      },
+      width: {
+        default: '100%',
+      },
+      height: {
+        default: '450px',
+      },
+      frameborder: {
+        default: '0',
+      },
+      allowfullscreen: {
+        default: 'true',
+      }
+    }
+  },
+
+  parseHTML() {
+    return [
+      {
+        tag: 'iframe',
+      },
+    ]
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ['iframe', mergeAttributes(HTMLAttributes)]
+  },
+
+  addNodeView() {
+    return ReactNodeViewRenderer(IframeViewerComponent)
+  },
+})
+
+const DrawioViewerComponent = (props: any) => {
+  const filePath = props.node.attrs.path
+  const [xml, setXml] = useState<string | null>(null)
+  const iframeRef = useRef<HTMLIFrameElement>(null)
+
+  useEffect(() => {
+    if (!filePath) return
+    // Fetch the canvas file content to extract Draw.io XML
+    fetch(`/api/file?path=${encodeURIComponent(filePath)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && data.content) {
+          const codeBlockMatch = data.content.match(/```xml\n([\s\S]*?)\n```/)
+          if (codeBlockMatch && codeBlockMatch[1]) {
+            setXml(codeBlockMatch[1].trim())
+          }
+        }
+      })
+      .catch((err) => console.error('Failed to load embedded draw.io file', err))
+  }, [filePath])
+
+  useEffect(() => {
+    if (!xml) return
+
+    const handleMessage = (e: MessageEvent) => {
+      if (
+        e.origin !== 'https://embed.diagrams.net' &&
+        e.origin !== 'https://app.diagrams.net' &&
+        e.origin !== 'https://viewer.diagrams.net'
+      ) {
+        return
+      }
+      try {
+        const data = JSON.parse(e.data)
+        if (data.event === 'init') {
+          iframeRef.current?.contentWindow?.postMessage(
+            JSON.stringify({
+              action: 'load',
+              xml: xml,
+            }),
+            '*'
+          )
+        }
+      } catch (err) {
+        // Ignore
+      }
+    }
+
+    window.addEventListener('message', handleMessage)
+    return () => {
+      window.removeEventListener('message', handleMessage)
+    }
+  }, [xml])
+
+  return (
+    <NodeViewWrapper className="drawio-embed my-4 border border-slate-800 rounded-xl overflow-hidden shadow-lg bg-[#0d1117] text-slate-200">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-slate-800 bg-[#161b22]/50">
+        <div className="flex items-center space-x-2 select-none">
+          <span className="text-violet-400">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
+            </svg>
+          </span>
+          <span className="text-xs font-semibold text-slate-350 truncate">Embedded Draw.io Canvas: {filePath ? filePath.split('/').pop() : 'Untitled'}</span>
+        </div>
+        <a
+          href={`/${filePath}`}
+          onClick={(e) => {
+            e.preventDefault();
+            props.extension.options.onSelectFile?.(filePath)
+          }}
+          className="text-[10px] text-violet-400 hover:text-violet-300 font-bold underline transition cursor-pointer select-none"
+        >
+          Edit Canvas
+        </a>
+      </div>
+      <div className="relative w-full h-[400px] bg-[#121212]">
+        <iframe
+          ref={iframeRef}
+          src="https://viewer.diagrams.net/?embed=1&ui=dark&spin=1&proto=json"
+          className="w-full h-full border-none"
+          title="Draw.io Embedded Viewer"
+        />
+      </div>
+    </NodeViewWrapper>
+  )
+}
+
+export const DrawioNode = Node.create({
+  name: 'drawio',
+  group: 'block',
+  selectable: true,
+  draggable: true,
+  atom: true,
+
+  addOptions() {
+    return {
+      onSelectFile: null,
+    }
+  },
+
+  addAttributes() {
+    return {
+      path: {
+        default: null,
+      },
+    }
+  },
+
+  parseHTML() {
+    return [
+      {
+        tag: 'drawio',
+      },
+    ]
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ['drawio', mergeAttributes(HTMLAttributes), 'drawio-canvas']
+  },
+
+  addNodeView() {
+    return ReactNodeViewRenderer(DrawioViewerComponent)
+  },
+})
+
+const ExcalidrawViewerComponent = (props: any) => {
+  const filePath = props.node.attrs.path
+  const [elements, setElements] = useState<any[]>([])
+  const [appState, setAppState] = useState<any>({ theme: 'dark', viewBackgroundColor: '#121212' })
+  const [isLoaded, setIsLoaded] = useState(false)
+  const excalidrawRef = useRef<any>(null)
+
+  useEffect(() => {
+    if (!filePath) return
+    fetch(`/api/file?path=${encodeURIComponent(filePath)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && data.content) {
+          const codeBlockMatch = data.content.match(/```json\n([\s\S]*?)\n```/)
+          if (codeBlockMatch && codeBlockMatch[1]) {
+            const parsed = JSON.parse(codeBlockMatch[1])
+            if (parsed && Array.isArray(parsed.elements)) {
+              setElements(parsed.elements)
+              if (parsed.appState) {
+                setAppState({ ...parsed.appState, theme: 'dark' })
+              }
+            }
+          }
+        }
+        setIsLoaded(true)
+      })
+      .catch((err) => console.error('Failed to load embedded excalidraw file', err))
+  }, [filePath])
+
+  useEffect(() => {
+    if (isLoaded && elements.length > 0 && excalidrawRef.current) {
+      const hasCustomScroll = appState.scrollX !== undefined && appState.scrollX !== 0
+      const hasCustomZoom = appState.zoom && appState.zoom.value !== undefined && appState.zoom.value !== 1
+      
+      if (!hasCustomScroll && !hasCustomZoom) {
+        const timer = setTimeout(() => {
+          excalidrawRef.current?.scrollToContent()
+        }, 250)
+        return () => clearTimeout(timer)
+      }
+    }
+  }, [isLoaded, elements, appState])
+
+  return (
+    <NodeViewWrapper className="excalidraw-embed my-4 border border-slate-800 rounded-xl overflow-hidden shadow-lg bg-[#0d1117] text-slate-200">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-slate-800 bg-[#161b22]/50">
+        <div className="flex items-center space-x-2 select-none">
+          <span className="text-violet-400">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+            </svg>
+          </span>
+          <span className="text-xs font-semibold text-slate-350 truncate">Embedded Excalidraw Canvas: {filePath ? filePath.split('/').pop() : 'Untitled'}</span>
+        </div>
+        <a
+          href={`/${filePath}`}
+          onClick={(e) => {
+            e.preventDefault();
+            props.extension.options.onSelectFile?.(filePath)
+          }}
+          className="text-[10px] text-violet-400 hover:text-violet-300 font-bold underline transition cursor-pointer select-none"
+        >
+          Edit Canvas
+        </a>
+      </div>
+      <div className="relative w-full h-[400px] bg-[#121212] flex items-center justify-center">
+        {!isLoaded ? (
+          <div className="text-xs text-slate-500 select-none">Loading Excalidraw viewer...</div>
+        ) : (
+          <Excalidraw
+            excalidrawAPI={(api: any) => {
+              excalidrawRef.current = api
+            }}
+            viewModeEnabled={true}
+            initialData={{
+              elements,
+              appState: { ...appState, theme: 'dark' },
+            }}
+            theme="dark"
+          />
+        )}
+      </div>
+    </NodeViewWrapper>
+  )
+}
+
+export const ExcalidrawNode = Node.create({
+  name: 'excalidraw',
+  group: 'block',
+  selectable: true,
+  draggable: true,
+  atom: true,
+
+  addOptions() {
+    return {
+      onSelectFile: null,
+    }
+  },
+
+  addAttributes() {
+    return {
+      path: {
+        default: null,
+      },
+    }
+  },
+
+  parseHTML() {
+    return [
+      {
+        tag: 'excalidraw',
+      },
+    ]
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ['excalidraw', mergeAttributes(HTMLAttributes), 'excalidraw-canvas']
+  },
+
+  addNodeView() {
+    return ReactNodeViewRenderer(ExcalidrawViewerComponent)
+  },
+})
+
 interface FileRecord {
   path: string
   title: string
@@ -109,6 +522,8 @@ interface EditorProps {
   onCreateSubPage?: (parentPath: string, onCreated: (newPath: string, title: string) => string) => void
   onSelectFile?: (path: string) => void
   files: FileRecord[]
+  globalLayoutOverride?: string
+  globalColumnWidthOverride?: string
 }
 
 interface HistoryVersion {
@@ -131,6 +546,7 @@ const COMMANDS = [
   { id: 'table', label: 'Table Grid', desc: 'Insert a 2x2 grid table', search: 'table grid columns cell' },
   { id: 'code', label: 'Code Block', desc: 'Monospace fenced code block', search: 'code block script pre' },
   { id: 'subpage', label: 'Sub-page', desc: 'Create a sub-page inside this page', search: 'subpage sub page child nested' },
+  { id: 'embed', label: 'Embed Link / Canvas', desc: 'Embed a website link, iframe, or Draw.io canvas', search: 'embed iframe link website canvas drawio' },
 ]
 
 export const Editor: React.FC<EditorProps> = ({
@@ -144,6 +560,8 @@ export const Editor: React.FC<EditorProps> = ({
   onCreateSubPage,
   onSelectFile,
   files,
+  globalLayoutOverride,
+  globalColumnWidthOverride,
 }) => {
   // Slash command states
   const [commandActive, setCommandActive] = useState(false)
@@ -165,6 +583,69 @@ export const Editor: React.FC<EditorProps> = ({
 
   // Image Viewer & Editor state
   const [editingImageSrc, setEditingImageSrc] = useState<string | null>(null)
+
+  // Embed states
+  const [embedModalOpen, setEmbedModalOpen] = useState(false)
+  const [embedType, setEmbedType] = useState<'url' | 'drawio'>('url')
+  const [embedUrl, setEmbedUrl] = useState('')
+  const [selectedCanvasPath, setSelectedCanvasPath] = useState('')
+
+  // Layout state (left, center, full)
+  const [localLayout, setLocalLayout] = useState<'left' | 'center' | 'full'>('left')
+  const pageLayout = frontMatter && onUpdateFrontMatter
+    ? (frontMatter.layout as 'left' | 'center' | 'full' || 'left')
+    : localLayout
+
+  // Apply global layout override if set
+  const layout = globalLayoutOverride && globalLayoutOverride !== 'per-page'
+    ? (globalLayoutOverride as 'left' | 'center' | 'full')
+    : pageLayout
+
+  const cycleLayout = async () => {
+    let nextLayout: 'left' | 'center' | 'full' = 'left'
+    if (pageLayout === 'left') nextLayout = 'center'
+    else if (pageLayout === 'center') nextLayout = 'full'
+    else nextLayout = 'left'
+
+    if (frontMatter && onUpdateFrontMatter) {
+      await onUpdateFrontMatter({ layout: nextLayout })
+    } else {
+      setLocalLayout(nextLayout)
+    }
+  }
+
+  // Column width / lateral margins state (narrow, normal, wide) for left & center aligned modes
+  const [localColumnWidth, setLocalColumnWidth] = useState<'narrow' | 'normal' | 'wide'>('normal')
+  const pageColumnWidth = frontMatter && onUpdateFrontMatter
+    ? (frontMatter.columnWidth as 'narrow' | 'normal' | 'wide' || 'normal')
+    : localColumnWidth
+
+  // Apply global column width override if set
+  const columnWidth = globalColumnWidthOverride && globalColumnWidthOverride !== 'per-page'
+    ? (globalColumnWidthOverride as 'narrow' | 'normal' | 'wide')
+    : pageColumnWidth
+
+  const cycleColumnWidth = async () => {
+    let nextWidth: 'narrow' | 'normal' | 'wide' = 'normal'
+    if (columnWidth === 'narrow') nextWidth = 'normal'
+    else if (columnWidth === 'normal') nextWidth = 'wide'
+    else nextWidth = 'narrow'
+
+    if (frontMatter && onUpdateFrontMatter) {
+      await onUpdateFrontMatter({ columnWidth: nextWidth })
+    } else {
+      setLocalColumnWidth(nextWidth)
+    }
+  }
+
+  const getWidthClass = () => {
+    if (layout === 'full') return 'max-w-none w-full'
+    const widthKey = columnWidth === 'narrow' ? 'max-w-2xl' :
+                     columnWidth === 'wide' ? 'max-w-6xl' :
+                     'max-w-4xl'
+    if (layout === 'center') return `${widthKey} mx-auto w-full`
+    return widthKey
+  }
 
   // Mention states
   const [mentionActive, setMentionActive] = useState(false)
@@ -213,6 +694,13 @@ export const Editor: React.FC<EditorProps> = ({
       TableRow,
       TableHeader,
       TableCell,
+      IframeNode,
+      DrawioNode.configure({
+        onSelectFile: (path: string) => onSelectFile?.(path)
+      } as any),
+      ExcalidrawNode.configure({
+        onSelectFile: (path: string) => onSelectFile?.(path)
+      } as any),
     ],
     content: getHTMLFromMarkdown(initialContent),
     editorProps: {
@@ -546,6 +1034,51 @@ export const Editor: React.FC<EditorProps> = ({
     executeAutoSave()
   }
 
+  const handleInsertEmbed = () => {
+    if (!editor) return
+
+    if (embedType === 'url') {
+      if (!embedUrl.trim()) {
+        alert('Please enter a URL to embed.')
+        return
+      }
+      
+      let finalSrc = embedUrl.trim()
+      
+      // Auto-convert standard YouTube watch URLs to embed URLs
+      if (finalSrc.includes('youtube.com/watch?v=')) {
+        const videoId = finalSrc.split('v=')[1]?.split('&')[0]
+        if (videoId) {
+          finalSrc = `https://www.youtube.com/embed/${videoId}`
+        }
+      } else if (finalSrc.includes('youtu.be/')) {
+        const videoId = finalSrc.split('youtu.be/')[1]?.split('?')[0]
+        if (videoId) {
+          finalSrc = `https://www.youtube.com/embed/${videoId}`
+        }
+      }
+
+      editor.chain().focus().insertContent(`<iframe src="${finalSrc}"></iframe>`).run()
+    } else {
+      if (!selectedCanvasPath) {
+        alert('Please select a canvas drawing to embed.')
+        return
+      }
+
+      const selectedFile = files.find(f => f.path === selectedCanvasPath)
+      const editorType = selectedFile?.frontMatter?.editor || 'excalidraw'
+
+      if (editorType === 'drawio') {
+        editor.chain().focus().insertContent(`<drawio path="${selectedCanvasPath}">drawio-canvas</drawio>`).run()
+      } else {
+        editor.chain().focus().insertContent(`<excalidraw path="${selectedCanvasPath}">excalidraw-canvas</excalidraw>`).run()
+      }
+    }
+
+    setEmbedModalOpen(false)
+    triggerAutoSave()
+  }
+
   const getFilteredCommands = () => {
     const query = commandQuery.toLowerCase()
     return COMMANDS.filter(
@@ -613,6 +1146,13 @@ export const Editor: React.FC<EditorProps> = ({
           const markdown = turndownService.turndown(html)
           return markdown
         })
+        break
+      }
+      case 'embed': {
+        setEmbedUrl('')
+        setSelectedCanvasPath('')
+        setEmbedType('url')
+        setEmbedModalOpen(true)
         break
       }
     }
@@ -812,6 +1352,34 @@ export const Editor: React.FC<EditorProps> = ({
             {getSaveStatusIndicator()}
 
             <button
+              onClick={cycleLayout}
+              className={`p-2 rounded-lg hover:bg-slate-800 transition cursor-pointer flex items-center gap-1.5 ${
+                layout !== 'left' ? 'bg-violet-600/20 text-violet-400 border border-violet-500/30' : 'text-slate-400'
+              }`}
+              title={`Layout: ${layout === 'left' ? 'Left Aligned' : layout === 'center' ? 'Center Aligned' : 'Full Width'}`}
+            >
+              {layout === 'left' && <AlignLeft size={16} />}
+              {layout === 'center' && <AlignCenter size={16} />}
+              {layout === 'full' && <Maximize2 size={16} />}
+              <span className="text-[9px] font-bold uppercase tracking-wider select-none text-slate-500">
+                {layout}
+              </span>
+            </button>
+
+            {layout !== 'full' && (
+              <button
+                onClick={cycleColumnWidth}
+                className="p-2 rounded-lg hover:bg-slate-800 transition cursor-pointer flex items-center gap-1.5 text-slate-400 hover:text-white"
+                title={`Margins: ${columnWidth === 'narrow' ? 'Large Margins (Narrow)' : columnWidth === 'normal' ? 'Normal Margins' : 'Small Margins (Wide)'}`}
+              >
+                <ArrowLeftRight size={16} />
+                <span className="text-[9px] font-bold uppercase tracking-wider select-none text-slate-500">
+                  {columnWidth}
+                </span>
+              </button>
+            )}
+
+            <button
               onClick={() => setHistoryOpen(!historyOpen)}
               className={`p-2 rounded-lg hover:bg-slate-800 transition cursor-pointer ${
                 historyOpen ? 'bg-violet-600/20 text-violet-400 border border-violet-500/30' : 'text-slate-400'
@@ -841,7 +1409,7 @@ export const Editor: React.FC<EditorProps> = ({
 
           {/* Notion Page Properties Panel */}
           {frontMatter && onUpdateFrontMatter && (
-            <div className="mb-6 p-4 bg-[#161b22]/40 border border-slate-800/80 rounded-xl space-y-3.5 select-none max-w-3xl">
+            <div className={`mb-6 p-4 bg-[#161b22]/40 border border-slate-800/80 rounded-xl space-y-3.5 select-none transition-all duration-300 ${getWidthClass()}`}>
               <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5 mb-1">
                 <Activity size={10} className="text-violet-400" />
                 Page Attributes
@@ -991,7 +1559,7 @@ export const Editor: React.FC<EditorProps> = ({
           )}
 
           {/* Document Content Block */}
-          <div className="max-w-3xl flex-1">
+          <div className={`flex-1 transition-all duration-300 ${getWidthClass()}`}>
             <EditorContent editor={editor} />
           </div>
         </div>
@@ -1152,6 +1720,109 @@ export const Editor: React.FC<EditorProps> = ({
           onClose={() => setEditingImageSrc(null)}
           onSave={handleImageSave}
         />
+      )}
+
+      {embedModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm transition-opacity">
+          <div className="bg-[#161b22] border border-slate-700/80 rounded-2xl shadow-2xl p-6 max-w-md w-full text-slate-200">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-md font-bold tracking-wide flex items-center gap-2">
+                <svg className="w-5 h-5 text-violet-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
+                </svg>
+                Insert Rich Embed
+              </h3>
+              <button
+                onClick={() => setEmbedModalOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Type selector tabs */}
+            <div className="flex gap-2 p-1 bg-[#0d1117] rounded-xl mb-5 border border-slate-800/80">
+              <button
+                onClick={() => setEmbedType('url')}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                  embedType === 'url' ? 'bg-violet-600 text-white shadow-md' : 'text-slate-450 hover:text-slate-200'
+                }`}
+              >
+                Website URL / Iframe
+              </button>
+              <button
+                onClick={() => {
+                  setEmbedType('drawio')
+                  const canvasFiles = files.filter(f => f.type === 'canvas')
+                  if (canvasFiles.length > 0 && !selectedCanvasPath) {
+                    setSelectedCanvasPath(canvasFiles[0].path)
+                  }
+                }}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                  embedType === 'drawio' ? 'bg-violet-600 text-white shadow-md' : 'text-slate-450 hover:text-slate-200'
+                }`}
+              >
+                Canvas Drawing
+              </button>
+            </div>
+
+            {/* Content panel */}
+            <div className="space-y-4 mb-6">
+              {embedType === 'url' ? (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-450 mb-1.5 uppercase tracking-wider">Embed Link / URL</label>
+                  <input
+                    type="text"
+                    value={embedUrl}
+                    onChange={(e) => setEmbedUrl(e.target.value)}
+                    placeholder="e.g. https://youtube.com/watch?v=... or https://example.com"
+                    className="w-full bg-[#0d1117] border border-slate-750 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-violet-500/80 focus:ring-1 focus:ring-violet-500/30 transition placeholder-slate-600"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1.5 font-medium">Supports regular websites, direct iframe src URLs, YouTube videos, and more.</p>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-455 mb-1.5 uppercase tracking-wider">Select Workspace Drawing</label>
+                  {files.filter(f => f.type === 'canvas').length > 0 ? (
+                    <select
+                      value={selectedCanvasPath}
+                      onChange={(e) => setSelectedCanvasPath(e.target.value)}
+                      className="w-full bg-[#0d1117] border border-slate-750 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-violet-500/80 focus:ring-1 focus:ring-violet-500/30 transition cursor-pointer"
+                    >
+                      {files.filter(f => f.type === 'canvas').map(f => (
+                        <option key={f.path} value={f.path}>
+                          {f.title || f.path.split('/').pop()} ({f.frontMatter?.editor === 'drawio' ? 'Draw.io' : 'Excalidraw'})
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="text-center py-4 bg-[#0d1117] border border-slate-800 rounded-xl select-none">
+                      <p className="text-xs text-slate-500 font-medium">No canvas drawings found in the vault.</p>
+                      <p className="text-[10px] text-slate-600 mt-1">Create an Excalidraw or Draw.io canvas page from the sidebar menu first.</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Actions */}
+            <div className="flex justify-end gap-3 select-none">
+              <button
+                onClick={() => setEmbedModalOpen(false)}
+                className="px-4 py-2 border border-slate-800 hover:bg-slate-800 rounded-xl text-xs font-semibold text-slate-400 hover:text-slate-200 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleInsertEmbed}
+                disabled={embedType === 'drawio' && files.filter(f => f.type === 'canvas').length === 0}
+                className="px-4 py-2 bg-violet-600 hover:bg-violet-550 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition shadow-lg cursor-pointer"
+              >
+                Insert Embed
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

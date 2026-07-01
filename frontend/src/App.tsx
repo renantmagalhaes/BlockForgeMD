@@ -7,7 +7,6 @@ import {
   Brush,
   ChevronRight,
   ChevronDown,
-  Database,
   CloudLightning,
   AlertCircle,
   FilePlus,
@@ -15,7 +14,8 @@ import {
   ArrowRight,
   Plus,
   X,
-  Grid
+  Grid,
+  Settings
 } from 'lucide-react'
 import Editor from './components/Editor'
 import Kanban from './components/Kanban'
@@ -355,6 +355,15 @@ export const App: React.FC = () => {
   }>({ isOpen: false, type: null })
   const [createNameInput, setCreateNameInput] = useState('')
 
+  const [adminModalOpen, setAdminModalOpen] = useState(false)
+  const [settingsTab, setSettingsTab] = useState<'editor' | 'cache' | 'about'>('editor')
+  const [globalLayoutOverride, setGlobalLayoutOverride] = useState<string>(() => {
+    return localStorage.getItem('blockforge_global_layout_override') || 'per-page'
+  })
+  const [globalColumnWidthOverride, setGlobalColumnWidthOverride] = useState<string>(() => {
+    return localStorage.getItem('blockforge_global_column_width_override') || 'per-page'
+  })
+
   const [contextMenu, setContextMenu] = useState<{
     isOpen: boolean; x: number; y: number; path: string | null; isFolder: boolean
   }>({ isOpen: false, x: 0, y: 0, path: null, isFolder: false })
@@ -638,7 +647,13 @@ export const App: React.FC = () => {
           </div>
 
           <div className="flex items-center justify-between text-[10px] border-t border-slate-800/60 pt-3">
-            <div className="flex items-center gap-1 text-slate-500"><Database size={10} /><span>SQLite Cache</span></div>
+            <button
+              onClick={() => setAdminModalOpen(true)}
+              className="flex items-center gap-1.5 text-slate-500 hover:text-violet-400 transition cursor-pointer select-none"
+            >
+              <Settings size={10} />
+              <span>Settings</span>
+            </button>
             {isSyncing ? (
               <span className="text-amber-500 animate-pulse">Syncing...</span>
             ) : syncError ? (
@@ -705,6 +720,8 @@ export const App: React.FC = () => {
                   onCreateSubPage={(parentPath, onCreated) => handleCreateFile('document', parentPath, onCreated)}
                   onSelectFile={fetchFileContent}
                   files={files}
+                  globalLayoutOverride={globalLayoutOverride}
+                  globalColumnWidthOverride={globalColumnWidthOverride}
                 />
               )}
             </div>
@@ -810,6 +827,192 @@ export const App: React.FC = () => {
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-850">
                 <button type="button" onClick={() => setCreateModal({ isOpen: false, type: null })} className="px-4 py-2 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-lg text-xs font-semibold transition cursor-pointer">Cancel</button>
                 <button type="button" disabled={!createModal.type || !createNameInput.trim()} onClick={handleCreateConfirm} className="px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white rounded-lg text-xs font-semibold shadow transition cursor-pointer">Create Item</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Settings Menu Modal ─────────────────────────────────────────── */}
+      {adminModalOpen && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 select-none animate-in fade-in duration-150">
+          <div className="bg-[#161b22] border border-slate-800 rounded-2xl max-w-2xl w-full shadow-2xl p-6 overflow-hidden animate-in zoom-in-95 duration-150 text-slate-200 flex flex-col h-[480px]">
+            {/* Modal Header */}
+            <div className="flex justify-between items-center mb-6 pb-4 border-b border-slate-800 shrink-0">
+              <div className="flex items-center gap-2">
+                <Settings className="text-violet-400" size={18} />
+                <h3 className="font-bold text-base text-slate-100">Settings</h3>
+              </div>
+              <button 
+                onClick={() => setAdminModalOpen(false)} 
+                className="text-slate-500 hover:text-slate-300 transition cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Modal Body (Sidebar + Content Panel) */}
+            <div className="flex-1 flex overflow-hidden min-h-0">
+              {/* Settings Sidebar Submenu */}
+              <div className="w-44 border-r border-slate-800 pr-4 space-y-1 shrink-0 flex flex-col justify-between">
+                <div className="space-y-1">
+                  {[
+                    { id: 'editor' as const, label: 'Editor Layout', icon: <LayoutGrid size={14} className="text-violet-400" /> },
+                    { id: 'cache'  as const, label: 'System & Sync', icon: <CheckSquare size={14} className="text-amber-500" /> },
+                    { id: 'about'  as const, label: 'About Vault',  icon: <Layers size={14} className="text-blue-400" /> },
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setSettingsTab(tab.id)}
+                      className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold border transition cursor-pointer text-left ${
+                        settingsTab === tab.id
+                          ? 'bg-violet-600/10 border-violet-500/35 text-violet-300'
+                          : 'bg-transparent border-transparent text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                      }`}
+                    >
+                      {tab.icon}
+                      <span>{tab.label}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="text-[10px] text-slate-500 font-mono pl-3">
+                  v1.2.0-stable
+                </div>
+              </div>
+
+              {/* Settings Content Pane */}
+              <div className="flex-1 pl-6 overflow-y-auto no-scrollbar flex flex-col justify-between min-h-0">
+                <div className="min-h-0">
+                  {settingsTab === 'editor' && (
+                    <div className="space-y-5 animate-in fade-in duration-150">
+                      {/* Global Layout Alignment Dropdown */}
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
+                          Global Layout Alignment
+                        </label>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Force a specific layout alignment (Left, Center, or Full Width) across all notes, or let each page define its own.
+                        </p>
+                        <div className="relative">
+                          <select
+                            value={globalLayoutOverride}
+                            onChange={(e) => {
+                              const val = e.target.value
+                              localStorage.setItem('blockforge_global_layout_override', val)
+                              setGlobalLayoutOverride(val)
+                            }}
+                            className="w-full bg-[#1f242c] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 outline-none focus:border-violet-500 transition cursor-pointer appearance-none font-medium"
+                          >
+                            <option value="per-page">Per-Page (Respect Page Frontmatter)</option>
+                            <option value="left">Force Left Aligned</option>
+                            <option value="center">Force Center Aligned</option>
+                            <option value="full">Force Full Width</option>
+                          </select>
+                          <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-400">
+                            <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+                              <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/>
+                            </svg>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Global Margin Width Override Dropdown */}
+                      <div className="space-y-2 pt-2">
+                        <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
+                          Global Margin Width
+                        </label>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Force column layout width boundaries (Narrow, Normal, or Wide lateral margins) for left and center aligned modes.
+                        </p>
+                        <div className="relative">
+                          <select
+                            value={globalColumnWidthOverride}
+                            onChange={(e) => {
+                              const val = e.target.value
+                              localStorage.setItem('blockforge_global_column_width_override', val)
+                              setGlobalColumnWidthOverride(val)
+                            }}
+                            className="w-full bg-[#1f242c] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 outline-none focus:border-violet-500 transition cursor-pointer appearance-none font-medium"
+                          >
+                            <option value="per-page">Per-Page (Respect Page Frontmatter)</option>
+                            <option value="narrow">Force Narrow (Large Margins / 672px)</option>
+                            <option value="normal">Force Normal Margins (896px)</option>
+                            <option value="wide">Force Wide (Small Margins / 1152px)</option>
+                          </select>
+                          <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-400">
+                            <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+                              <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/>
+                            </svg>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {settingsTab === 'cache' && (
+                    <div className="space-y-4 animate-in fade-in duration-150">
+                      <div className="space-y-1.5">
+                        <h4 className="font-bold text-sm text-slate-100">Local Cache & SQLite</h4>
+                        <p className="text-xs text-slate-400 leading-relaxed">
+                          Manage internal index caches. Workspace notes are stored as plain Markdown files on disk, but indexed in SQLite for high-speed search and kanban filters.
+                        </p>
+                      </div>
+
+                      <div className="bg-slate-900/50 border border-slate-850 rounded-xl p-4 space-y-2">
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="text-slate-400 font-medium">Index Database:</span>
+                          <span className="font-mono text-slate-300">sqlite3 (local)</span>
+                        </div>
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="text-slate-400 font-medium">Sync State:</span>
+                          {isSyncing ? (
+                            <span className="text-amber-500 animate-pulse font-semibold">Syncing Cache...</span>
+                          ) : syncError ? (
+                            <span className="text-red-400 font-semibold">Offline (Local Cache Active)</span>
+                          ) : (
+                            <span className="text-emerald-500 font-semibold">Live Synced</span>
+                          )}
+                        </div>
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="text-slate-400 font-medium">Local Documents:</span>
+                          <span className="font-mono text-slate-300 font-bold">{files.length} indexed files</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {settingsTab === 'about' && (
+                    <div className="space-y-4 animate-in fade-in duration-150">
+                      <div className="space-y-1.5">
+                        <h4 className="font-bold text-sm text-slate-100">BlockForgeMD</h4>
+                        <p className="text-xs text-slate-400 leading-relaxed">
+                          A high-performance, local-first alternative to Notion. Built with standard Markdown, Go back-end servers, SQLite indexes, and React client editors.
+                        </p>
+                      </div>
+
+                      <div className="bg-slate-900/50 border border-slate-850 rounded-xl p-4 space-y-3">
+                        <div className="text-xs text-slate-400">
+                          BlockForgeMD workspace operates fully offline, reading and writing files directly to your storage disk directory. No third-party servers tracking or storing your notes.
+                        </div>
+                        <div className="flex justify-between items-center text-xs border-t border-slate-850 pt-2.5">
+                          <span className="text-slate-500">License:</span>
+                          <span className="text-slate-400 font-medium">MIT (Open Source)</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Done Button */}
+                <div className="pt-4 border-t border-slate-800 flex justify-end shrink-0 mt-4">
+                  <button
+                    type="button"
+                    onClick={() => setAdminModalOpen(false)}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg text-xs font-semibold shadow transition cursor-pointer"
+                  >
+                    Done
+                  </button>
+                </div>
               </div>
             </div>
           </div>

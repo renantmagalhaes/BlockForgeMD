@@ -57,7 +57,10 @@ export const Canvas: React.FC<CanvasProps> = ({ filePath, initialContent, onSave
       elements: currentElements,
       appState: {
         viewBackgroundColor: currentAppState.viewBackgroundColor,
-        theme: 'dark'
+        theme: 'dark',
+        scrollX: currentAppState.scrollX,
+        scrollY: currentAppState.scrollY,
+        zoom: currentAppState.zoom,
       }
     }
 
