@@ -3,12 +3,14 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -77,6 +79,7 @@ func (s *Server) setupRoutes() {
 		r.Post("/file/rollback", s.handleRollbackFile)
 		r.Post("/upload", s.handleUploadAsset)
 		r.Get("/sync/events", s.handleSSE)
+		r.Get("/link-preview", s.handleLinkPreview)
 	})
 
 	// Serve assets directly from the vault's assets directory
@@ -664,4 +667,202 @@ func (s *Server) handleUploadAsset(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, map[string]string{
 		"url": urlPath,
 	})
+}
+
+// ─── Link Preview ─────────────────────────────────────────────────────────────
+
+type LinkPreviewResult struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Image       string `json:"image"`
+	Favicon     string `json:"favicon"`
+	SiteName    string `json:"siteName"`
+	EmbedURL    string `json:"embedUrl,omitempty"`
+	URL         string `json:"url"`
+}
+
+type previewCacheEntry struct {
+	result    LinkPreviewResult
+	fetchedAt time.Time
+}
+
+var (
+	previewCache   = make(map[string]previewCacheEntry)
+	previewCacheMu sync.Mutex
+)
+
+var ytRegexes = []*regexp.Regexp{
+	regexp.MustCompile(`(?:youtube\.com/watch\?.*v=|youtu\.be/|youtube\.com/embed/)([a-zA-Z0-9_-]{11})`),
+}
+
+var vimeoRegexes = []*regexp.Regexp{
+	regexp.MustCompile(`vimeo\.com/(?:video/)?(\d+)`),
+}
+
+func (s *Server) handleLinkPreview(w http.ResponseWriter, r *http.Request) {
+	rawURL := r.URL.Query().Get("url")
+	if rawURL == "" {
+		http.Error(w, "Missing url parameter", http.StatusBadRequest)
+		return
+	}
+
+	u, err := url.Parse(rawURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		http.Error(w, "Invalid url parameter", http.StatusBadRequest)
+		return
+	}
+
+	// Check cache
+	previewCacheMu.Lock()
+	if entry, found := previewCache[rawURL]; found && time.Since(entry.fetchedAt) < 10*time.Minute {
+		previewCacheMu.Unlock()
+		respondJSON(w, entry.result)
+		return
+	}
+	previewCacheMu.Unlock()
+
+	result := LinkPreviewResult{
+		URL: rawURL,
+	}
+
+	// Special case YouTube
+	for _, reg := range ytRegexes {
+		if matches := reg.FindStringSubmatch(rawURL); len(matches) > 1 {
+			videoID := matches[1]
+			result.Title = "YouTube Video"
+			result.SiteName = "YouTube"
+			result.Image = fmt.Sprintf("https://img.youtube.com/vi/%s/hqdefault.jpg", videoID)
+			result.EmbedURL = fmt.Sprintf("https://www.youtube.com/embed/%s", videoID)
+			result.Favicon = "https://www.google.com/s2/favicons?domain=youtube.com&sz=32"
+			break
+		}
+	}
+
+	// Special case Vimeo
+	if result.EmbedURL == "" {
+		for _, reg := range vimeoRegexes {
+			if matches := reg.FindStringSubmatch(rawURL); len(matches) > 1 {
+				videoID := matches[1]
+				result.Title = "Vimeo Video"
+				result.SiteName = "Vimeo"
+				result.EmbedURL = fmt.Sprintf("https://player.vimeo.com/video/%s", videoID)
+				result.Favicon = "https://www.google.com/s2/favicons?domain=vimeo.com&sz=32"
+				break
+			}
+		}
+	}
+
+	// Fetch page metadata if not fully populated by special embed logic
+	if result.Title == "" || result.Image == "" {
+		client := http.Client{
+			Timeout: 4 * time.Second,
+		}
+		req, err := http.NewRequest("GET", rawURL, nil)
+		if err == nil {
+			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
+			resp, err := client.Do(req)
+			if err == nil {
+				defer resp.Body.Close()
+				bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
+				if err == nil {
+					htmlContent := string(bodyBytes)
+					
+					// Parse title
+					if title := extractMeta(htmlContent, `(?i)<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']`); title != "" {
+						result.Title = title
+					} else if title := extractMeta(htmlContent, `(?i)<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']`); title != "" {
+						result.Title = title
+					} else if title := extractTag(htmlContent, `(?i)<title[^>]*>([^<]+)</title>`); title != "" {
+						result.Title = title
+					}
+
+					// Parse description
+					if desc := extractMeta(htmlContent, `(?i)<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']`); desc != "" {
+						result.Description = desc
+					} else if desc := extractMeta(htmlContent, `(?i)<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:description["']`); desc != "" {
+						result.Description = desc
+					} else if desc := extractMeta(htmlContent, `(?i)<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']`); desc != "" {
+						result.Description = desc
+					} else if desc := extractMeta(htmlContent, `(?i)<meta[^>]+content=["']([^"']+)["'][^>]+name=["']description["']`); desc != "" {
+						result.Description = desc
+					}
+
+					// Parse image
+					if img := extractMeta(htmlContent, `(?i)<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']`); img != "" {
+						result.Image = img
+					} else if img := extractMeta(htmlContent, `(?i)<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']`); img != "" {
+						result.Image = img
+					}
+
+					// Parse site name
+					if site := extractMeta(htmlContent, `(?i)<meta[^>]+property=["']og:site_name["'][^>]+content=["']([^"']+)["']`); site != "" {
+						result.SiteName = site
+					} else if site := extractMeta(htmlContent, `(?i)<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:site_name["']`); site != "" {
+						result.SiteName = site
+					}
+
+					// Parse favicon
+					if fav := extractMeta(htmlContent, `(?i)<link[^>]+rel=["'](?:shortcut )?icon["'][^>]+href=["']([^"']+)["']`); fav != "" {
+						result.Favicon = fav
+					} else if fav := extractMeta(htmlContent, `(?i)<link[^>]+href=["']([^"']+)["'][^>]+rel=["'](?:shortcut )?icon["']`); fav != "" {
+						result.Favicon = fav
+					}
+				}
+			}
+		}
+	}
+
+	// Set defaults/fallbacks
+	if result.Title == "" {
+		result.Title = u.Host
+	}
+	if result.SiteName == "" {
+		result.SiteName = u.Host
+		if strings.HasPrefix(result.SiteName, "www.") {
+			result.SiteName = result.SiteName[4:]
+		}
+	}
+	if result.Favicon == "" {
+		result.Favicon = fmt.Sprintf("https://www.google.com/s2/favicons?domain=%s&sz=32", u.Host)
+	} else {
+		favURL, err := url.Parse(result.Favicon)
+		if err == nil {
+			result.Favicon = u.ResolveReference(favURL).String()
+		}
+	}
+
+	if result.Image != "" {
+		imgURL, err := url.Parse(result.Image)
+		if err == nil {
+			result.Image = u.ResolveReference(imgURL).String()
+		}
+	}
+
+	// Save to cache
+	previewCacheMu.Lock()
+	previewCache[rawURL] = previewCacheEntry{
+		result:    result,
+		fetchedAt: time.Now(),
+	}
+	previewCacheMu.Unlock()
+
+	respondJSON(w, result)
+}
+
+func extractMeta(htmlContent, regexStr string) string {
+	re := regexp.MustCompile(regexStr)
+	matches := re.FindStringSubmatch(htmlContent)
+	if len(matches) > 1 {
+		return strings.TrimSpace(html.UnescapeString(matches[1]))
+	}
+	return ""
+}
+
+func extractTag(htmlContent, regexStr string) string {
+	re := regexp.MustCompile(regexStr)
+	matches := re.FindStringSubmatch(htmlContent)
+	if len(matches) > 1 {
+		return strings.TrimSpace(html.UnescapeString(matches[1]))
+	}
+	return ""
 }

@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useRef } from 'react'
-import { useEditor, EditorContent, NodeViewWrapper, ReactNodeViewRenderer } from '@tiptap/react'
+import { useEditor, EditorContent, NodeViewWrapper, NodeViewContent, ReactNodeViewRenderer } from '@tiptap/react'
 import { Node, mergeAttributes } from '@tiptap/core'
 import { Excalidraw } from '@excalidraw/excalidraw'
 import StarterKit from '@tiptap/starter-kit'
+import CodeBlock from '@tiptap/extension-code-block'
 import Link from '@tiptap/extension-link'
 import Image from '@tiptap/extension-image'
 import { ImageEditorModal } from './ImageEditorModal'
@@ -42,7 +43,10 @@ import {
   Maximize2,
   AlignLeft,
   AlignCenter,
-  ArrowLeftRight
+  ArrowLeftRight,
+  BookMarked,
+  MonitorPlay,
+  Link2
 } from 'lucide-react'
 
 // Configure Turndown for clean Markdown serialization
@@ -123,6 +127,21 @@ turndownService.addRule('excalidraw', {
   replacement: (_content, node) => {
     const path = (node as HTMLElement).getAttribute('path') || ''
     return `\n<excalidraw path="${path}">excalidraw-canvas</excalidraw>\n`
+  }
+})
+
+// Custom rule for bookmark embeds in Turndown
+turndownService.addRule('bookmark', {
+  filter: (node) => node.nodeName.toLowerCase() === 'bookmark',
+  replacement: (_content, node) => {
+    const el = node as HTMLElement
+    const url = (el.getAttribute('url') || '').replace(/"/g, '&quot;')
+    const title = (el.getAttribute('title') || '').replace(/"/g, '&quot;')
+    const description = (el.getAttribute('description') || '').replace(/"/g, '&quot;')
+    const image = (el.getAttribute('image') || '').replace(/"/g, '&quot;')
+    const favicon = (el.getAttribute('favicon') || '').replace(/"/g, '&quot;')
+    const siteName = (el.getAttribute('siteName') || '').replace(/"/g, '&quot;')
+    return `\n<bookmark url="${url}" title="${title}" description="${description}" image="${image}" favicon="${favicon}" siteName="${siteName}"></bookmark>\n`
   }
 })
 
@@ -502,6 +521,215 @@ export const ExcalidrawNode = Node.create({
   },
 })
 
+const BookmarkComponent = (props: any) => {
+  const { url, title, description, image, favicon, siteName } = props.node.attrs
+  const [loading, setLoading] = useState(!title)
+
+  useEffect(() => {
+    if (title) return // Already fetched and stored
+
+    setLoading(true)
+    const API_BASE = import.meta.env.DEV ? 'http://localhost:8080' : ''
+    fetch(`${API_BASE}/api/link-preview?url=${encodeURIComponent(url)}`)
+      .then(res => {
+        if (!res.ok) throw new Error()
+        return res.json()
+      })
+      .then(data => {
+        props.updateAttributes({
+          title: data.title || url,
+          description: data.description || '',
+          image: data.image || '',
+          favicon: data.favicon || '',
+          siteName: data.siteName || '',
+        })
+        setLoading(false)
+      })
+      .catch(() => {
+        props.updateAttributes({
+          title: url,
+          description: '',
+          image: '',
+          favicon: '',
+          siteName: '',
+        })
+        setLoading(false)
+      })
+  }, [url, title]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const displayTitle = title || url
+  const displayHost = (() => {
+    try {
+      return new URL(url).hostname
+    } catch {
+      return url
+    }
+  })()
+
+  return (
+    <NodeViewWrapper className="bookmark-card my-4 border border-slate-800 bg-[#161b22]/40 hover:bg-[#161b22]/70 hover:border-violet-500/40 rounded-xl overflow-hidden shadow-md transition-all duration-200">
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-stretch text-slate-200 no-underline cursor-pointer select-none"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex-1 p-4 min-w-0 flex flex-col justify-between">
+          <div className="min-w-0">
+            {loading ? (
+              <div className="flex items-center space-x-2 text-slate-500 text-xs py-2">
+                <Loader2 className="animate-spin w-3.5 h-3.5" />
+                <span>Loading link preview...</span>
+              </div>
+            ) : (
+              <>
+                <h4 className="text-sm font-semibold text-slate-250 truncate leading-snug hover:text-violet-400 transition-colors">
+                  {displayTitle}
+                </h4>
+                {description && (
+                  <p className="text-xs text-slate-455 mt-1 line-clamp-2 leading-relaxed">
+                    {description}
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+          <div className="flex items-center space-x-2 mt-3 text-[11px] text-slate-500 min-w-0">
+            {favicon ? (
+              <img
+                src={favicon}
+                alt=""
+                className="w-3.5 h-3.5 object-contain rounded shrink-0"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none'
+                }}
+              />
+            ) : (
+              <Link2 size={12} className="text-slate-500 shrink-0" />
+            )}
+            <span className="font-semibold truncate text-slate-400">{siteName || displayHost}</span>
+            <span className="text-slate-700 font-bold shrink-0">·</span>
+            <span className="truncate max-w-[150px] font-mono text-[10px] text-slate-500">{displayHost}</span>
+          </div>
+        </div>
+        {image && !loading && (
+          <div className="w-1/4 max-w-[140px] min-w-[100px] relative border-l border-slate-800 bg-[#0d1117] hidden sm:block">
+            <img src={image} alt="" className="absolute inset-0 w-full h-full object-cover" />
+          </div>
+        )}
+      </a>
+    </NodeViewWrapper>
+  )
+}
+
+export const BookmarkNode = Node.create({
+  name: 'bookmark',
+  group: 'block',
+  selectable: true,
+  draggable: true,
+  atom: true,
+
+  addAttributes() {
+    return {
+      url: {
+        default: '',
+      },
+      title: {
+        default: '',
+      },
+      description: {
+        default: '',
+      },
+      image: {
+        default: '',
+      },
+      favicon: {
+        default: '',
+      },
+      siteName: {
+        default: '',
+      },
+    }
+  },
+
+  parseHTML() {
+    return [
+      {
+        tag: 'bookmark',
+      },
+    ]
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ['bookmark', mergeAttributes(HTMLAttributes)]
+  },
+
+  addNodeView() {
+    return ReactNodeViewRenderer(BookmarkComponent)
+  },
+})
+
+const LANGUAGES = [
+  { value: 'javascript', label: 'JavaScript' },
+  { value: 'typescript', label: 'TypeScript' },
+  { value: 'html', label: 'HTML' },
+  { value: 'css', label: 'CSS' },
+  { value: 'python', label: 'Python' },
+  { value: 'go', label: 'Go' },
+  { value: 'rust', label: 'Rust' },
+  { value: 'bash', label: 'Bash / Shell' },
+  { value: 'json', label: 'JSON' },
+  { value: 'yaml', label: 'YAML' },
+  { value: 'markdown', label: 'Markdown' },
+  { value: 'sql', label: 'SQL' },
+  { value: 'xml', label: 'XML' },
+]
+
+const CodeBlockComponent = (props: any) => {
+  const { language } = props.node.attrs
+
+  const handleLanguageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    props.updateAttributes({ language: e.target.value })
+  }
+
+  return (
+    <NodeViewWrapper className="code-block-container my-4 relative rounded-xl overflow-hidden border border-slate-800 bg-[#0d1117] group">
+      {/* Header with language selection */}
+      <div className="flex items-center justify-between px-4 py-1.5 bg-[#161b22] border-b border-slate-850 select-none">
+        <select
+          value={language || 'javascript'}
+          onChange={handleLanguageChange}
+          className="bg-transparent text-slate-400 hover:text-slate-200 text-xs font-semibold focus:outline-none border-none py-0.5 pr-6 cursor-pointer rounded-lg transition-colors"
+        >
+          {LANGUAGES.map((lang) => (
+            <option key={lang.value} value={lang.value} className="bg-[#161b22] text-slate-350">
+              {lang.label}
+            </option>
+          ))}
+        </select>
+        <span className="text-[10px] text-slate-500 font-mono select-none opacity-0 group-hover:opacity-100 transition-opacity pr-2">
+          Code Block
+        </span>
+      </div>
+
+      {/* Editor Content Area */}
+      <pre style={{ backgroundColor: 'transparent', padding: '1rem', border: 'none', margin: 0, borderRadius: 0 }} className="overflow-x-auto text-xs font-mono text-slate-100 focus:outline-none leading-relaxed">
+        <NodeViewContent as={"code" as any} />
+      </pre>
+    </NodeViewWrapper>
+  )
+}
+
+export const CustomCodeBlock = CodeBlock.extend({
+  addNodeView() {
+    return ReactNodeViewRenderer(CodeBlockComponent)
+  },
+})
+
+
+
+
 interface FileRecord {
   path: string
   title: string
@@ -653,6 +881,74 @@ export const Editor: React.FC<EditorProps> = ({
   const [mentionCoords, setMentionCoords] = useState({ top: 0, left: 0 })
   const [mentionSelectedIndex, setMentionSelectedIndex] = useState(0)
 
+  // Link paste non-blocking toast state
+  const [pasteInfo, setPasteInfo] = useState<{ url: string; from: number; to: number; x: number; y: number } | null>(null)
+  const pasteInfoRef = useRef(pasteInfo)
+  useEffect(() => {
+    pasteInfoRef.current = pasteInfo
+  }, [pasteInfo])
+
+  const lastSavedContentRef = useRef<string>(initialContent || '')
+  const lastFilePathRef = useRef<string | null>(null)
+
+
+
+  // Click outside to close paste popup
+  useEffect(() => {
+    if (!pasteInfo) return
+    const handler = (e: MouseEvent) => {
+      const el = document.getElementById('link-paste-popup')
+      if (el && !el.contains(e.target as any)) {
+        setPasteInfo(null)
+      }
+    }
+    const t = setTimeout(() => {
+      document.addEventListener('mousedown', handler)
+    }, 50)
+    return () => {
+      clearTimeout(t)
+      document.removeEventListener('mousedown', handler)
+    }
+  }, [pasteInfo])
+
+  const toEmbedUrl = (url: string) => {
+    // YouTube Watch URLs
+    const ytMatch1 = url.match(/(?:youtube\.com\/watch\?.*v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/)
+    if (ytMatch1) {
+      return `https://www.youtube.com/embed/${ytMatch1[1]}`
+    }
+    // Vimeo URLs
+    const vimeoMatch = url.match(/vimeo\.com\/(?:video\/)?(\d+)/)
+    if (vimeoMatch) {
+      return `https://player.vimeo.com/video/${vimeoMatch[1]}`
+    }
+    return url
+  }
+
+  const handleToastConvert = (type: 'bookmark' | 'embed') => {
+    if (!pasteInfo || !editor) return
+    const { url, from, to } = pasteInfo
+    setPasteInfo(null)
+
+    const content = type === 'bookmark'
+      ? {
+          type: 'bookmark',
+          attrs: { url, title: '', description: '', image: '', favicon: '', siteName: '' }
+        }
+      : {
+          type: 'iframe',
+          attrs: { src: toEmbedUrl(url), width: '100%', height: '450px' }
+        }
+
+    editor.chain()
+      .focus()
+      .setTextSelection({ from, to })
+      .deleteSelection()
+      .insertContent(content)
+      .run()
+    triggerAutoSave()
+  }
+
   // Avoid stale closures in TipTap callback handlers via refs
   const commandActiveRef = useRef(commandActive)
   const selectedIndexRef = useRef(selectedIndex)
@@ -664,8 +960,13 @@ export const Editor: React.FC<EditorProps> = ({
 
   const getHTMLFromMarkdown = (markdown: string) => {
     if (!markdown.trim()) return '<p></p>'
-    const rawHtml = marked.parse(markdown)
-    return typeof rawHtml === 'string' ? rawHtml : ''
+    let rawHtml = marked.parse(markdown)
+    if (typeof rawHtml !== 'string') rawHtml = ''
+    rawHtml = rawHtml
+      .replace(/<p>\s*(<bookmark[^>]*>.*?<\/bookmark>)\s*<\/p>/gi, '$1')
+      .replace(/<p>\s*(<drawio[^>]*>.*?<\/drawio>)\s*<\/p>/gi, '$1')
+      .replace(/<p>\s*(<excalidraw[^>]*>.*?<\/excalidraw>)\s*<\/p>/gi, '$1')
+    return rawHtml
   }
 
   const editor = useEditor({
@@ -695,6 +996,8 @@ export const Editor: React.FC<EditorProps> = ({
       TableHeader,
       TableCell,
       IframeNode,
+      BookmarkNode,
+      CustomCodeBlock,
       DrawioNode.configure({
         onSelectFile: (path: string) => onSelectFile?.(path)
       } as any),
@@ -707,20 +1010,58 @@ export const Editor: React.FC<EditorProps> = ({
       attributes: {
         class: 'prose prose-invert max-w-none focus:outline-none min-h-[450px] text-slate-200 px-4 py-2',
       },
-      handlePaste: (_view, event) => {
+      handlePaste: (view, event) => {
         const items = event.clipboardData?.items
-        if (!items) return false
-        let hasImage = false
-        for (let i = 0; i < items.length; i++) {
-          if (items[i].type.indexOf('image') !== -1) {
-            const file = items[i].getAsFile()
-            if (file) {
-              hasImage = true
-              uploadImageAndInsert(file)
+        if (items) {
+          let hasImage = false
+          for (let i = 0; i < items.length; i++) {
+            if (items[i].type.indexOf('image') !== -1) {
+              const file = items[i].getAsFile()
+              if (file) {
+                hasImage = true
+                uploadImageAndInsert(file)
+              }
             }
           }
+          if (hasImage) return true
         }
-        return hasImage
+
+        const pastedText = event.clipboardData?.getData('text/plain')?.trim()
+        if (pastedText && /^https?:\/\/[^\s]+$/i.test(pastedText)) {
+          const { state, dispatch } = view
+          const { selection } = state
+          
+          // Insert standard link node
+          const linkMark = state.schema.marks.link.create({ href: pastedText })
+          const textNode = state.schema.text(pastedText, [linkMark])
+          const tr = state.tr.replaceSelectionWith(textNode)
+          tr.removeStoredMark(state.schema.marks.link)
+          dispatch(tr)
+
+          triggerAutoSave()
+
+          try {
+            const coords = view.coordsAtPos(selection.from)
+            setPasteInfo({
+              url: pastedText,
+              from: selection.from,
+              to: selection.from + pastedText.length,
+              x: coords.left,
+              y: coords.bottom + 8
+            })
+          } catch (e) {
+            setPasteInfo({
+              url: pastedText,
+              from: selection.from,
+              to: selection.from + pastedText.length,
+              x: window.innerWidth / 2 - 150,
+              y: window.innerHeight / 2
+            })
+          }
+          return true
+        }
+
+        return false
       },
       handleDrop: (_view, event, _slice, moved) => {
         if (moved) return false
@@ -743,7 +1084,11 @@ export const Editor: React.FC<EditorProps> = ({
             if (href) {
               event.preventDefault()
               event.stopPropagation()
-              onSelectFile?.(href)
+              if (href.startsWith('http://') || href.startsWith('https://')) {
+                window.open(href, '_blank', 'noopener,noreferrer')
+              } else {
+                onSelectFile?.(href)
+              }
               return true
             }
           }
@@ -761,6 +1106,13 @@ export const Editor: React.FC<EditorProps> = ({
         return false
       },
       handleKeyDown: (_view, event) => {
+        // If link paste choices popup is open, dismiss it on any content keypress
+        if (pasteInfoRef.current) {
+          if (!['Control', 'Shift', 'Alt', 'Meta'].includes(event.key)) {
+            setPasteInfo(null)
+          }
+        }
+
         if (commandActiveRef.current) {
           const filtered = getFilteredCommands()
           if (filtered.length > 0) {
@@ -818,6 +1170,9 @@ export const Editor: React.FC<EditorProps> = ({
     },
     onUpdate: () => {
       triggerAutoSave()
+    },
+    onSelectionUpdate: () => {
+      // Don't auto-dismiss in selectionUpdate as that is triggered by editor events
     }
   })
 
@@ -831,6 +1186,77 @@ export const Editor: React.FC<EditorProps> = ({
     mentionSelectedIndexRef.current = mentionSelectedIndex
     mentionQueryRef.current = mentionQuery
   })
+
+  // Floating Table Controls coordinates state
+  const [activeTableRect, setActiveTableRect] = useState<{
+    top: number
+    left: number
+    width: number
+    height: number
+  } | null>(null)
+
+  const updateTableRect = () => {
+    if (!editor || !editor.isFocused) {
+      setActiveTableRect(null)
+      return
+    }
+
+    const selection = window.getSelection()
+    if (!selection || selection.rangeCount === 0) {
+      setActiveTableRect(null)
+      return
+    }
+
+    try {
+      const range = selection.getRangeAt(0)
+      const cell = range.startContainer.nodeType === 3
+        ? range.startContainer.parentElement?.closest('td, th')
+        : (range.startContainer as HTMLElement)?.closest?.('td, th')
+
+      const table = cell?.closest('table')
+      if (table) {
+        const rect = table.getBoundingClientRect()
+        setActiveTableRect({
+          top: rect.top,
+          left: rect.left,
+          width: rect.width,
+          height: rect.height
+        })
+      } else {
+        setActiveTableRect(null)
+      }
+    } catch (e) {
+      setActiveTableRect(null)
+    }
+  }
+
+  // Sync table selection & scroll updates
+  useEffect(() => {
+    if (!editor) return
+
+    const handleUpdate = () => {
+      updateTableRect()
+    }
+
+    const handleUpdateDelayed = () => {
+      setTimeout(handleUpdate, 10)
+    }
+
+    editor.on('selectionUpdate', handleUpdateDelayed)
+    editor.on('focus', handleUpdateDelayed)
+    editor.on('blur', handleUpdateDelayed)
+
+    window.addEventListener('scroll', handleUpdate, true)
+    window.addEventListener('resize', handleUpdate)
+
+    return () => {
+      editor.off('selectionUpdate', handleUpdateDelayed)
+      editor.off('focus', handleUpdateDelayed)
+      editor.off('blur', handleUpdateDelayed)
+      window.removeEventListener('scroll', handleUpdate, true)
+      window.removeEventListener('resize', handleUpdate)
+    }
+  }, [editor])
 
   // Watch for text patterns (e.g. typing / or @)
   useEffect(() => {
@@ -883,19 +1309,31 @@ export const Editor: React.FC<EditorProps> = ({
     }
   }, [editor])
 
-  // Track initial content updates (switching files)
+
+  // Track initial content updates (switching files or external non-focused updates)
   useEffect(() => {
     if (editor && initialContent !== undefined) {
-      const html = getHTMLFromMarkdown(initialContent)
-      if (editor.getHTML() !== html) {
+      const fileChanged = lastFilePathRef.current !== filePath
+      const contentChangedExternally = initialContent !== lastSavedContentRef.current
+
+      if (fileChanged) {
+        lastFilePathRef.current = filePath
+        lastSavedContentRef.current = initialContent
+        const html = getHTMLFromMarkdown(initialContent)
         editor.commands.setContent(html)
+        setSaveStatus('saved')
+      } else if (contentChangedExternally && !editor.isFocused) {
+        lastSavedContentRef.current = initialContent
+        const html = getHTMLFromMarkdown(initialContent)
+        editor.commands.setContent(html)
+        setSaveStatus('saved')
       }
-      setSaveStatus('saved')
-      if (historyOpen) {
+
+      if (historyOpen && fileChanged) {
         fetchHistory()
       }
     }
-  }, [initialContent, filePath, editor])
+  }, [initialContent, filePath, editor, historyOpen])
 
   // Fetch Version History snapshots
   const fetchHistory = async () => {
@@ -946,6 +1384,7 @@ export const Editor: React.FC<EditorProps> = ({
     const markdown = turndownService.turndown(html)
     try {
       await onSave(markdown)
+      lastSavedContentRef.current = markdown
       setSaveStatus('saved')
       if (historyOpen) {
         fetchHistory()
@@ -971,6 +1410,7 @@ export const Editor: React.FC<EditorProps> = ({
       const data = await res.json()
       
       const html = getHTMLFromMarkdown(data.content)
+      lastSavedContentRef.current = data.content
       editor.commands.setContent(html)
       setSaveStatus('saved')
       fetchHistory()
@@ -1745,7 +2185,7 @@ export const Editor: React.FC<EditorProps> = ({
               <button
                 onClick={() => setEmbedType('url')}
                 className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                  embedType === 'url' ? 'bg-violet-600 text-white shadow-md' : 'text-slate-450 hover:text-slate-200'
+                  embedType === 'url' ? 'bg-violet-600 text-white shadow-md' : 'text-slate-455 hover:text-slate-200'
                 }`}
               >
                 Website URL / Iframe
@@ -1759,7 +2199,7 @@ export const Editor: React.FC<EditorProps> = ({
                   }
                 }}
                 className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                  embedType === 'drawio' ? 'bg-violet-600 text-white shadow-md' : 'text-slate-450 hover:text-slate-200'
+                  embedType === 'drawio' ? 'bg-violet-600 text-white shadow-md' : 'text-slate-455 hover:text-slate-200'
                 }`}
               >
                 Canvas Drawing
@@ -1770,13 +2210,13 @@ export const Editor: React.FC<EditorProps> = ({
             <div className="space-y-4 mb-6">
               {embedType === 'url' ? (
                 <div>
-                  <label className="block text-xs font-semibold text-slate-450 mb-1.5 uppercase tracking-wider">Embed Link / URL</label>
+                  <label className="block text-xs font-semibold text-slate-455 mb-1.5 uppercase tracking-wider">Embed Link / URL</label>
                   <input
                     type="text"
                     value={embedUrl}
                     onChange={(e) => setEmbedUrl(e.target.value)}
                     placeholder="e.g. https://youtube.com/watch?v=... or https://example.com"
-                    className="w-full bg-[#0d1117] border border-slate-750 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-violet-500/80 focus:ring-1 focus:ring-violet-500/30 transition placeholder-slate-600"
+                    className="w-full bg-[#0d1117] border border-slate-750 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-violet-500/80 focus:ring-1 focus:ring-violet-500/30 transition placeholder-slate-655"
                   />
                   <p className="text-[10px] text-slate-500 mt-1.5 font-medium">Supports regular websites, direct iframe src URLs, YouTube videos, and more.</p>
                 </div>
@@ -1823,6 +2263,98 @@ export const Editor: React.FC<EditorProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Floating Link Paste Option Picker */}
+      {pasteInfo && (
+        <div
+          id="link-paste-popup"
+          style={{
+            position: 'fixed',
+            top: `${pasteInfo.y}px`,
+            left: `${pasteInfo.x}px`,
+            zIndex: 9999,
+          }}
+          className="bg-[#1e2330] border border-slate-700/80 rounded-xl shadow-2xl p-1 px-1.5 text-xs text-slate-200 select-none animate-in fade-in zoom-in-95 duration-100 flex flex-col space-y-0.5"
+        >
+          <div className="px-2 py-1 text-[9px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-800 mb-1 truncate max-w-[200px]">
+            {pasteInfo.url}
+          </div>
+          <button
+            onClick={() => setPasteInfo(null)}
+            className="flex items-center space-x-2 px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-350 hover:text-slate-100 text-left cursor-pointer transition-colors w-full group"
+          >
+            <Link2 size={13} className="text-violet-400 shrink-0" />
+            <div className="flex flex-col">
+              <span className="font-semibold text-[11px] leading-tight">Inline Link</span>
+              <span className="text-[9px] text-slate-550">Keep standard hyperlink</span>
+            </div>
+          </button>
+          <button
+            onClick={() => handleToastConvert('bookmark')}
+            className="flex items-center space-x-2 px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-350 hover:text-slate-100 text-left cursor-pointer transition-colors w-full group"
+          >
+            <BookMarked size={13} className="text-emerald-400 shrink-0" />
+            <div className="flex flex-col">
+              <span className="font-semibold text-[11px] leading-tight">Bookmark Card</span>
+              <span className="text-[9px] text-slate-550">Create rich preview card</span>
+            </div>
+          </button>
+          <button
+            onClick={() => handleToastConvert('embed')}
+            className="flex items-center space-x-2 px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-350 hover:text-slate-100 text-left cursor-pointer transition-colors w-full group"
+          >
+            <MonitorPlay size={13} className="text-amber-400 shrink-0" />
+            <div className="flex flex-col">
+              <span className="font-semibold text-[11px] leading-tight">Embed</span>
+              <span className="text-[9px] text-slate-550">Insert interactive iframe</span>
+            </div>
+          </button>
+        </div>
+      )}
+      {/* Floating Table Add Row/Col Hover Overlays */}
+      {activeTableRect && (
+        <>
+          {/* Row "+" button below the table */}
+          <button
+            onMouseDown={(e) => {
+              // preventDefault keeps editor focus + selection intact before command runs
+              e.preventDefault()
+              e.stopPropagation()
+              editor.chain().addRowAfter().run()
+            }}
+            title="Add Row"
+            style={{
+              position: 'fixed',
+              top: `${activeTableRect.top + activeTableRect.height + 6}px`,
+              left: `${activeTableRect.left + activeTableRect.width / 2 - 12}px`,
+              zIndex: 9999,
+            }}
+            className="bg-[#1e2330] hover:bg-violet-600 border border-slate-700 hover:border-violet-500 text-slate-400 hover:text-white rounded-full w-6 h-6 shadow-2xl transition cursor-pointer flex items-center justify-center"
+          >
+            <Plus size={12} />
+          </button>
+
+          {/* Column "+" button to the right of the table */}
+          <button
+            onMouseDown={(e) => {
+              // preventDefault keeps editor focus + selection intact before command runs
+              e.preventDefault()
+              e.stopPropagation()
+              editor.chain().addColumnAfter().run()
+            }}
+            title="Add Column"
+            style={{
+              position: 'fixed',
+              top: `${activeTableRect.top + activeTableRect.height / 2 - 12}px`,
+              left: `${activeTableRect.left + activeTableRect.width + 6}px`,
+              zIndex: 9999,
+            }}
+            className="bg-[#1e2330] hover:bg-violet-600 border border-slate-700 hover:border-violet-500 text-slate-400 hover:text-white rounded-full w-6 h-6 shadow-2xl transition cursor-pointer flex items-center justify-center"
+          >
+            <Plus size={12} />
+          </button>
+        </>
       )}
     </div>
   )
