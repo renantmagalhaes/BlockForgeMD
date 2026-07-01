@@ -382,7 +382,7 @@ export const App: React.FC = () => {
     }
   }
 
-  const fetchFileContent = async (path: string) => {
+  const fetchFileContent = async (path: string, skipHistory = false) => {
     try {
       const res = await fetch(`${API_BASE}/api/file?path=${encodeURIComponent(path)}`)
       if (!res.ok) throw new Error('Failed to fetch file content')
@@ -392,6 +392,13 @@ export const App: React.FC = () => {
       setCurrentFrontMatterStr(frontMatterStr)
       setSelectedPath(path)
       setActiveView(data.meta?.type === 'board' ? 'board' : 'editor')
+      // Sync URL hash so the file can be restored on refresh or shared
+      if (!skipHistory) {
+        const hash = '#/' + encodeURIComponent(path)
+        if (window.location.hash !== hash) {
+          window.history.pushState({ filePath: path }, '', hash)
+        }
+      }
     } catch (e) {
       console.error('Error loading file content', e)
     }
@@ -408,6 +415,37 @@ export const App: React.FC = () => {
     es.onopen = () => setSyncError(false)
     return () => es.close()
   }, [selectedPath, isSaving])
+
+  // Restore file from URL hash on initial page load
+  useEffect(() => {
+    const hash = window.location.hash
+    if (hash.startsWith('#/')) {
+      const path = decodeURIComponent(hash.slice(2))
+      if (path) fetchFileContent(path, true) // true = don't push again to history
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Handle browser back / forward navigation
+  useEffect(() => {
+    const handlePopState = (e: PopStateEvent) => {
+      const path = e.state?.filePath
+      if (path) {
+        fetchFileContent(path, true)
+      } else {
+        // Hash is now empty — return to the welcome/home view
+        const hash = window.location.hash
+        if (!hash || hash === '#' || hash === '#/') {
+          setSelectedPath(null)
+          setSelectedContent('')
+          setCurrentFrontMatterStr('')
+        } else if (hash.startsWith('#/')) {
+          fetchFileContent(decodeURIComponent(hash.slice(2)), true)
+        }
+      }
+    }
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const close = () => setContextMenu(p => p.isOpen ? { ...p, isOpen: false } : p)
@@ -555,7 +593,14 @@ export const App: React.FC = () => {
       const res = await fetch(`${API_BASE}/api/file?path=${encodeURIComponent(path)}`, { method: 'DELETE' })
       if (!res.ok) throw new Error('Failed to delete file')
       fetchFiles()
-      if (selectedPath === path) { setSelectedPath(null); setActiveView('board') }
+      if (selectedPath === path) {
+        setSelectedPath(null)
+        setSelectedContent('')
+        setCurrentFrontMatterStr('')
+        setActiveView('board')
+        // Clear hash so refresh doesn't attempt to reload a deleted file
+        window.history.replaceState(null, '', window.location.pathname)
+      }
     } catch (e) { console.error('Error deleting file', e) }
   }
 
