@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react'
+import EmojiPicker, { Theme } from 'emoji-picker-react'
 import { useEditor, EditorContent, NodeViewWrapper, NodeViewContent, ReactNodeViewRenderer } from '@tiptap/react'
 import { Node, mergeAttributes } from '@tiptap/core'
 import { Excalidraw } from '@excalidraw/excalidraw'
@@ -145,7 +146,451 @@ turndownService.addRule('bookmark', {
   }
 })
 
+// Custom rule for callout nodes in Turndown
+turndownService.addRule('callout', {
+  filter: (node) => node.nodeName.toLowerCase() === 'div' && (node as HTMLElement).getAttribute('data-callout') === 'true',
+  replacement: (content, node) => {
+    const el = node as HTMLElement
+    const emoji = el.getAttribute('data-callout-emoji') || '📝'
+    const label = el.getAttribute('data-callout-label') || 'Note'
+    const color = el.getAttribute('data-callout-color') || '#6366f1'
+    return `\n<callout emoji="${emoji}" label="${label}" color="${color}">\n${content}\n</callout>\n`
+  }
+})
+
+// Callout color palette
+const CALLOUT_COLORS = [
+  '#6366f1', '#8b5cf6', '#ec4899', '#ef4444',
+  '#f97316', '#f59e0b', '#22c55e', '#10b981',
+  '#06b6d4', '#3b82f6', '#64748b', '#e2e8f0',
+]
+
+// Complete searchable emoji database
+const EMOJI_LIST = [
+  { char: '😀', name: 'grinning smiley smile face' },
+  { char: '😃', name: 'smiley happy smile face' },
+  { char: '😄', name: 'smiley grin laugh face' },
+  { char: '😁', name: 'grin beam face' },
+  { char: '😆', name: 'laugh squint face' },
+  { char: '😅', name: 'sweat smile face' },
+  { char: '😂', name: 'joy tears laugh face' },
+  { char: '🤣', name: 'rofl funny laugh face' },
+  { char: '😊', name: 'blush smile happy face' },
+  { char: '😇', name: 'halo innocent face' },
+  { char: '🙂', name: 'slightly smiling face' },
+  { char: '🙃', name: 'upside down face' },
+  { char: '😉', name: 'wink face' },
+  { char: '😌', name: 'relieved face' },
+  { char: '😍', name: 'heart eyes love face' },
+  { char: '🥰', name: 'smiling face with hearts love face' },
+  { char: '😘', name: 'kissing heart love face' },
+  { char: '😋', name: 'yum delicious face' },
+  { char: '😛', name: 'stuck out tongue face' },
+  { char: '😜', name: 'wink tongue face' },
+  { char: '🤪', name: 'zany crazy face' },
+  { char: '🤨', name: 'raised eyebrow face' },
+  { char: '🧐', name: 'monocle face' },
+  { char: '🤓', name: 'nerd face glasses' },
+  { char: '😎', name: 'sunglasses cool face' },
+  { char: '🥸', name: 'disguised face' },
+  { char: '🤩', name: 'star struck eyes face' },
+  { char: '🥳', name: 'partying celebrate face' },
+  { char: '😏', name: 'smirk face' },
+  { char: '😒', name: 'unamused face' },
+  { char: '😞', name: 'disappointed sad face' },
+  { char: '😔', name: 'pensive sad face' },
+  { char: '😟', name: 'worried sad face' },
+  { char: '😕', name: 'confused face' },
+  { char: '🙁', name: 'slightly frown face' },
+  { char: '☹️', name: 'frown sad face' },
+  { char: '😣', name: 'persevere face' },
+  { char: '😖', name: 'confounded face' },
+  { char: '😫', name: 'tired weary face' },
+  { char: '😩', name: 'weary tired face' },
+  { char: '🥺', name: 'pleading begging face' },
+  { char: '😢', name: 'cry sad tears face' },
+  { char: '😭', name: 'sob cry sad tears face' },
+  { char: '😤', name: 'triumph steam angry face' },
+  { char: '😠', name: 'angry mad face' },
+  { char: '😡', name: 'rage angry mad face' },
+  { char: '🤬', name: 'cursing swear angry face' },
+  { char: '🤯', name: 'exploding head mindblown face' },
+  { char: '😳', name: 'flushed blushed face' },
+  { char: '🥵', name: 'hot red face' },
+  { char: '🥶', name: 'cold blue face' },
+  { char: '😱', name: 'scream fear scared face' },
+  { char: '😨', name: 'fearful scared face' },
+  { char: '😰', name: 'anxious blue sweat face' },
+  { char: '😥', name: 'sad relieved sweat face' },
+  { char: '😓', name: 'cold sweat face' },
+  { char: '🤔', name: 'thinking face' },
+  { char: '🫣', name: 'peeking eye face' },
+  { char: '🤭', name: 'hand over mouth face' },
+  { char: '🫢', name: 'open mouth face' },
+  { char: '🤫', name: 'shush quiet silent face' },
+  { char: '🫠', name: 'melting face' },
+  { char: '🤥', name: 'liar pinocchio face' },
+  { char: '😶', name: 'no mouth face' },
+  { char: '😐', name: 'neutral line face' },
+  { char: '😑', name: 'expressionless line face' },
+  { char: '😬', name: 'grimacing teeth face' },
+  { char: '🙄', name: 'rolling eyes face' },
+  { char: '😴', name: 'sleep sleepy tired face' },
+  { char: '🤤', name: 'drool face' },
+  { char: '😪', name: 'sleepy tear face' },
+  { char: '😵', name: 'dizzy dead face' },
+  { char: '🤐', name: 'zipper mouth silent face' },
+  { char: '🥴', name: 'woozy drunk face' },
+  { char: '🤢', name: 'nauseated green sick face' },
+  { char: '🤮', name: 'vomit puke sick face' },
+  { char: '🤧', name: 'sneeze cold sick face' },
+  { char: '😷', name: 'mask medical sick face' },
+  { char: '🤒', name: 'thermometer temperature sick face' },
+  { char: '🤕', name: 'bandage head injury sick face' },
+  { char: '🤑', name: 'money mouth dollar face' },
+  { char: '🤠', name: 'cowboy hat face' },
+  { char: '😈', name: 'devil horn purple happy face' },
+  { char: '👿', name: 'devil angry purple sad face' },
+  { char: '👹', name: 'ogre red monster demon' },
+  { char: '👺', name: 'goblin red nose demon' },
+  { char: '💀', name: 'skull bones dead skeleton' },
+  { char: '👻', name: 'ghost spooky halloween' },
+  { char: '👽', name: 'alien ufo space' },
+  { char: '👾', name: 'space invader retro game' },
+  { char: '🤖', name: 'robot machine tech' },
+  { char: '💩', name: 'poop pile brown' },
+  { char: '🤡', name: 'clown circus face' },
+  { char: '🔥', name: 'fire hot flame burn' },
+  { char: '💡', name: 'idea light bulb smart' },
+  { char: '⚠️', name: 'warning danger yellow triangle' },
+  { char: '🚨', name: 'danger siren red alert police emergency' },
+  { char: 'ℹ️', name: 'info information blue circle' },
+  { char: '✅', name: 'check correct green yes done success ok' },
+  { char: '💬', name: 'quote speech bubble chat comment' },
+  { char: '🐛', name: 'bug insect worm caterpillar' },
+  { char: '🎯', name: 'bullseye target goal hit focus' },
+  { char: '🎉', name: 'party popper celebrate congratulations' },
+  { char: '📌', name: 'pushpin red map pin' },
+  { char: '🔑', name: 'key lock password security' },
+  { char: '💎', name: 'diamond gem jewel rich' },
+  { char: '🚀', name: 'rocket space launch start speed' },
+  { char: '⭐', name: 'star yellow gold favorite' },
+  { char: '🌟', name: 'glowing star shine' },
+  { char: '✨', name: 'sparkles shine clean magic' },
+  { char: '⚡️', name: 'lightning bolt electricity energy fast power' },
+  { char: '☄️', name: 'comet space' },
+  { char: '💥', name: 'collision explosion burst blast' },
+  { char: '🌪️', name: 'tornado wind weather' },
+  { char: '🌈', name: 'rainbow colorful weather' },
+  { char: '👀', name: 'eyes look see watch' },
+  { char: '👍', name: 'thumbs up positive like yes ok' },
+  { char: '👎', name: 'thumbs down negative dislike no' },
+  { char: '❤️', name: 'heart red love' },
+  { char: '💖', name: 'sparkling heart love' },
+  { char: '💔', name: 'broken heart sad love' },
+  { char: '👏', name: 'clap hands applause' },
+  { char: '🙌', name: 'hooray raise hands celebrate' },
+  { char: '🙏', name: 'please thank you pray hands' },
+  { char: '💪', name: 'muscle flex strong power' },
+  { char: '✍️', name: 'writing hand pen pencil signature' },
+  { char: '📍', name: 'location map pin red' },
+  { char: '⏱️', name: 'stopwatch timer time' },
+  { char: '⏰', name: 'alarm clock time' },
+  { char: '📅', name: 'calendar date schedule' },
+  { char: '📁', name: 'folder directory document' },
+  { char: '📂', name: 'open folder directory' },
+  { char: '📄', name: 'page document sheet paper' },
+  { char: '📋', name: 'clipboard document task checklist' },
+  { char: '📎', name: 'paperclip clip attach' },
+  { char: '🔗', name: 'link chain hyperlink connect url' },
+  { char: '✏️', name: 'pencil edit write' },
+  { char: '📝', name: 'note memo document write pen page' },
+  { char: '💼', name: 'briefcase work job business' },
+  { char: '🔍', name: 'search magnifying glass find inspect' },
+  { char: '🔒', name: 'lock secure password private closed' },
+  { char: '🔓', name: 'unlock open insecure public' },
+  { char: '🏷️', name: 'tag label ticket price' },
+  { char: '🎨', name: 'palette art paint creative design' },
+  { char: '🛠️', name: 'tools hammer wrench repair dev fix' },
+  { char: '💻', name: 'computer laptop code dev technology tech' },
+  { char: '📱', name: 'phone mobile cellphone device' },
+  { char: '🐱', name: 'cat kitten animal pet' },
+  { char: '🐶', name: 'dog puppy animal pet' },
+  { char: '🦁', name: 'lion animal wild cat' },
+  { char: '🐼', name: 'panda animal bear' },
+  { char: '🥑', name: 'avocado food healthy' },
+  { char: '🍕', name: 'pizza food junk slice cheese' },
+  { char: '🍔', name: 'hamburger food junk burger cheese' },
+  { char: '☕', name: 'coffee tea hot drink cup mug cafe' },
+  { char: '🍺', name: 'beer alcohol drink glass mug pub' },
+  { char: '🍷', name: 'wine alcohol drink glass' },
+  { char: '🚗', name: 'car vehicle automobile drive transport' },
+  { char: '✈️', name: 'airplane plane flight travel sky transport' },
+  { char: '🌍', name: 'earth globe world space travel' },
+  { char: '☀️', name: 'sun sunny summer hot weather' },
+  { char: '🌧️', name: 'rain rainy clouds weather' },
+  { char: '❄️', name: 'snowflake snow cold winter ice weather' }
+]
+
+const hexToRgba = (hex: string, alpha: number) => {
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  return `rgba(${r},${g},${b},${alpha})`
+}
+
+const CalloutComponent = (props: any) => {
+  const emoji: string = props.node.attrs.calloutEmoji || '📝'
+  const label: string = props.node.attrs.calloutLabel || 'Note'
+  const color: string = props.node.attrs.calloutColor || '#6366f1'
+
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false)
+  const [colorPickerOpen, setColorPickerOpen] = useState(false)
+  const [editingLabel, setEditingLabel] = useState(false)
+  const [labelValue, setLabelValue] = useState(label)
+  const labelInputRef = useRef<HTMLInputElement>(null)
+
+  // Sync label from props
+  React.useEffect(() => { setLabelValue(label) }, [label])
+  React.useEffect(() => { if (editingLabel) labelInputRef.current?.focus() }, [editingLabel])
+
+  const bg = hexToRgba(color, 0.07)
+  const textColor = color
+
+  const closeAll = () => {
+    setEmojiPickerOpen(false)
+    setColorPickerOpen(false)
+  }
+
+  return (
+    <NodeViewWrapper
+      data-callout="true"
+      data-callout-emoji={emoji}
+      data-callout-label={label}
+      data-callout-color={color}
+      style={{
+        borderLeft: `4px solid ${color}`,
+        background: bg,
+        borderRadius: '0 12px 12px 0',
+        padding: '12px 16px',
+        margin: '12px 0',
+        position: 'relative',
+      }}
+      className="group"
+    >
+      {/* Header row */}
+      <div
+        contentEditable={false}
+        style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', userSelect: 'none', position: 'relative' }}
+      >
+        {/* Emoji picker trigger */}
+        <button
+          onMouseDown={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            setColorPickerOpen(false)
+            setEmojiPickerOpen(p => !p)
+          }}
+          style={{
+            fontSize: '18px', lineHeight: 1, background: 'none', border: 'none',
+            cursor: 'pointer', padding: '2px 4px', borderRadius: '6px',
+            transition: 'background 0.15s',
+          }}
+          title="Change emoji"
+        >
+          {emoji}
+        </button>
+
+        {/* Editable label */}
+        {editingLabel ? (
+          <input
+            ref={labelInputRef}
+            value={labelValue}
+            onChange={(e) => setLabelValue(e.target.value)}
+            onBlur={() => {
+              props.updateAttributes({ calloutLabel: labelValue || 'Note' })
+              setEditingLabel(false)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === 'Escape') {
+                props.updateAttributes({ calloutLabel: labelValue || 'Note' })
+                setEditingLabel(false)
+              }
+            }}
+            style={{
+              color: textColor, fontWeight: 700, fontSize: '12px', letterSpacing: '0.05em',
+              textTransform: 'uppercase', background: 'transparent',
+              border: `1px solid ${color}60`, borderRadius: '4px',
+              padding: '1px 6px', outline: 'none', width: '120px',
+            }}
+          />
+        ) : (
+          <span
+            onMouseDown={(e) => { e.preventDefault(); setEditingLabel(true); closeAll() }}
+            style={{
+              color: textColor, fontWeight: 700, fontSize: '12px', letterSpacing: '0.05em',
+              textTransform: 'uppercase', cursor: 'text',
+              borderBottom: `1px dashed ${color}50`,
+              paddingBottom: '1px',
+            }}
+            title="Click to rename"
+          >
+            {label}
+          </span>
+        )}
+
+        {/* Color picker trigger */}
+        <button
+          onMouseDown={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            setEmojiPickerOpen(false)
+            setColorPickerOpen(p => !p)
+          }}
+          style={{
+            width: '14px', height: '14px', borderRadius: '50%',
+            background: color, border: `2px solid ${color}80`,
+            cursor: 'pointer', flexShrink: 0,
+            boxShadow: '0 0 0 1px rgba(0,0,0,0.3)',
+          }}
+          title="Change color"
+        />
+
+        {/* Emoji picker dropdown */}
+        {emojiPickerOpen && (
+          <div
+            style={{
+              position: 'absolute', top: '100%', left: 0, zIndex: 9999,
+              boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+            }}
+          >
+            <EmojiPicker
+              theme={Theme.DARK}
+              lazyLoadEmojis={true}
+              onEmojiClick={(emojiData) => {
+                props.updateAttributes({ calloutEmoji: emojiData.emoji })
+                setEmojiPickerOpen(false)
+              }}
+            />
+          </div>
+        )}
+
+
+        {/* Color picker dropdown */}
+        {colorPickerOpen && (
+          <div
+            style={{
+              position: 'absolute', top: '100%', left: 0, zIndex: 9999,
+              background: '#161b22', border: '1px solid #30363d',
+              borderRadius: '10px', padding: '10px',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+            }}
+          >
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '6px', marginBottom: '8px' }}>
+              {CALLOUT_COLORS.map(c => (
+                <button
+                  key={c}
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    props.updateAttributes({ calloutColor: c })
+                    setColorPickerOpen(false)
+                  }}
+                  style={{
+                    width: '22px', height: '22px', borderRadius: '50%',
+                    background: c, border: c === color ? '2px solid white' : '2px solid transparent',
+                    cursor: 'pointer', boxShadow: '0 0 0 1px rgba(0,0,0,0.4)',
+                  }}
+                  title={c}
+                />
+              ))}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ color: '#64748b', fontSize: '10px', fontWeight: 600 }}>HEX</span>
+              <input
+                type="text"
+                defaultValue={color}
+                maxLength={7}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    const val = (e.target as HTMLInputElement).value
+                    if (/^#[0-9a-fA-F]{6}$/.test(val)) {
+                      props.updateAttributes({ calloutColor: val })
+                      setColorPickerOpen(false)
+                    }
+                  }
+                }}
+                style={{
+                  background: '#0d1117', border: '1px solid #30363d',
+                  borderRadius: '6px', padding: '3px 8px', color: '#e2e8f0',
+                  fontSize: '11px', outline: 'none', width: '80px', fontFamily: 'monospace',
+                }}
+                placeholder="#rrggbb"
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Editable body content */}
+      <NodeViewContent style={{ color: '#cbd5e1', fontSize: '14px', lineHeight: '1.7' }} />
+    </NodeViewWrapper>
+  )
+}
+
+const CalloutNode = Node.create({
+  name: 'callout',
+  group: 'block',
+  content: 'block+',
+  defining: true,
+
+  addAttributes() {
+    return {
+      calloutEmoji: {
+        default: '📝',
+        parseHTML: el => el.getAttribute('data-callout-emoji') || '📝',
+        renderHTML: attrs => ({ 'data-callout-emoji': attrs.calloutEmoji }),
+      },
+      calloutLabel: {
+        default: 'Note',
+        parseHTML: el => el.getAttribute('data-callout-label') || 'Note',
+        renderHTML: attrs => ({ 'data-callout-label': attrs.calloutLabel }),
+      },
+      calloutColor: {
+        default: '#6366f1',
+        parseHTML: el => el.getAttribute('data-callout-color') || '#6366f1',
+        renderHTML: attrs => ({ 'data-callout-color': attrs.calloutColor }),
+      },
+    }
+  },
+
+  parseHTML() {
+    return [
+      { tag: 'div[data-callout="true"]' },
+      {
+        tag: 'callout',
+        getAttrs: el => ({
+          calloutEmoji: (el as HTMLElement).getAttribute('emoji') || '📝',
+          calloutLabel: (el as HTMLElement).getAttribute('label') || 'Note',
+          calloutColor: (el as HTMLElement).getAttribute('color') || '#6366f1',
+        })
+      },
+    ]
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ['div', mergeAttributes({ 'data-callout': 'true' }, HTMLAttributes), 0]
+  },
+
+  addNodeView() {
+    return ReactNodeViewRenderer(CalloutComponent)
+  },
+})
+
+
+
+
 const IframeViewerComponent = (props: any) => {
+
   const { src, width, height } = props.node.attrs
   const containerRef = useRef<HTMLDivElement>(null)
   const [isResizing, setIsResizing] = useState(false)
@@ -770,7 +1215,12 @@ const COMMANDS = [
   { id: 'number', label: 'Numbered List', desc: 'Ordered numbered list', search: 'number list ordered' },
   { id: 'task', label: 'Task List', desc: 'Checkbox checklist', search: 'task todo checklist check' },
   { id: 'quote', label: 'Blockquote', desc: 'Indented block quote', search: 'quote blockquote indent' },
-  { id: 'callout', label: 'Callout Box', desc: 'Highlighted info box', search: 'callout note alert warning info' },
+  { id: 'callout-note', label: '📝 Note Callout', desc: 'Callout styled as a Note', search: 'callout note box preset' },
+  { id: 'callout-tip', label: '💡 Tip Callout', desc: 'Callout styled as a Tip', search: 'callout tip box preset' },
+  { id: 'callout-warning', label: '⚠️ Warning Callout', desc: 'Callout styled as a Warning', search: 'callout warning box preset' },
+  { id: 'callout-danger', label: '🚨 Danger Callout', desc: 'Callout styled as a Danger', search: 'callout danger box preset' },
+  { id: 'callout-bug', label: '🐛 Bug Callout', desc: 'Callout styled as a Bug', search: 'callout bug box preset' },
+  { id: 'callout', label: '🎨 Custom Callout', desc: 'Fully customizable callout box', search: 'callout note custom box' },
   { id: 'table', label: 'Table Grid', desc: 'Insert a 2x2 grid table', search: 'table grid columns cell' },
   { id: 'code', label: 'Code Block', desc: 'Monospace fenced code block', search: 'code block script pre' },
   { id: 'subpage', label: 'Sub-page', desc: 'Create a sub-page inside this page', search: 'subpage sub page child nested' },
@@ -881,6 +1331,16 @@ export const Editor: React.FC<EditorProps> = ({
   const [mentionCoords, setMentionCoords] = useState({ top: 0, left: 0 })
   const [mentionSelectedIndex, setMentionSelectedIndex] = useState(0)
 
+  // Emoji suggestions states
+  const [emojiActive, setEmojiActive] = useState(false)
+  const [emojiQuery, setEmojiQuery] = useState('')
+  const [emojiCoords, setEmojiCoords] = useState({ top: 0, left: 0 })
+  const [emojiSelectedIndex, setEmojiSelectedIndex] = useState(0)
+
+  const emojiActiveRef = useRef(emojiActive)
+  const emojiSelectedIndexRef = useRef(emojiSelectedIndex)
+  const emojiQueryRef = useRef(emojiQuery)
+
   // Link paste non-blocking toast state
   const [pasteInfo, setPasteInfo] = useState<{ url: string; from: number; to: number; x: number; y: number } | null>(null)
   const pasteInfoRef = useRef(pasteInfo)
@@ -966,6 +1426,13 @@ export const Editor: React.FC<EditorProps> = ({
       .replace(/<p>\s*(<bookmark[^>]*>.*?<\/bookmark>)\s*<\/p>/gi, '$1')
       .replace(/<p>\s*(<drawio[^>]*>.*?<\/drawio>)\s*<\/p>/gi, '$1')
       .replace(/<p>\s*(<excalidraw[^>]*>.*?<\/excalidraw>)\s*<\/p>/gi, '$1')
+      // Convert <callout emoji="X" label="Y" color="Z">...</callout> → <div data-callout="true" ...>
+      .replace(/<callout([^>]*)>([\s\S]*?)<\/callout>/gi, (_, attrs, content) => {
+        const emoji = (attrs.match(/emoji="([^"]*)"/) || [])[1] || '📝'
+        const label = (attrs.match(/label="([^"]*)"/) || [])[1] || 'Note'
+        const color = (attrs.match(/color="([^"]*)"/) || [])[1] || '#6366f1'
+        return `<div data-callout="true" data-callout-emoji="${emoji}" data-callout-label="${label}" data-callout-color="${color}">${content}</div>`
+      })
     return rawHtml
   }
 
@@ -998,6 +1465,7 @@ export const Editor: React.FC<EditorProps> = ({
       IframeNode,
       BookmarkNode,
       CustomCodeBlock,
+      CalloutNode,
       DrawioNode.configure({
         onSelectFile: (path: string) => onSelectFile?.(path)
       } as any),
@@ -1165,6 +1633,35 @@ export const Editor: React.FC<EditorProps> = ({
           }
         }
 
+        if (emojiActiveRef.current) {
+          const filtered = getFilteredEmojis()
+          if (filtered.length > 0) {
+            if (event.key === 'ArrowDown') {
+              event.preventDefault()
+              setEmojiSelectedIndex((prev) => (prev + 1) % filtered.length)
+              return true
+            }
+            if (event.key === 'ArrowUp') {
+              event.preventDefault()
+              setEmojiSelectedIndex((prev) => (prev - 1 + filtered.length) % filtered.length)
+              return true
+            }
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              executeEmoji(filtered[emojiSelectedIndexRef.current].char)
+              return true
+            }
+            if (event.key === 'Escape') {
+              event.preventDefault()
+              setEmojiActive(false)
+              return true
+            }
+            if (event.key === ' ') {
+              setEmojiActive(false)
+            }
+          }
+        }
+
         return false
       }
     },
@@ -1185,6 +1682,10 @@ export const Editor: React.FC<EditorProps> = ({
     mentionActiveRef.current = mentionActive
     mentionSelectedIndexRef.current = mentionSelectedIndex
     mentionQueryRef.current = mentionQuery
+
+    emojiActiveRef.current = emojiActive
+    emojiSelectedIndexRef.current = emojiSelectedIndex
+    emojiQueryRef.current = emojiQuery
   })
 
   // Floating Table Controls coordinates state
@@ -1272,11 +1773,13 @@ export const Editor: React.FC<EditorProps> = ({
       
       const slashMatch = textBeforeCursor.match(/(?:^|\s)\/([a-zA-Z0-9]*)$/)
       const mentionMatch = textBeforeCursor.match(/(?:^|\s)@([a-zA-Z0-9\s-]*)$/)
+      const emojiMatch = textBeforeCursor.match(/(?:^|\s):([a-zA-Z0-9_+-]*)$/)
 
       if (slashMatch) {
         setCommandActive(true)
         setCommandQuery(slashMatch[1])
         setMentionActive(false)
+        setEmojiActive(false)
         try {
           const coords = editor.view.coordsAtPos(selection.from)
           setCommandCoords({
@@ -1288,6 +1791,7 @@ export const Editor: React.FC<EditorProps> = ({
         setMentionActive(true)
         setMentionQuery(mentionMatch[1])
         setCommandActive(false)
+        setEmojiActive(false)
         try {
           const coords = editor.view.coordsAtPos(selection.from)
           setMentionCoords({
@@ -1295,9 +1799,23 @@ export const Editor: React.FC<EditorProps> = ({
             left: coords.left,
           })
         } catch (e) {}
+      } else if (emojiMatch) {
+        setEmojiActive(true)
+        setEmojiQuery(emojiMatch[1])
+        setCommandActive(false)
+        setMentionActive(false)
+        setEmojiSelectedIndex(0)
+        try {
+          const coords = editor.view.coordsAtPos(selection.from)
+          setEmojiCoords({
+            top: coords.bottom + 8,
+            left: coords.left,
+          })
+        } catch (e) {}
       } else {
         setCommandActive(false)
         setMentionActive(false)
+        setEmojiActive(false)
       }
     }
 
@@ -1559,8 +2077,47 @@ export const Editor: React.FC<EditorProps> = ({
       case 'quote':
         editor.chain().focus().toggleBlockquote().run()
         break
+      case 'callout-note':
+        editor.chain().focus().insertContent({
+          type: 'callout',
+          attrs: { calloutEmoji: '📝', calloutLabel: 'Note', calloutColor: '#6366f1' },
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: ' ' }] }]
+        }).run()
+        break
+      case 'callout-tip':
+        editor.chain().focus().insertContent({
+          type: 'callout',
+          attrs: { calloutEmoji: '💡', calloutLabel: 'Tip', calloutColor: '#10b981' },
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: ' ' }] }]
+        }).run()
+        break
+      case 'callout-warning':
+        editor.chain().focus().insertContent({
+          type: 'callout',
+          attrs: { calloutEmoji: '⚠️', calloutLabel: 'Warning', calloutColor: '#f59e0b' },
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: ' ' }] }]
+        }).run()
+        break
+      case 'callout-danger':
+        editor.chain().focus().insertContent({
+          type: 'callout',
+          attrs: { calloutEmoji: '🚨', calloutLabel: 'Danger', calloutColor: '#ef4444' },
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: ' ' }] }]
+        }).run()
+        break
+      case 'callout-bug':
+        editor.chain().focus().insertContent({
+          type: 'callout',
+          attrs: { calloutEmoji: '🐛', calloutLabel: 'Bug', calloutColor: '#ec4899' },
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: ' ' }] }]
+        }).run()
+        break
       case 'callout':
-        editor.chain().focus().insertContent('<blockquote><p>💡 <strong>Note:</strong> </p></blockquote>').run()
+        editor.chain().focus().insertContent({
+          type: 'callout',
+          attrs: { calloutEmoji: '📝', calloutLabel: 'Note', calloutColor: '#6366f1' },
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: ' ' }] }]
+        }).run()
         break
       case 'table':
         editor.chain().focus().insertContent('<table><thead><tr><th>Header 1</th><th>Header 2</th></tr></thead><tbody><tr><td>Cell 1</td><td>Cell 2</td></tr></tbody></table>').run()
@@ -1606,6 +2163,27 @@ export const Editor: React.FC<EditorProps> = ({
       case 'board':  return <LayoutGrid size={13} className="text-violet-400 shrink-0" />
       default:       return <FileText size={13} className="text-blue-400 shrink-0" />
     }
+  }
+
+  const getFilteredEmojis = () => {
+    const query = emojiQuery.toLowerCase().trim()
+    if (!query) {
+      // Return first 10 emojis
+      return EMOJI_LIST.slice(0, 10)
+    }
+    return EMOJI_LIST.filter(e => e.name.includes(query)).slice(0, 10)
+  }
+
+  const executeEmoji = (emojiChar: string) => {
+    if (!editor) return
+    const { selection } = editor.state
+    const queryLength = emojiQuery.length + 1 // +1 for the ':'
+    editor.chain()
+      .focus()
+      .deleteRange({ from: selection.from - queryLength, to: selection.from })
+      .insertContent(emojiChar)
+      .run()
+    setEmojiActive(false)
   }
 
   const getFilteredMentions = () => {
@@ -2054,6 +2632,39 @@ export const Editor: React.FC<EditorProps> = ({
               ))
             )}
           </div>
+        </div>
+      )}
+
+      {/* Floating Emoji Suggestions Popup Menu */}
+      {emojiActive && getFilteredEmojis().length > 0 && (
+        <div
+          style={{
+            position: 'fixed',
+            top: `${emojiCoords.top}px`,
+            left: `${emojiCoords.left}px`,
+            zIndex: 9999,
+          }}
+          className="w-56 max-h-72 overflow-y-auto bg-[#161b22] border border-slate-700/80 rounded-xl shadow-2xl p-1.5 flex flex-col space-y-0.5 no-scrollbar select-none animate-in fade-in zoom-in-95 duration-100"
+        >
+          <div className="px-2.5 py-1.5 text-[9px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-800/40 mb-1">
+            Emoji Matches
+          </div>
+          {getFilteredEmojis().map((emojiItem, i) => {
+            const isSelected = i === emojiSelectedIndex
+            return (
+              <div
+                key={emojiItem.char}
+                onClick={() => executeEmoji(emojiItem.char)}
+                onMouseEnter={() => setEmojiSelectedIndex(i)}
+                className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg cursor-pointer transition ${
+                  isSelected ? 'bg-violet-600/15 text-violet-300 border border-violet-500/20' : 'text-slate-300 hover:bg-slate-800/40'
+                }`}
+              >
+                <span className="text-lg leading-none shrink-0">{emojiItem.char}</span>
+                <span className="text-xs font-medium truncate text-slate-400">:{emojiItem.name.split(' ')[0]}:</span>
+              </div>
+            )
+          })}
         </div>
       )}
 

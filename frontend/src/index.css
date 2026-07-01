@@ -168,6 +168,10 @@ body {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+/* Callout type switcher: show "Change" button on hover */
+.group:hover .callout-type-btn {
+  opacity: 1 !important;
+}
 
 /* Table interactive adjustments */
 .ProseMirror table {
