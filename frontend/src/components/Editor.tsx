@@ -1298,6 +1298,8 @@ export const Editor: React.FC<EditorProps> = ({
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyList, setHistoryList] = useState<HistoryVersion[]>([])
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
+  const [previewVersion, setPreviewVersion] = useState<{ timestamp: number; date: string; content: string } | null>(null)
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false)
 
   // Tag manager input state
   const [newTagInput, setNewTagInput] = useState('')
@@ -2023,8 +2025,8 @@ export const Editor: React.FC<EditorProps> = ({
     }
   }
 
-  const handleRollback = async (timestamp: number) => {
-    if (!confirm('Do you want to roll back the page to this version? Your current state will be saved as a backup snapshot.')) {
+  const handleRollback = async (timestamp: number, skipConfirm = false) => {
+    if (!skipConfirm && !confirm('Do you want to roll back the page to this version? Your current state will be saved as a backup snapshot.')) {
       return
     }
     setSaveStatus('saving')
@@ -2042,10 +2044,85 @@ export const Editor: React.FC<EditorProps> = ({
       editor.commands.setContent(html)
       setSaveStatus('saved')
       fetchHistory()
+      setPreviewVersion(null)
     } catch (e) {
       console.error('Rollback error', e)
       alert('Failed to rollback version.')
       setSaveStatus('dirty')
+    }
+  }
+
+  interface DiffLine {
+    type: 'added' | 'removed' | 'unchanged'
+    text: string
+  }
+
+  const getDiffLines = (current: string, snapshot: string): DiffLine[] => {
+    const currentLines = current.split('\n')
+    const snapshotLines = snapshot.split('\n')
+    const diff: DiffLine[] = []
+    let i = 0, j = 0
+
+    while (i < currentLines.length || j < snapshotLines.length) {
+      if (i < currentLines.length && j < snapshotLines.length) {
+        if (currentLines[i] === snapshotLines[j]) {
+          diff.push({ type: 'unchanged', text: currentLines[i] })
+          i++
+          j++
+        } else {
+          let foundMatch = false
+          for (let k = 1; k <= 5; k++) {
+            if (i + k < currentLines.length && currentLines[i + k] === snapshotLines[j]) {
+              for (let m = 0; m < k; m++) {
+                diff.push({ type: 'removed', text: currentLines[i + m] })
+              }
+              i += k
+              foundMatch = true
+              break
+            }
+            if (j + k < snapshotLines.length && currentLines[i] === snapshotLines[j + k]) {
+              for (let m = 0; m < k; m++) {
+                diff.push({ type: 'added', text: snapshotLines[j + m] })
+              }
+              j += k
+              foundMatch = true
+              break
+            }
+          }
+          if (!foundMatch) {
+            diff.push({ type: 'removed', text: currentLines[i] })
+            diff.push({ type: 'added', text: snapshotLines[j] })
+            i++
+            j++
+          }
+        }
+      } else if (i < currentLines.length) {
+        diff.push({ type: 'removed', text: currentLines[i] })
+        i++
+      } else if (j < snapshotLines.length) {
+        diff.push({ type: 'added', text: snapshotLines[j] })
+        j++
+      }
+    }
+    return diff
+  }
+
+  const handleLoadPreview = async (timestamp: number, date: string) => {
+    setIsPreviewLoading(true)
+    try {
+      const res = await fetch(`${API_BASE}/api/file/history/content?path=${encodeURIComponent(filePath)}&timestamp=${timestamp}`)
+      if (!res.ok) throw new Error('Failed to load snapshot content')
+      const data = await res.json()
+      setPreviewVersion({
+        timestamp,
+        date,
+        content: data.content || ''
+      })
+    } catch (e) {
+      console.error('Error loading history snapshot content', e)
+      alert('Failed to load snapshot content.')
+    } finally {
+      setIsPreviewLoading(false)
     }
   }
 
@@ -2731,11 +2808,16 @@ export const Editor: React.FC<EditorProps> = ({
                   </div>
                   <div className="mt-3.5 flex justify-end">
                     <button
-                      onClick={() => handleRollback(ver.timestamp)}
-                      className="flex items-center gap-1.5 px-3 py-1 bg-violet-600/10 hover:bg-violet-600 text-violet-400 hover:text-white border border-violet-500/20 rounded-md text-[10px] font-bold tracking-wide uppercase transition cursor-pointer"
+                      onClick={() => handleLoadPreview(ver.timestamp, ver.date)}
+                      disabled={isPreviewLoading}
+                      className="flex items-center gap-1.5 px-3 py-1 bg-violet-600/10 hover:bg-violet-600 text-violet-400 hover:text-white border border-violet-500/20 rounded-md text-[10px] font-bold tracking-wide uppercase transition cursor-pointer disabled:opacity-50"
                     >
-                      <RotateCcw size={10} />
-                      Rollback
+                      {isPreviewLoading ? (
+                        <Loader2 className="animate-spin" size={10} />
+                      ) : (
+                        <RotateCcw size={10} />
+                      )}
+                      Preview & Rollback
                     </button>
                   </div>
                 </div>
@@ -3022,6 +3104,86 @@ export const Editor: React.FC<EditorProps> = ({
               <span className="text-[9px] text-slate-550">Insert interactive iframe</span>
             </div>
           </button>
+        </div>
+      )}
+
+      {/* Version History Diff Modal Overlay */}
+      {previewVersion && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-6 select-none transition-opacity">
+          <div className="bg-[#161b22] border border-slate-700/80 rounded-2xl shadow-2xl max-w-4xl w-full max-h-[85vh] flex flex-col overflow-hidden text-slate-200">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <span className="p-1.5 bg-violet-600/10 text-violet-400 rounded-lg">
+                  <RotateCcw size={16} />
+                </span>
+                <div>
+                  <h3 className="text-sm font-bold tracking-wide">Compare Snapshot Version</h3>
+                  <p className="text-[10px] text-slate-500 font-mono mt-0.5">{previewVersion.date}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setPreviewVersion(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-850 transition cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Diff content container */}
+            <div className="flex-1 overflow-y-auto p-6 font-mono text-xs bg-[#0d1117] leading-relaxed no-scrollbar select-text">
+              <div className="border border-slate-850 rounded-xl overflow-hidden divide-y divide-slate-900 bg-slate-950/20">
+                {getDiffLines(initialContent || '', previewVersion.content).map((line, idx) => {
+                  let bgColor = 'bg-transparent text-slate-350'
+                  let marker = ' '
+                  if (line.type === 'added') {
+                    bgColor = 'bg-emerald-500/10 text-emerald-300 border-l-2 border-emerald-500/80 px-2'
+                    marker = '+'
+                  } else if (line.type === 'removed') {
+                    bgColor = 'bg-red-500/10 text-red-300 border-l-2 border-red-500/80 px-2'
+                    marker = '-'
+                  } else {
+                    bgColor = 'px-2'
+                  }
+                  return (
+                    <div key={idx} className={`py-1.5 flex gap-4 min-w-0 transition-colors hover:bg-slate-900/10 ${bgColor}`}>
+                      <span className="w-8 shrink-0 text-right text-[10px] text-slate-600 select-none border-r border-slate-900 pr-2">
+                        {idx + 1}
+                      </span>
+                      <span className="w-3 shrink-0 text-center select-none font-bold">
+                        {marker}
+                      </span>
+                      <span className="flex-1 whitespace-pre-wrap break-all">
+                        {line.text || ' '}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* Actions bar */}
+            <div className="px-6 py-4 bg-slate-900/40 border-t border-slate-800 flex justify-between items-center">
+              <span className="text-[10px] text-slate-500 flex gap-4 select-none">
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 bg-red-500/20 border border-red-500/50 rounded-sm"></span> Current (will replace)</span>
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 bg-emerald-500/20 border border-emerald-500/50 rounded-sm"></span> Target Snapshot</span>
+              </span>
+              <div className="flex gap-3 select-none">
+                <button
+                  onClick={() => setPreviewVersion(null)}
+                  className="px-4 py-2 border border-slate-800 hover:bg-slate-800 rounded-xl text-xs font-semibold text-slate-400 hover:text-slate-200 transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleRollback(previewVersion.timestamp, true)}
+                  className="px-4 py-2 bg-violet-600 hover:bg-violet-550 text-white rounded-xl text-xs font-bold transition shadow-lg hover:shadow-violet-600/10 cursor-pointer"
+                >
+                  Confirm Rollback
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
       {/* Floating Table Add Row/Col Hover Overlays */}

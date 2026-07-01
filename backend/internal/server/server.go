@@ -76,6 +76,7 @@ func (s *Server) setupRoutes() {
 		r.Patch("/file/front-matter", s.handleUpdateFrontMatter)
 		r.Patch("/file/task", s.handleUpdateTaskStatus)
 		r.Get("/file/history", s.handleGetFileHistory)
+		r.Get("/file/history/content", s.handleGetFileHistoryContent)
 		r.Post("/file/rollback", s.handleRollbackFile)
 		r.Post("/upload", s.handleUploadAsset)
 		r.Get("/sync/events", s.handleSSE)
@@ -882,4 +883,30 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, results)
+}
+
+func (s *Server) handleGetFileHistoryContent(w http.ResponseWriter, r *http.Request) {
+	relPath := r.URL.Query().Get("path")
+	tsStr := r.URL.Query().Get("timestamp")
+	if relPath == "" || tsStr == "" {
+		http.Error(w, "missing path or timestamp parameters", http.StatusBadRequest)
+		return
+	}
+
+	timestamp, err := strconv.ParseInt(tsStr, 10, 64)
+	if err != nil {
+		http.Error(w, "invalid timestamp parameter", http.StatusBadRequest)
+		return
+	}
+
+	escapedPath := url.PathEscape(relPath)
+	backupFilePath := filepath.Join(s.rootPath, ".blockforge", "history", escapedPath, fmt.Sprintf("%d.md", timestamp))
+
+	backupBytes, err := os.ReadFile(backupFilePath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("backup snapshot not found: %v", err), http.StatusNotFound)
+		return
+	}
+
+	respondJSON(w, map[string]string{"content": string(backupBytes)})
 }
