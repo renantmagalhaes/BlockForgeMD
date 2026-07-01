@@ -15,7 +15,8 @@ import {
   Plus,
   X,
   Grid,
-  Settings
+  Settings,
+  Search
 } from 'lucide-react'
 import Editor from './components/Editor'
 import Kanban from './components/Kanban'
@@ -317,6 +318,7 @@ interface FileRecord {
   type: string
   contentHash: string
   updatedAt: string
+  content?: string
   frontMatter?: Record<string, string>
 }
 
@@ -329,6 +331,21 @@ const splitFrontMatter = (content: string) => {
 }
 
 const API_BASE = import.meta.env.DEV ? 'http://localhost:8080' : ''
+
+const getSearchSnippet = (content: string, query: string) => {
+  if (!content || !query) return ''
+  const index = content.toLowerCase().indexOf(query.toLowerCase())
+  if (index === -1) {
+    const cleanContent = content.replace(/^---[\s\S]*?---/, '').trim().replace(/\s+/g, ' ')
+    return cleanContent.slice(0, 70) + (cleanContent.length > 70 ? '...' : '')
+  }
+  const start = Math.max(0, index - 35)
+  const end = Math.min(content.length, index + query.length + 35)
+  let snippet = content.slice(start, end).replace(/\s+/g, ' ')
+  if (start > 0) snippet = '...' + snippet
+  if (end < content.length) snippet = snippet + '...'
+  return snippet
+}
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 export const App: React.FC = () => {
@@ -368,6 +385,14 @@ export const App: React.FC = () => {
     isOpen: boolean; x: number; y: number; path: string | null; isFolder: boolean
   }>({ isOpen: false, x: 0, y: 0, path: null, isFolder: false })
 
+  // Search & Command Palette States
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<FileRecord[]>([])
+  const [searchSelectedIndex, setSearchSelectedIndex] = useState(0)
+  const [isSearching, setIsSearching] = useState(false)
+  const [activeSearchHighlight, setActiveSearchHighlight] = useState<string | null>(null)
+
   const fetchFiles = async () => {
     try {
       setSyncError(false)
@@ -382,7 +407,8 @@ export const App: React.FC = () => {
     }
   }
 
-  const fetchFileContent = async (path: string, skipHistory = false) => {
+  const fetchFileContent = async (path: string, skipHistory = false, highlightTerm: string | null = null) => {
+    setActiveSearchHighlight(highlightTerm)
     try {
       const res = await fetch(`${API_BASE}/api/file?path=${encodeURIComponent(path)}`)
       if (!res.ok) throw new Error('Failed to fetch file content')
@@ -446,6 +472,51 @@ export const App: React.FC = () => {
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Listen for Ctrl+K / Cmd+K to toggle Search
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault()
+        setSearchOpen((prev) => !prev)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
+  // Fetch search results from backend when query changes
+  useEffect(() => {
+    if (!searchOpen) {
+      setSearchQuery('')
+      setSearchResults([])
+      return
+    }
+
+    if (!searchQuery.trim()) {
+      setSearchResults([])
+      setSearchSelectedIndex(0)
+      return
+    }
+
+    const delayDebounceFn = setTimeout(async () => {
+      setIsSearching(true)
+      try {
+        const res = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(searchQuery)}`)
+        if (res.ok) {
+          const data = await res.json()
+          setSearchResults(data || [])
+          setSearchSelectedIndex(0)
+        }
+      } catch (e) {
+        console.error('Search query failed', e)
+      } finally {
+        setIsSearching(false)
+      }
+    }, 150)
+
+    return () => clearTimeout(delayDebounceFn)
+  }, [searchQuery, searchOpen])
 
   useEffect(() => {
     const close = () => setContextMenu(p => p.isOpen ? { ...p, isOpen: false } : p)
@@ -606,6 +677,16 @@ export const App: React.FC = () => {
 
   const activeFile = files.find((f) => f.path === selectedPath)
 
+  const COMMAND_ITEMS = [
+    { id: 'create-doc',     label: 'Create New Document',          icon: <FilePlus size={14} className="text-blue-400" />,    action: () => handleCreateFile('document') },
+    { id: 'create-board',   label: 'Create New Kanban Board',      icon: <LayoutGrid size={14} className="text-rose-400" />,  action: () => handleCreateFile('board') },
+    { id: 'create-canvas',  label: 'Create New Excalidraw Canvas',  icon: <Brush size={14} className="text-emerald-400" />,       action: () => handleCreateFile('canvas') },
+    { id: 'create-diagram', label: 'Create New Draw.io Diagram',   icon: <Grid size={14} className="text-violet-400" />,        action: () => handleCreateFile('diagram') },
+    { id: 'create-folder',  label: 'Create New Folder',            icon: <Plus size={14} className="text-slate-400" />,        action: () => handleCreateFile(null) },
+    { id: 'goto-kanban',    label: 'Go to Kanban Board Dashboard', icon: <LayoutGrid size={14} className="text-slate-400" />,  action: () => { setActiveView('board'); setSelectedPath(null) } },
+    { id: 'open-settings',  label: 'Open Settings',                icon: <Settings size={14} className="text-slate-400" />,    action: () => setAdminModalOpen(true) },
+  ]
+
   return (
     <div className="flex h-screen bg-[#0d1117] text-slate-100 font-sans overflow-hidden">
       {/* ── Sidebar ──────────────────────────────────────────────────────── */}
@@ -619,6 +700,19 @@ export const App: React.FC = () => {
                 <span className="text-[10px] text-slate-500 font-mono">Local-First Vault</span>
               </div>
             </div>
+          </div>
+
+          <div className="px-3 pt-3 pb-1">
+            <button
+              onClick={() => setSearchOpen(true)}
+              className="w-full flex items-center justify-between px-3 py-1.5 bg-[#0d1117] border border-slate-800 hover:border-slate-700 rounded-lg text-xs transition text-slate-400 hover:text-slate-200 cursor-pointer select-none"
+            >
+              <div className="flex items-center gap-2">
+                <Search size={14} className="text-slate-500" />
+                <span>Search...</span>
+              </div>
+              <span className="text-[9px] bg-[#161b22] px-1 py-0.5 rounded font-mono border border-slate-800 text-slate-500">Ctrl+K</span>
+            </button>
           </div>
 
           <div className="p-3">
@@ -767,6 +861,8 @@ export const App: React.FC = () => {
                   files={files}
                   globalLayoutOverride={globalLayoutOverride}
                   globalColumnWidthOverride={globalColumnWidthOverride}
+                  highlightSearchTerm={activeSearchHighlight}
+                  onClearSearchHighlight={() => setActiveSearchHighlight(null)}
                 />
               )}
             </div>
@@ -1106,6 +1202,161 @@ export const App: React.FC = () => {
           >
             <Trash2 size={13} className="text-red-500" /> Delete Item
           </button>
+        </div>
+      )}
+
+      {/* ── Search & Command Palette Modal ─────────────────────────────── */}
+      {searchOpen && (
+        <div 
+          className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-[12vh]"
+          onMouseDown={() => setSearchOpen(false)}
+        >
+          <div 
+            className="bg-[#161b22] border border-slate-800 rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden animate-in zoom-in-95 duration-100 flex flex-col max-h-[500px]"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            {/* Search Input Header */}
+            <div className="flex items-center gap-3 px-4 py-3.5 border-b border-slate-800">
+              <Search className="text-slate-500" size={18} />
+              <input
+                type="text"
+                placeholder="Search files and contents, or type commands..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="flex-1 bg-transparent text-sm text-slate-100 outline-none placeholder-slate-500"
+                autoFocus
+                onKeyDown={(e) => {
+                  const filteredCommands = COMMAND_ITEMS.filter(item => 
+                    item.label.toLowerCase().includes(searchQuery.toLowerCase())
+                  )
+                  const allResults = [
+                    ...filteredCommands.map(c => ({ type: 'command' as const, ...c })),
+                    ...searchResults.map(f => ({ 
+                      type: 'file' as const, 
+                      id: f.path, 
+                      label: f.title, 
+                      path: f.path, 
+                      fileType: f.type, 
+                      action: () => fetchFileContent(f.path, false, searchQuery) 
+                    }))
+                  ]
+
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault()
+                    setSearchSelectedIndex(prev => (prev + 1) % Math.max(1, allResults.length))
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault()
+                    setSearchSelectedIndex(prev => (prev - 1 + allResults.length) % Math.max(1, allResults.length))
+                  } else if (e.key === 'Enter') {
+                    e.preventDefault()
+                    if (allResults[searchSelectedIndex]) {
+                      allResults[searchSelectedIndex].action()
+                      setSearchOpen(false)
+                    }
+                  } else if (e.key === 'Escape') {
+                    setSearchOpen(false)
+                  }
+                }}
+              />
+              {isSearching && (
+                <div className="h-4 w-4 border-2 border-violet-500 border-t-transparent rounded-full animate-spin shrink-0" />
+              )}
+            </div>
+
+            {/* Results List */}
+            <div className="flex-1 overflow-y-auto p-2 space-y-3 max-h-[380px] no-scrollbar">
+              {/* Commands Section */}
+              {COMMAND_ITEMS.filter(item => 
+                item.label.toLowerCase().includes(searchQuery.toLowerCase())
+              ).length > 0 && (
+                <div className="space-y-1">
+                  <div className="px-3 py-1 text-[9px] font-bold text-slate-500 uppercase tracking-wider">
+                    Commands
+                  </div>
+                  {COMMAND_ITEMS.filter(item => 
+                    item.label.toLowerCase().includes(searchQuery.toLowerCase())
+                  ).map((item, idx) => {
+                    const globalIdx = idx
+                    const isSelected = globalIdx === searchSelectedIndex
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => { item.action(); setSearchOpen(false) }}
+                        onMouseEnter={() => setSearchSelectedIndex(globalIdx)}
+                        className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-left text-xs transition font-medium cursor-pointer ${
+                          isSelected ? 'bg-violet-600/15 text-violet-300 border border-violet-500/20' : 'text-slate-300 border border-transparent hover:bg-slate-800/40'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <span className="text-slate-400 leading-none">{item.icon}</span>
+                          <span>{item.label}</span>
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* Files Section */}
+              {searchResults.length > 0 && (
+                <div className="space-y-1">
+                  <div className="px-3 py-1 text-[9px] font-bold text-slate-500 uppercase tracking-wider border-t border-slate-800/40 pt-2.5">
+                    Files & Contents
+                  </div>
+                  {searchResults.map((file, idx) => {
+                    const commandsCount = COMMAND_ITEMS.filter(item => 
+                      item.label.toLowerCase().includes(searchQuery.toLowerCase())
+                    ).length
+                    const globalIdx = commandsCount + idx
+                    const isSelected = globalIdx === searchSelectedIndex
+                    return (
+                      <button
+                        key={file.path}
+                        onClick={() => { fetchFileContent(file.path, false, searchQuery); setSearchOpen(false) }}
+                        onMouseEnter={() => setSearchSelectedIndex(globalIdx)}
+                        className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-left text-xs transition font-medium cursor-pointer ${
+                          isSelected ? 'bg-violet-600/15 text-violet-300 border border-violet-500/20' : 'text-slate-300 border border-transparent hover:bg-slate-800/40'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0 w-full">
+                          <span className="text-slate-400 shrink-0">
+                            {file.type === 'canvas' ? <Brush size={14} /> : <FileText size={14} />}
+                          </span>
+                          <div className="truncate flex-1">
+                            <div className="font-semibold text-slate-200">{file.title}</div>
+                            <div className="text-[10px] text-slate-500 truncate">{file.path}</div>
+                            {getSearchSnippet(file.content || '', searchQuery) && (
+                              <div className="text-[10px] text-slate-400 font-sans italic font-normal mt-0.5 max-w-full truncate">
+                                {getSearchSnippet(file.content || '', searchQuery)}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* Empty State */}
+              {COMMAND_ITEMS.filter(item => 
+                item.label.toLowerCase().includes(searchQuery.toLowerCase())
+              ).length === 0 && searchResults.length === 0 && (
+                <div className="p-8 text-center text-xs text-slate-500">
+                  No matching files or commands found.
+                </div>
+              )}
+            </div>
+
+            {/* Footer with key descriptions */}
+            <div className="px-4 py-2 bg-slate-900/60 border-t border-slate-800 text-[10px] text-slate-500 flex justify-between shrink-0 font-mono">
+              <div className="flex items-center gap-2">
+                <span>↑↓ navigate</span>
+                <span>⏎ select</span>
+              </div>
+              <span>Esc to close</span>
+            </div>
+          </div>
         </div>
       )}
     </div>

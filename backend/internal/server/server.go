@@ -80,6 +80,7 @@ func (s *Server) setupRoutes() {
 		r.Post("/upload", s.handleUploadAsset)
 		r.Get("/sync/events", s.handleSSE)
 		r.Get("/link-preview", s.handleLinkPreview)
+		r.Get("/search", s.handleSearch)
 	})
 
 	// Serve assets directly from the vault's assets directory
@@ -865,4 +866,20 @@ func extractTag(htmlContent, regexStr string) string {
 		return strings.TrimSpace(html.UnescapeString(matches[1]))
 	}
 	return ""
+}
+
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	if q == "" {
+		respondJSON(w, []db.FileRecord{})
+		return
+	}
+
+	results, err := s.db.Search(q)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Search failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, results)
 }

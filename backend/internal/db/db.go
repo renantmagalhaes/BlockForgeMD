@@ -17,6 +17,7 @@ type FileRecord struct {
 	Type        string            `json:"type"` // "document", "task", "canvas"
 	ContentHash string            `json:"contentHash"`
 	UpdatedAt   time.Time         `json:"updatedAt"`
+	Content     string            `json:"content,omitempty"`
 	FrontMatter map[string]string `json:"frontMatter,omitempty"`
 }
 
@@ -70,7 +71,8 @@ func (db *DB) createTables() error {
 			title TEXT NOT NULL,
 			type TEXT NOT NULL,
 			content_hash TEXT NOT NULL,
-			updated_at DATETIME NOT NULL
+			updated_at DATETIME NOT NULL,
+			content TEXT
 		);`,
 		`CREATE TABLE IF NOT EXISTS front_matter (
 			file_path TEXT,
@@ -94,6 +96,10 @@ func (db *DB) createTables() error {
 			return fmt.Errorf("failed to create tables: %w, query: %s", err, q)
 		}
 	}
+
+	// Automatic migration: add content column to files table if it doesn't exist
+	_, _ = db.Conn.Exec("ALTER TABLE files ADD COLUMN content TEXT;")
+
 	return nil
 }
 
@@ -107,9 +113,9 @@ func (db *DB) UpsertFile(file FileRecord, fm map[string]interface{}, tasks []Tas
 
 	// 1. Insert or replace file
 	_, err = tx.Exec(`
-		INSERT OR REPLACE INTO files (path, title, type, content_hash, updated_at)
-		VALUES (?, ?, ?, ?, ?);
-	`, file.Path, file.Title, file.Type, file.ContentHash, file.UpdatedAt)
+		INSERT OR REPLACE INTO files (path, title, type, content_hash, updated_at, content)
+		VALUES (?, ?, ?, ?, ?, ?);
+	`, file.Path, file.Title, file.Type, file.ContentHash, file.UpdatedAt, file.Content)
 	if err != nil {
 		return fmt.Errorf("failed to upsert file: %w", err)
 	}
@@ -175,9 +181,9 @@ func (db *DB) DeleteFile(path string) error {
 
 // GetFile retrieves a single file record along with its front matter
 func (db *DB) GetFile(path string) (*FileRecord, error) {
-	row := db.Conn.QueryRow("SELECT path, title, type, content_hash, updated_at FROM files WHERE path = ?;", path)
+	row := db.Conn.QueryRow("SELECT path, title, type, content_hash, updated_at, COALESCE(content, '') FROM files WHERE path = ?;", path)
 	var record FileRecord
-	err := row.Scan(&record.Path, &record.Title, &record.Type, &record.ContentHash, &record.UpdatedAt)
+	err := row.Scan(&record.Path, &record.Title, &record.Type, &record.ContentHash, &record.UpdatedAt, &record.Content)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +208,7 @@ func (db *DB) GetFile(path string) (*FileRecord, error) {
 
 // ListFiles returns all files in the database, including their front matter
 func (db *DB) ListFiles() ([]FileRecord, error) {
-	rows, err := db.Conn.Query("SELECT path, title, type, content_hash, updated_at FROM files ORDER BY path ASC;")
+	rows, err := db.Conn.Query("SELECT path, title, type, content_hash, updated_at, COALESCE(content, '') FROM files ORDER BY path ASC;")
 	if err != nil {
 		return nil, err
 	}
@@ -213,7 +219,7 @@ func (db *DB) ListFiles() ([]FileRecord, error) {
 
 	for rows.Next() {
 		var record FileRecord
-		err := rows.Scan(&record.Path, &record.Title, &record.Type, &record.ContentHash, &record.UpdatedAt)
+		err := rows.Scan(&record.Path, &record.Title, &record.Type, &record.ContentHash, &record.UpdatedAt, &record.Content)
 		if err == nil {
 			record.FrontMatter = make(map[string]string)
 			records = append(records, record)
@@ -289,6 +295,31 @@ func (db *DB) GetTasksForFile(filePath string) ([]TaskRecord, error) {
 		}
 	}
 	return tasks, nil
+}
+
+// Search queries files where path, title, or content matches the query string
+func (db *DB) Search(query string) ([]FileRecord, error) {
+	q := "%" + query + "%"
+	rows, err := db.Conn.Query(`
+		SELECT path, title, type, content_hash, updated_at, COALESCE(content, '') 
+		FROM files 
+		WHERE path LIKE ? OR title LIKE ? OR content LIKE ?
+		ORDER BY title ASC LIMIT 50;
+	`, q, q, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var records []FileRecord
+	for rows.Next() {
+		var record FileRecord
+		err := rows.Scan(&record.Path, &record.Title, &record.Type, &record.ContentHash, &record.UpdatedAt, &record.Content)
+		if err == nil {
+			records = append(records, record)
+		}
+	}
+	return records, nil
 }
 
 func (db *DB) Close() error {

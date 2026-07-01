@@ -130,6 +130,7 @@ func ParseFile(rootPath, relPath string) (*ParseResult, error) {
 		Type:        fileType,
 		ContentHash: contentHash,
 		UpdatedAt:   updatedAt,
+		Content:     buf.String(),
 	}
 
 	// If it is a canvas type, double check we have Excalidraw or Draw.io config

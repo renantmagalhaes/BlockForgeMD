@@ -1236,6 +1236,8 @@ interface EditorProps {
   files: FileRecord[]
   globalLayoutOverride?: string
   globalColumnWidthOverride?: string
+  highlightSearchTerm?: string | null
+  onClearSearchHighlight?: () => void
 }
 
 interface HistoryVersion {
@@ -1254,12 +1256,12 @@ const COMMANDS = [
   { id: 'number', label: 'Numbered List', desc: 'Ordered numbered list', search: 'number list ordered' },
   { id: 'task', label: 'Task List', desc: 'Checkbox checklist', search: 'task todo checklist check' },
   { id: 'quote', label: 'Blockquote', desc: 'Indented block quote', search: 'quote blockquote indent' },
+  { id: 'callout', label: '🎨 Custom Callout', desc: 'Fully customizable callout box', search: 'callout note custom box' },
   { id: 'callout-note', label: '📝 Note Callout', desc: 'Callout styled as a Note', search: 'callout note box preset' },
   { id: 'callout-tip', label: '💡 Tip Callout', desc: 'Callout styled as a Tip', search: 'callout tip box preset' },
   { id: 'callout-warning', label: '⚠️ Warning Callout', desc: 'Callout styled as a Warning', search: 'callout warning box preset' },
   { id: 'callout-danger', label: '🚨 Danger Callout', desc: 'Callout styled as a Danger', search: 'callout danger box preset' },
   { id: 'callout-bug', label: '🐛 Bug Callout', desc: 'Callout styled as a Bug', search: 'callout bug box preset' },
-  { id: 'callout', label: '🎨 Custom Callout', desc: 'Fully customizable callout box', search: 'callout note custom box' },
   { id: 'table', label: 'Table Grid', desc: 'Insert a 2x2 grid table', search: 'table grid columns cell' },
   { id: 'code', label: 'Code Block', desc: 'Monospace fenced code block', search: 'code block script pre' },
   { id: 'subpage', label: 'Sub-page', desc: 'Create a sub-page inside this page', search: 'subpage sub page child nested' },
@@ -1279,6 +1281,8 @@ export const Editor: React.FC<EditorProps> = ({
   files,
   globalLayoutOverride,
   globalColumnWidthOverride,
+  highlightSearchTerm,
+  onClearSearchHighlight,
 }) => {
   // Slash command states
   const [commandActive, setCommandActive] = useState(false)
@@ -1921,6 +1925,43 @@ export const Editor: React.FC<EditorProps> = ({
       }
     }
   }, [initialContent, filePath, editor, historyOpen])
+
+  // Highlight search term when loading document from search results
+  useEffect(() => {
+    if (!editor || !highlightSearchTerm) return
+
+    console.log('[SearchHighlight] Triggered highlight search for:', highlightSearchTerm)
+
+    const t = setTimeout(() => {
+      let foundPos = -1
+      editor.state.doc.descendants((node, pos) => {
+        if (node.isText && node.text) {
+          const idx = node.text.toLowerCase().indexOf(highlightSearchTerm.toLowerCase())
+          if (idx !== -1) {
+            foundPos = pos + idx
+            console.log('[SearchHighlight] Found match inside text node at pos:', pos, 'idx:', idx, 'text:', node.text)
+            return false
+          }
+        }
+        return true
+      })
+
+      if (foundPos !== -1) {
+        editor.chain()
+          .focus()
+          .setTextSelection({ from: foundPos, to: foundPos + highlightSearchTerm.length })
+          .scrollIntoView()
+          .run()
+        console.log('[SearchHighlight] Applied text selection highlight range:', foundPos, 'to', foundPos + highlightSearchTerm.length)
+      } else {
+        console.log('[SearchHighlight] No matches found inside editor doc nodes.')
+      }
+      
+      onClearSearchHighlight?.()
+    }, 250)
+
+    return () => clearTimeout(t)
+  }, [editor, highlightSearchTerm, initialContent])
 
   // Fetch Version History snapshots
   const fetchHistory = async () => {

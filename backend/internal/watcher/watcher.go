@@ -140,9 +140,9 @@ func (w *Watcher) indexFile(relPath string) error {
 		return err
 	}
 
-	// Check if already in DB and content matches hash
+	// Check if already in DB, content matches hash, and content column is populated
 	existing, err := w.db.GetFile(relPath)
-	if err == nil && existing.ContentHash == res.Record.ContentHash {
+	if err == nil && existing.ContentHash == res.Record.ContentHash && existing.Content != "" {
 		// No changes, skip DB write
 		return nil
 	}
