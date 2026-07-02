@@ -716,9 +716,9 @@ export const App: React.FC = () => {
   ]
 
   return (
-    <div className="flex h-screen bg-[#0d1117] text-slate-100 font-sans overflow-hidden">
+    <div className="flex h-screen bg-[#0d1117] text-slate-100 font-sans overflow-hidden app-layout-root">
       {/* ── Sidebar ──────────────────────────────────────────────────────── */}
-      <div className="w-64 bg-[#161b22] border-r border-slate-800 flex flex-col justify-between">
+      <div className="w-64 bg-[#161b22] border-r border-slate-800 flex flex-col justify-between no-print">
         <div>
           <div className="p-5 border-b border-slate-800">
             <div className="flex items-center gap-2">
@@ -855,8 +855,8 @@ export const App: React.FC = () => {
             />
           </div>
         ) : selectedPath && activeFile ? (
-          <div className="flex-1 p-6 flex flex-col overflow-hidden">
-            <div className="flex justify-between items-center mb-4">
+          <div className="flex-1 p-6 flex flex-col overflow-hidden main-content-pane">
+            <div className="flex justify-between items-center mb-4 no-print">
               <div className="flex items-center gap-1.5 text-xs text-slate-400">
                 <button onClick={() => setActiveView('board')} className="hover:text-violet-400 hover:underline transition">Workspace</button>
                 <ChevronRight size={12} />

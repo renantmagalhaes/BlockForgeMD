@@ -52,7 +52,8 @@ import {
   MonitorPlay,
   Link2,
   Copy,
-  Check
+  Check,
+  Download
 } from 'lucide-react'
 
 // Configure Turndown for clean Markdown serialization
@@ -1359,6 +1360,7 @@ export const Editor: React.FC<EditorProps> = ({
 
   // Version history states
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [exportDropdownOpen, setExportDropdownOpen] = useState(false)
   const [historyList, setHistoryList] = useState<HistoryVersion[]>([])
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
   const [previewVersion, setPreviewVersion] = useState<{ timestamp: number; date: string; content: string } | null>(null)
@@ -2557,11 +2559,11 @@ export const Editor: React.FC<EditorProps> = ({
   }
 
   return (
-    <div className="flex h-full bg-[#0d1117] rounded-xl border border-slate-800 overflow-hidden shadow-2xl relative">
+    <div className="flex h-full bg-[#0d1117] rounded-xl border border-slate-800 overflow-hidden shadow-2xl relative editor-root-container">
       {/* Editor Main Work Area */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Control Toolbar */}
-        <div className="flex flex-wrap items-center justify-between p-3 border-b border-slate-800 bg-[#161b22]/80 backdrop-blur-md sticky top-0 z-10 select-none">
+        <div className="flex flex-wrap items-center justify-between p-3 border-b border-slate-800 bg-[#161b22]/80 backdrop-blur-md sticky top-0 z-10 select-none no-print">
           <div className="flex flex-wrap items-center gap-1">
             <button
               onClick={() => editor.chain().focus().toggleBold().run()}
@@ -2684,6 +2686,136 @@ export const Editor: React.FC<EditorProps> = ({
               <History size={16} />
             </button>
 
+            {/* Export Dropdown Menu */}
+            <div className="relative">
+              <button
+                onClick={() => setExportDropdownOpen(!exportDropdownOpen)}
+                className={`p-2 rounded-lg hover:bg-slate-800 transition cursor-pointer flex items-center gap-1 text-slate-400 hover:text-white ${
+                  exportDropdownOpen ? 'bg-slate-800 text-white' : ''
+                }`}
+                title="Export Page"
+              >
+                <Download size={16} />
+              </button>
+              
+              {exportDropdownOpen && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setExportDropdownOpen(false)} />
+                  <div className="absolute right-0 mt-1.5 w-44 bg-[#161b22] border border-slate-800 rounded-xl shadow-2xl p-1.5 flex flex-col space-y-0.5 z-20 no-scrollbar select-none text-slate-200">
+                    <button
+                      onClick={() => {
+                        setExportDropdownOpen(false)
+                        window.print()
+                      }}
+                      className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold hover:bg-slate-800 text-slate-305 hover:text-white transition flex items-center gap-2 cursor-pointer"
+                    >
+                      <FileText size={12} className="text-red-450" />
+                      <span>Export to PDF</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setExportDropdownOpen(false)
+                        const html = editor?.getHTML() || ''
+                        const markdownBody = turndownService.turndown(html)
+                        
+                        let fmString = ''
+                        if (frontMatter && Object.keys(frontMatter).length > 0) {
+                          fmString = '---\n'
+                          for (const [k, v] of Object.entries(frontMatter)) {
+                            if (v !== undefined && v !== null && v !== '') {
+                              fmString += `${k}: ${JSON.stringify(v)}\n`
+                            }
+                          }
+                          fmString += '---\n\n'
+                        }
+                        
+                        const fullContent = fmString + markdownBody
+                        const blob = new Blob([fullContent], { type: 'text/markdown;charset=utf-8' })
+                        const url = URL.createObjectURL(blob)
+                        const link = document.createElement('a')
+                        link.href = url
+                        link.download = filePath.split('/').pop() || 'note.md'
+                        link.click()
+                        URL.revokeObjectURL(url)
+                      }}
+                      className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold hover:bg-slate-800 text-slate-305 hover:text-white transition flex items-center gap-2 cursor-pointer"
+                    >
+                      <FileText size={12} className="text-violet-450" />
+                      <span>Export to Markdown</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setExportDropdownOpen(false)
+                        const html = editor?.getHTML() || ''
+                        const htmlContent = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>${filePath.split('/').pop()?.replace('.md', '') || 'Exported Note'}</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: #24292f;
+      background-color: #ffffff;
+      line-height: 1.6;
+      padding: 2rem;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    pre {
+      background-color: #f6f8fa;
+      padding: 16px;
+      border-radius: 6px;
+      overflow: auto;
+    }
+    code {
+      font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace;
+      font-size: 85%;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 1.5rem 0;
+    }
+    th, td {
+      border: 1px solid #d0d7de;
+      padding: 8px 12px;
+    }
+    th {
+      background-color: #f6f8fa;
+    }
+    .callout-box {
+      padding: 16px;
+      border-left: 4px solid #8b5cf6;
+      background-color: #f8f9fa;
+      border-radius: 0 8px 8px 0;
+      margin: 1.5rem 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>${filePath.split('/').pop()?.replace('.md', '') || 'Note'}</h1>
+  ${html}
+</body>
+</html>`
+                        const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' })
+                        const url = URL.createObjectURL(blob)
+                        const link = document.createElement('a')
+                        link.href = url
+                        link.download = (filePath.split('/').pop()?.replace('.md', '') || 'note') + '.html'
+                        link.click()
+                        URL.revokeObjectURL(url)
+                      }}
+                      className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold hover:bg-slate-800 text-slate-305 hover:text-white transition flex items-center gap-2 cursor-pointer"
+                    >
+                      <FileText size={12} className="text-emerald-450" />
+                      <span>Export to HTML</span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
             <button
               onClick={() => executeAutoSave()}
               disabled={saveStatus === 'saved' || isSaving}
@@ -2696,7 +2828,7 @@ export const Editor: React.FC<EditorProps> = ({
         </div>
 
         {/* Editor Body & Notion-Style Properties Panel */}
-        <div className="flex-1 overflow-y-auto px-8 py-6 no-scrollbar flex flex-col">
+        <div className="flex-1 overflow-y-auto px-8 py-6 no-scrollbar flex flex-col print-document-container">
           {/* File path breadcrumbs */}
           <div className="text-[10px] text-slate-500 font-mono mb-4 uppercase tracking-wider select-none">
             {filePath}
@@ -2704,7 +2836,7 @@ export const Editor: React.FC<EditorProps> = ({
 
           {/* Notion Page Properties Panel */}
           {frontMatter && onUpdateFrontMatter && (
-            <div className={`mb-6 p-4 bg-[#161b22]/40 border border-slate-800/80 rounded-xl space-y-3.5 select-none transition-all duration-300 ${getWidthClass()}`}>
+            <div className={`mb-6 p-4 bg-[#161b22]/40 border border-slate-800/80 rounded-xl space-y-3.5 select-none transition-all duration-300 no-print ${getWidthClass()}`}>
               <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5 mb-1">
                 <Activity size={10} className="text-violet-400" />
                 Page Attributes
