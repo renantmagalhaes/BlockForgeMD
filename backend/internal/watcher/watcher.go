@@ -232,6 +232,20 @@ func (w *Watcher) watchLoop() {
 	}
 }
 
+// WatchPath adds a directory and its subdirectories to the file watcher.
+// Used after creating or migrating a workspace directory.
+func (w *Watcher) WatchPath(dir string) {
+	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || !info.IsDir() {
+			return nil
+		}
+		if base := filepath.Base(path); strings.HasPrefix(base, ".") {
+			return filepath.SkipDir
+		}
+		return w.fsWatcher.Add(path)
+	})
+}
+
 func (w *Watcher) Close() error {
 	close(w.closeChan)
 	return w.fsWatcher.Close()

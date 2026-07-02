@@ -17,8 +17,11 @@ import { Table } from '@tiptap/extension-table'
 import TableRow from '@tiptap/extension-table-row'
 import TableCell from '@tiptap/extension-table-cell'
 import TableHeader from '@tiptap/extension-table-header'
+import Placeholder from '@tiptap/extension-placeholder'
 import { marked } from 'marked'
 import TurndownService from 'turndown'
+import MindElixir from 'mind-elixir'
+import 'mind-elixir/style.css'
 import {
   Bold,
   Italic,
@@ -41,6 +44,7 @@ import {
   Hash,
   Activity,
   Plus,
+  Minus,
   FileText,
   LayoutGrid,
   Brush,
@@ -53,7 +57,8 @@ import {
   Link2,
   Copy,
   Check,
-  Download
+  Download,
+  Brain,
 } from 'lucide-react'
 
 // Configure Turndown for clean Markdown serialization
@@ -134,6 +139,15 @@ turndownService.addRule('excalidraw', {
   replacement: (_content, node) => {
     const path = (node as HTMLElement).getAttribute('path') || ''
     return `\n<excalidraw path="${path}">excalidraw-canvas</excalidraw>\n`
+  }
+})
+
+// Custom rule for mindmap embeds in Turndown
+turndownService.addRule('mindmap', {
+  filter: (node) => node.nodeName.toLowerCase() === 'mindmap',
+  replacement: (_content, node) => {
+    const path = (node as HTMLElement).getAttribute('path') || ''
+    return `\n<mindmap path="${path}">mindmap-embed</mindmap>\n`
   }
 })
 
@@ -1011,6 +1025,120 @@ export const ExcalidrawNode = Node.create({
   },
 })
 
+const MINDMAP_EMBED_THEME = {
+  name: 'blockforge-dark',
+  type: 'dark' as const,
+  palette: ['#8b5cf6', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#06b6d4'],
+  cssVar: {
+    '--node-gap-x': '28px', '--node-gap-y': '6px',
+    '--main-gap-x': '36px', '--main-gap-y': '10px',
+    '--main-color': '#f1f5f9', '--main-bgcolor': '#6d28d9',
+    '--main-bgcolor-transparent': 'rgba(109,40,217,0.15)',
+    '--color': '#cbd5e1', '--bgcolor': '#1e293b',
+    '--selected': '#8b5cf6', '--accent-color': '#8b5cf6',
+    '--root-color': '#ffffff', '--root-bgcolor': '#7c3aed',
+    '--root-border-color': '#a78bfa', '--root-radius': '10px',
+    '--main-radius': '7px', '--topic-padding': '4px 12px',
+    '--panel-color': '#94a3b8', '--panel-bgcolor': '#1e293b',
+    '--panel-border-color': '#334155', '--map-padding': '40px',
+  },
+}
+
+const MindMapEmbedComponent = (props: any) => {
+  const filePath = props.node.attrs.path
+  const containerRef = useRef<HTMLDivElement>(null)
+  const meRef = useRef<any>(null)
+  const [mapTitle, setMapTitle] = useState<string>(
+    filePath ? filePath.split('/').pop()?.replace('.mindmap.md', '') : 'Mind Map'
+  )
+  const API_BASE = import.meta.env.DEV ? 'http://localhost:8080' : ''
+
+  useEffect(() => {
+    if (!filePath || !containerRef.current) return
+    let destroyed = false
+
+    fetch(`${API_BASE}/api/file?path=${encodeURIComponent(filePath)}`)
+      .then(r => r.json())
+      .then(data => {
+        if (destroyed || !containerRef.current || !data?.content) return
+        const m = data.content.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
+        if (!m) return
+        const mindData = JSON.parse(m[1])
+        if (mindData.nodeData?.topic) setMapTitle(mindData.nodeData.topic)
+        containerRef.current.innerHTML = ''
+        const me = new MindElixir({
+          el: containerRef.current,
+          direction: MindElixir.SIDE,
+          editable: false,
+          contextMenu: false,
+          toolBar: false,
+          keypress: false,
+          theme: MINDMAP_EMBED_THEME,
+        })
+        me.init(mindData)
+        meRef.current = me
+      })
+      .catch(err => console.error('Failed to load embedded mindmap', err))
+
+    return () => {
+      destroyed = true
+      try { meRef.current?.destroy() } catch {}
+      meRef.current = null
+    }
+  }, [filePath])
+
+  return (
+    <NodeViewWrapper className="mindmap-embed my-4 border border-slate-800 rounded-xl overflow-hidden shadow-lg bg-[#0d1117] text-slate-200">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-slate-800 bg-[#161b22]/50">
+        <div className="flex items-center gap-2 select-none">
+          <Brain size={14} className="text-violet-400 shrink-0" />
+          <span className="text-xs font-semibold text-slate-350 truncate">Mind Map: {mapTitle}</span>
+        </div>
+        <a
+          href={`/${filePath}`}
+          onClick={(e) => { e.preventDefault(); props.extension.options.onSelectFile?.(filePath) }}
+          className="text-[10px] text-violet-400 hover:text-violet-300 font-bold underline transition cursor-pointer select-none"
+        >
+          Open Map
+        </a>
+      </div>
+      <div
+        ref={containerRef}
+        className="w-full"
+        style={{ height: '360px', background: '#0d1117' }}
+      />
+    </NodeViewWrapper>
+  )
+}
+
+export const MindmapNode = Node.create({
+  name: 'mindmap',
+  group: 'block',
+  selectable: true,
+  draggable: true,
+  atom: true,
+
+  addOptions() {
+    return { onSelectFile: null }
+  },
+
+  addAttributes() {
+    return { path: { default: null } }
+  },
+
+  parseHTML() {
+    return [{ tag: 'mindmap' }]
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ['mindmap', mergeAttributes(HTMLAttributes), 'mindmap-embed']
+  },
+
+  addNodeView() {
+    return ReactNodeViewRenderer(MindMapEmbedComponent)
+  },
+})
+
 const BookmarkComponent = (props: any) => {
   const { url, title, description, image, favicon, siteName } = props.node.attrs
   const [loading, setLoading] = useState(!title)
@@ -1294,7 +1422,9 @@ interface EditorProps {
   isSaving: boolean
   frontMatter?: Record<string, string>
   onUpdateFrontMatter?: (updates: Record<string, any>) => Promise<void>
+  onTitleChange?: (newTitle: string) => void
   boardColumns: string[]
+  boardTags?: string[]
   onCreateSubPage?: (parentPath: string, onCreated: (newPath: string, title: string) => string) => void
   onSelectFile?: (path: string) => void
   files: FileRecord[]
@@ -1329,7 +1459,7 @@ const COMMANDS = [
   { id: 'table', label: 'Table Grid', desc: 'Insert a 2x2 grid table', search: 'table grid columns cell' },
   { id: 'code', label: 'Code Block', desc: 'Monospace fenced code block', search: 'code block script pre' },
   { id: 'subpage', label: 'Sub-page', desc: 'Create a sub-page inside this page', search: 'subpage sub page child nested' },
-  { id: 'embed', label: 'Embed Link / Canvas', desc: 'Embed a website link, iframe, or Draw.io canvas', search: 'embed iframe link website canvas drawio' },
+  { id: 'embed', label: 'Embed Link / Canvas / Mind Map', desc: 'Embed a website, canvas, or mind map', search: 'embed iframe link website canvas drawio mindmap mind map brain' },
 ]
 
 export const Editor: React.FC<EditorProps> = ({
@@ -1339,7 +1469,9 @@ export const Editor: React.FC<EditorProps> = ({
   isSaving,
   frontMatter,
   onUpdateFrontMatter,
+  onTitleChange,
   boardColumns,
+  boardTags = [],
   onCreateSubPage,
   onSelectFile,
   files,
@@ -1368,15 +1500,17 @@ export const Editor: React.FC<EditorProps> = ({
 
   // Tag manager input state
   const [newTagInput, setNewTagInput] = useState('')
+  const [tagAutocompleteOpen, setTagAutocompleteOpen] = useState(false)
 
   // Image Viewer & Editor state
   const [editingImageSrc, setEditingImageSrc] = useState<string | null>(null)
 
   // Embed states
   const [embedModalOpen, setEmbedModalOpen] = useState(false)
-  const [embedType, setEmbedType] = useState<'url' | 'drawio'>('url')
+  const [embedType, setEmbedType] = useState<'url' | 'drawio' | 'mindmap'>('url')
   const [embedUrl, setEmbedUrl] = useState('')
   const [selectedCanvasPath, setSelectedCanvasPath] = useState('')
+  const [selectedMindmapPath, setSelectedMindmapPath] = useState('')
 
   // Layout state (left, center, full)
   const [localLayout, setLocalLayout] = useState<'left' | 'center' | 'full'>('left')
@@ -1461,6 +1595,18 @@ export const Editor: React.FC<EditorProps> = ({
 
   const lastSavedContentRef = useRef<string>(initialContent || '')
   const lastFilePathRef = useRef<string | null>(null)
+  const lastSyncedTitleRef = useRef<string>(frontMatter?.title || '')
+
+  // Always-current reference to the frontmatter title — updated on every render
+  // so the file-load effect can read the latest value without a dep-loop.
+  const frontMatterTitleRef = useRef<string>(frontMatter?.title || '')
+  frontMatterTitleRef.current = frontMatter?.title || ''
+
+  // Reset lastSyncedTitleRef when switching files so we don't trigger a
+  // spurious rename the moment a different file is opened.
+  useEffect(() => {
+    lastSyncedTitleRef.current = frontMatter?.title || ''
+  }, [filePath]) // eslint-disable-line react-hooks/exhaustive-deps
 
 
 
@@ -1561,6 +1707,7 @@ export const Editor: React.FC<EditorProps> = ({
       .replace(/<p>\s*(<bookmark[^>]*>.*?<\/bookmark>)\s*<\/p>/gi, '$1')
       .replace(/<p>\s*(<drawio[^>]*>.*?<\/drawio>)\s*<\/p>/gi, '$1')
       .replace(/<p>\s*(<excalidraw[^>]*>.*?<\/excalidraw>)\s*<\/p>/gi, '$1')
+      .replace(/<p>\s*(<mindmap[^>]*>.*?<\/mindmap>)\s*<\/p>/gi, '$1')
       // Convert <callout emoji="X" label="Y" color="Z">...</callout> → <div data-callout="true" ...>
       .replace(/<callout([^>]*)>([\s\S]*?)<\/callout>/gi, (_, attrs, content) => {
         const emoji = (attrs.match(/emoji="([^"]*)"/) || [])[1] || '📝'
@@ -1607,6 +1754,15 @@ export const Editor: React.FC<EditorProps> = ({
       ExcalidrawNode.configure({
         onSelectFile: (path: string) => onSelectFile?.(path)
       } as any),
+      MindmapNode.configure({
+        onSelectFile: (path: string) => onSelectFile?.(path)
+      } as any),
+      Placeholder.configure({
+        placeholder: 'Start typing, or press / for commands…',
+        emptyEditorClass: 'is-editor-empty',
+        emptyNodeClass: 'is-empty',
+        showOnlyCurrent: false,
+      }),
     ],
     content: getHTMLFromMarkdown(initialContent),
     editorProps: {
@@ -1834,6 +1990,10 @@ export const Editor: React.FC<EditorProps> = ({
     left: number
     width: number
     height: number
+    cellTop: number
+    cellLeft: number
+    cellWidth: number
+    cellHeight: number
   } | null>(null)
 
   const updateTableRect = () => {
@@ -1855,13 +2015,18 @@ export const Editor: React.FC<EditorProps> = ({
         : (range.startContainer as HTMLElement)?.closest?.('td, th')
 
       const table = cell?.closest('table')
-      if (table) {
+      if (table && cell) {
         const rect = table.getBoundingClientRect()
+        const cellRect = (cell as HTMLElement).getBoundingClientRect()
         setActiveTableRect({
           top: rect.top,
           left: rect.left,
           width: rect.width,
-          height: rect.height
+          height: rect.height,
+          cellTop: cellRect.top,
+          cellLeft: cellRect.left,
+          cellWidth: cellRect.width,
+          cellHeight: cellRect.height,
         })
       } else {
         setActiveTableRect(null)
@@ -1976,8 +2141,17 @@ export const Editor: React.FC<EditorProps> = ({
 
       if (fileChanged) {
         lastFilePathRef.current = filePath
-        lastSavedContentRef.current = initialContent
-        const html = getHTMLFromMarkdown(initialContent)
+        // Ensure the body always opens with a # Title heading so the first line
+        // is editable as the page name. If the H1 was deleted or never existed,
+        // prepend it from the frontmatter title so sync can work immediately.
+        const pageTitle = frontMatterTitleRef.current
+        const body = initialContent.trimStart()
+        const bodyWithH1 = (pageTitle && !body.startsWith('# '))
+          ? `# ${pageTitle}\n\n${body}`
+          : initialContent
+        lastSavedContentRef.current = bodyWithH1
+        lastSyncedTitleRef.current = pageTitle
+        const html = getHTMLFromMarkdown(bodyWithH1)
         editor.commands.setContent(html)
         setSaveStatus('saved')
       } else if (contentChangedExternally && !editor.isFocused) {
@@ -2081,6 +2255,25 @@ export const Editor: React.FC<EditorProps> = ({
       await onSave(markdown)
       lastSavedContentRef.current = markdown
       setSaveStatus('saved')
+
+      // After a successful save, check if the first line changed and notify the
+      // parent to rename the file + frontmatter title. This must run after save
+      // (not during typing) to avoid a race between the save and the rename.
+      // We detect both H1 and plain paragraph nodes so that users who cleared
+      // the page and started typing still get their title synced.
+      if (onTitleChange && editor) {
+        const json = editor.getJSON()
+        const firstNode = json.content?.[0]
+        if (firstNode && (firstNode.type === 'heading' || firstNode.type === 'paragraph')) {
+          const firstLineText = (firstNode.content as any[] | undefined)
+            ?.map((n: any) => n.text || '').join('') || ''
+          if (firstLineText && firstLineText !== lastSyncedTitleRef.current) {
+            lastSyncedTitleRef.current = firstLineText
+            onTitleChange(firstLineText)
+          }
+        }
+      }
+
       if (historyOpen) {
         fetchHistory()
       }
@@ -2296,7 +2489,7 @@ export const Editor: React.FC<EditorProps> = ({
       }
 
       editor.chain().focus().insertContent(`<iframe src="${finalSrc}"></iframe>`).run()
-    } else {
+    } else if (embedType === 'drawio') {
       if (!selectedCanvasPath) {
         alert('Please select a canvas drawing to embed.')
         return
@@ -2310,6 +2503,12 @@ export const Editor: React.FC<EditorProps> = ({
       } else {
         editor.chain().focus().insertContent(`<excalidraw path="${selectedCanvasPath}">excalidraw-canvas</excalidraw>`).run()
       }
+    } else if (embedType === 'mindmap') {
+      if (!selectedMindmapPath) {
+        alert('Please select a mind map to embed.')
+        return
+      }
+      editor.chain().focus().insertContent(`<mindmap path="${selectedMindmapPath}">mindmap-embed</mindmap>`).run()
     }
 
     setEmbedModalOpen(false)
@@ -2399,7 +2598,7 @@ export const Editor: React.FC<EditorProps> = ({
         }).run()
         break
       case 'table':
-        editor.chain().focus().insertContent('<table><thead><tr><th>Header 1</th><th>Header 2</th></tr></thead><tbody><tr><td>Cell 1</td><td>Cell 2</td></tr></tbody></table>').run()
+        editor.chain().focus().insertTable({ rows: 2, cols: 2, withHeaderRow: true }).run()
         break
       case 'code':
         editor.chain().focus().insertContent('<pre><code>\n// Code here\n</code></pre>').run()
@@ -2427,6 +2626,7 @@ export const Editor: React.FC<EditorProps> = ({
       case 'embed': {
         setEmbedUrl('')
         setSelectedCanvasPath('')
+        setSelectedMindmapPath('')
         setEmbedType('url')
         setEmbedModalOpen(true)
         break
@@ -2506,16 +2706,25 @@ export const Editor: React.FC<EditorProps> = ({
     }
   }
 
-  const handleAddTagSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    const cleanTag = newTagInput.trim()
+  const handleAddTag = (tag: string) => {
+    const cleanTag = tag.trim()
     if (!cleanTag) return
     const currentTags = getTagsArray()
     if (!currentTags.includes(cleanTag)) {
       onUpdateFrontMatter?.({ tags: [...currentTags, cleanTag] })
     }
     setNewTagInput('')
+    setTagAutocompleteOpen(false)
   }
+
+  const handleAddTagSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    handleAddTag(newTagInput)
+  }
+
+  const tagSuggestions = newTagInput
+    ? boardTags.filter(t => !getTagsArray().includes(t) && t.toLowerCase().includes(newTagInput.toLowerCase()))
+    : boardTags.filter(t => !getTagsArray().includes(t))
 
   const handleRemoveTag = (tagToRemove: string) => {
     const currentTags = getTagsArray()
@@ -2884,10 +3093,11 @@ export const Editor: React.FC<EditorProps> = ({
                     Priority
                   </span>
                   <select
-                    value={frontMatter.priority || 'Medium'}
-                    onChange={(e) => onUpdateFrontMatter({ priority: e.target.value })}
+                    value={frontMatter.priority || ''}
+                    onChange={(e) => onUpdateFrontMatter({ priority: e.target.value || null })}
                     className="flex-1 bg-slate-900/50 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded px-2.5 py-1 outline-none transition cursor-pointer"
                   >
+                    <option value="">No priority</option>
                     <option value="Low">Low</option>
                     <option value="Medium">Medium</option>
                     <option value="High">High</option>
@@ -2902,7 +3112,7 @@ export const Editor: React.FC<EditorProps> = ({
                   </span>
                   <input
                     type="date"
-                    value={frontMatter.dueDate || ''}
+                    value={frontMatter.dueDate?.split('T')[0] || ''}
                     onChange={(e) => onUpdateFrontMatter({ dueDate: e.target.value })}
                     className="flex-1 bg-slate-900/50 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded px-2.5 py-1 outline-none transition cursor-pointer"
                   />
@@ -2965,13 +3175,16 @@ export const Editor: React.FC<EditorProps> = ({
                     </span>
                   ))}
 
-                  <form onSubmit={handleAddTagSubmit} className="flex items-center gap-1 ml-1.5">
+                  <form onSubmit={handleAddTagSubmit} className="flex items-center gap-1 ml-1.5 relative">
                     <input
                       type="text"
                       placeholder="Add tag..."
                       value={newTagInput}
-                      onChange={(e) => setNewTagInput(e.target.value)}
-                      className="bg-slate-900 border border-slate-850 focus:border-slate-700 text-[10px] rounded px-2 py-0.5 outline-none text-slate-300 w-20 focus:w-28 transition-all"
+                      onChange={(e) => { setNewTagInput(e.target.value); setTagAutocompleteOpen(true) }}
+                      onFocus={() => setTagAutocompleteOpen(true)}
+                      onBlur={() => setTimeout(() => setTagAutocompleteOpen(false), 150)}
+                      onKeyDown={(e) => { if (e.key === 'Escape') { setTagAutocompleteOpen(false); setNewTagInput('') } }}
+                      className="bg-slate-900 border border-slate-700 focus:border-violet-500/50 text-[10px] rounded px-2 py-0.5 outline-none text-slate-300 w-20 focus:w-28 transition-all"
                     />
                     <button
                       type="submit"
@@ -2979,6 +3192,20 @@ export const Editor: React.FC<EditorProps> = ({
                     >
                       <Plus size={10} />
                     </button>
+                    {tagAutocompleteOpen && tagSuggestions.length > 0 && (
+                      <div className="absolute top-full left-0 mt-1 bg-[#1a2236] border border-slate-700 rounded-lg shadow-xl py-1 z-50 min-w-[130px] max-h-36 overflow-y-auto no-scrollbar">
+                        {tagSuggestions.map(s => (
+                          <button
+                            key={s}
+                            type="button"
+                            onMouseDown={() => handleAddTag(s)}
+                            className="flex w-full px-2.5 py-1.5 text-[10px] text-slate-300 hover:bg-slate-800 text-left cursor-pointer"
+                          >
+                            {s}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </form>
                 </div>
               </div>
@@ -3220,6 +3447,20 @@ export const Editor: React.FC<EditorProps> = ({
               >
                 Canvas Drawing
               </button>
+              <button
+                onClick={() => {
+                  setEmbedType('mindmap')
+                  const mindmapFiles = files.filter(f => f.type === 'mindmap')
+                  if (mindmapFiles.length > 0 && !selectedMindmapPath) {
+                    setSelectedMindmapPath(mindmapFiles[0].path)
+                  }
+                }}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                  embedType === 'mindmap' ? 'bg-violet-600 text-white shadow-md' : 'text-slate-455 hover:text-slate-200'
+                }`}
+              >
+                Mind Map
+              </button>
             </div>
 
             {/* Content panel */}
@@ -3236,7 +3477,7 @@ export const Editor: React.FC<EditorProps> = ({
                   />
                   <p className="text-[10px] text-slate-500 mt-1.5 font-medium">Supports regular websites, direct iframe src URLs, YouTube videos, and more.</p>
                 </div>
-              ) : (
+              ) : embedType === 'drawio' ? (
                 <div>
                   <label className="block text-xs font-semibold text-slate-455 mb-1.5 uppercase tracking-wider">Select Workspace Drawing</label>
                   {files.filter(f => f.type === 'canvas').length > 0 ? (
@@ -3258,6 +3499,28 @@ export const Editor: React.FC<EditorProps> = ({
                     </div>
                   )}
                 </div>
+              ) : (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-455 mb-1.5 uppercase tracking-wider">Select Mind Map</label>
+                  {files.filter(f => f.type === 'mindmap').length > 0 ? (
+                    <select
+                      value={selectedMindmapPath}
+                      onChange={(e) => setSelectedMindmapPath(e.target.value)}
+                      className="w-full bg-[#0d1117] border border-slate-750 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-violet-500/80 focus:ring-1 focus:ring-violet-500/30 transition cursor-pointer"
+                    >
+                      {files.filter(f => f.type === 'mindmap').map(f => (
+                        <option key={f.path} value={f.path}>
+                          {f.title || f.path.split('/').pop()?.replace('.mindmap.md', '')}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="text-center py-4 bg-[#0d1117] border border-slate-800 rounded-xl select-none">
+                      <p className="text-xs text-slate-500 font-medium">No mind maps found in the vault.</p>
+                      <p className="text-[10px] text-slate-600 mt-1">Create a mind map from the sidebar first.</p>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
 
@@ -3271,7 +3534,10 @@ export const Editor: React.FC<EditorProps> = ({
               </button>
               <button
                 onClick={handleInsertEmbed}
-                disabled={embedType === 'drawio' && files.filter(f => f.type === 'canvas').length === 0}
+                disabled={
+                  (embedType === 'drawio' && files.filter(f => f.type === 'canvas').length === 0) ||
+                  (embedType === 'mindmap' && files.filter(f => f.type === 'mindmap').length === 0)
+                }
                 className="px-4 py-2 bg-violet-600 hover:bg-violet-550 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition shadow-lg cursor-pointer"
               >
                 Insert Embed
@@ -3434,13 +3700,12 @@ export const Editor: React.FC<EditorProps> = ({
           </div>
         </div>
       )}
-      {/* Floating Table Add Row/Col Hover Overlays */}
+      {/* Floating Table Add/Delete Row/Col Overlays */}
       {activeTableRect && (
         <>
-          {/* Row "+" button below the table */}
+          {/* Add Row "+" button below the table */}
           <button
             onMouseDown={(e) => {
-              // preventDefault keeps editor focus + selection intact before command runs
               e.preventDefault()
               e.stopPropagation()
               editor.chain().addRowAfter().run()
@@ -3457,10 +3722,28 @@ export const Editor: React.FC<EditorProps> = ({
             <Plus size={12} />
           </button>
 
-          {/* Column "+" button to the right of the table */}
+          {/* Delete Row "−" button to the left of the current row */}
           <button
             onMouseDown={(e) => {
-              // preventDefault keeps editor focus + selection intact before command runs
+              e.preventDefault()
+              e.stopPropagation()
+              editor.chain().focus().deleteRow().run()
+            }}
+            title="Delete Row"
+            style={{
+              position: 'fixed',
+              top: `${activeTableRect.cellTop + activeTableRect.cellHeight / 2 - 12}px`,
+              left: `${activeTableRect.left - 30}px`,
+              zIndex: 9999,
+            }}
+            className="bg-[#1e2330] hover:bg-red-700 border border-slate-700 hover:border-red-500 text-slate-400 hover:text-white rounded-full w-6 h-6 shadow-2xl transition cursor-pointer flex items-center justify-center"
+          >
+            <Minus size={12} />
+          </button>
+
+          {/* Add Column "+" button to the right of the table */}
+          <button
+            onMouseDown={(e) => {
               e.preventDefault()
               e.stopPropagation()
               editor.chain().addColumnAfter().run()
@@ -3475,6 +3758,25 @@ export const Editor: React.FC<EditorProps> = ({
             className="bg-[#1e2330] hover:bg-violet-600 border border-slate-700 hover:border-violet-500 text-slate-400 hover:text-white rounded-full w-6 h-6 shadow-2xl transition cursor-pointer flex items-center justify-center"
           >
             <Plus size={12} />
+          </button>
+
+          {/* Delete Column "−" button above the current column */}
+          <button
+            onMouseDown={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              editor.chain().focus().deleteColumn().run()
+            }}
+            title="Delete Column"
+            style={{
+              position: 'fixed',
+              top: `${activeTableRect.top - 30}px`,
+              left: `${activeTableRect.cellLeft + activeTableRect.cellWidth / 2 - 12}px`,
+              zIndex: 9999,
+            }}
+            className="bg-[#1e2330] hover:bg-red-700 border border-slate-700 hover:border-red-500 text-slate-400 hover:text-white rounded-full w-6 h-6 shadow-2xl transition cursor-pointer flex items-center justify-center"
+          >
+            <Minus size={12} />
           </button>
         </>
       )}

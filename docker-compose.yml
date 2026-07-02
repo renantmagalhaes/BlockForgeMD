@@ -11,6 +11,9 @@ services:
       # This is where all your flat Markdown files, Kanban tasks, and drawings will reside.
       - ./vault:/workspace
     restart: unless-stopped
+    # Run the container as the host user so vault files are owned by you, not root.
+    # Override by setting PUID / PGID in your shell or a .env file alongside this file.
+    user: "${PUID:-1000}:${PGID:-1000}"
     # Optional environment configurations or variables can be defined here if you extend the backend
     environment:
       - TZ=UTC

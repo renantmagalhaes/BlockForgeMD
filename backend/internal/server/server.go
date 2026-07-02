@@ -78,12 +78,17 @@ func (s *Server) setupRoutes() {
 		r.Get("/file/history", s.handleGetFileHistory)
 		r.Get("/file/history/content", s.handleGetFileHistoryContent)
 		r.Post("/file/rollback", s.handleRollbackFile)
+		r.Post("/file/move", s.handleMoveFile)
 		r.Post("/upload", s.handleUploadAsset)
 		r.Get("/sync/events", s.handleSSE)
 		r.Get("/link-preview", s.handleLinkPreview)
 		r.Get("/search", s.handleSearch)
 		r.Get("/settings", s.handleGetSettings)
 		r.Post("/settings", s.handleSaveSettings)
+		r.Get("/workspaces", s.handleListWorkspaces)
+		r.Post("/workspaces", s.handleCreateWorkspace)
+		r.Post("/workspaces/rename", s.handleRenameWorkspace)
+		r.Post("/workspaces/migrate", s.handleMigrateWorkspace)
 	})
 
 	// Serve assets directly from the vault's assets directory
@@ -949,4 +954,242 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, map[string]string{"status": "success"})
+}
+
+// mdStem strips compound markdown extensions to get the stem used for sub-page directories.
+// e.g. "Boards/MyBoard.board.md" → "Boards/MyBoard"
+//      "Documents/Note.md"       → "Documents/Note"
+func mdStem(fullPath string) string {
+	if strings.HasSuffix(fullPath, ".board.md") {
+		return fullPath[:len(fullPath)-len(".board.md")]
+	}
+	if strings.HasSuffix(fullPath, ".md") {
+		return fullPath[:len(fullPath)-3]
+	}
+	return fullPath
+}
+
+// handleMoveFile moves a vault file (and its sub-page directory) to a new path,
+// then re-indexes everything that moved so the DB stays consistent.
+func (s *Server) handleMoveFile(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		From string `json:"from"`
+		To   string `json:"to"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.From == "" || req.To == "" {
+		http.Error(w, "missing from or to", http.StatusBadRequest)
+		return
+	}
+
+	fromFull := filepath.Join(s.rootPath, filepath.Clean(req.From))
+	toFull := filepath.Join(s.rootPath, filepath.Clean(req.To))
+
+	// Prevent path traversal
+	rootAbs := s.rootPath + string(os.PathSeparator)
+	if !strings.HasPrefix(fromFull, rootAbs) || !strings.HasPrefix(toFull, rootAbs) {
+		http.Error(w, "path traversal not allowed", http.StatusBadRequest)
+		return
+	}
+
+	// Prevent move onto self or own subtree
+	fromStemFull := mdStem(fromFull)
+	if fromFull == toFull || strings.HasPrefix(toFull, fromStemFull+string(os.PathSeparator)) {
+		http.Error(w, "cannot move a file onto itself or its own sub-page", http.StatusBadRequest)
+		return
+	}
+
+	// Ensure destination directory exists
+	if err := os.MkdirAll(filepath.Dir(toFull), 0755); err != nil {
+		http.Error(w, "failed to create destination directory: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	s.watcher.LockPath(req.From)
+	s.watcher.LockPath(req.To)
+	defer s.watcher.UnlockPath(req.From)
+	defer s.watcher.UnlockPath(req.To)
+
+	// Move the file itself
+	if err := os.Rename(fromFull, toFull); err != nil {
+		http.Error(w, "failed to move file: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Move the sub-page directory if it exists
+	// e.g. Documents/Note1.md  → sub-dir Documents/Note1/
+	//      Boards/MyBoard.board.md → sub-dir Boards/MyBoard/
+	toStemFull := mdStem(toFull)
+	if info, err := os.Stat(fromStemFull); err == nil && info.IsDir() && fromStemFull != fromFull {
+		if err := os.MkdirAll(filepath.Dir(toStemFull), 0755); err == nil {
+			_ = os.Rename(fromStemFull, toStemFull)
+		}
+	}
+
+	// Update DB: remove old entry, index the moved file
+	_ = s.db.DeleteFile(req.From)
+	if res, err := parser.ParseFile(s.rootPath, req.To); err == nil {
+		_ = s.db.UpsertFile(res.Record, res.FrontMatter, res.Tasks)
+	}
+
+	// Re-index any children that moved with the sub-page directory
+	if info, err := os.Stat(toStemFull); err == nil && info.IsDir() {
+		toStemRel := filepath.ToSlash(toStemFull[len(s.rootPath)+1:])
+		fromStemRel := filepath.ToSlash(fromStemFull[len(s.rootPath)+1:])
+		_ = filepath.Walk(toStemFull, func(path string, fi os.FileInfo, werr error) error {
+			if werr != nil || fi.IsDir() || !strings.HasSuffix(path, ".md") {
+				return nil
+			}
+			newRel := filepath.ToSlash(path[len(s.rootPath)+1:])
+			oldRel := fromStemRel + newRel[len(toStemRel):]
+			_ = s.db.DeleteFile(oldRel)
+			if res, err := parser.ParseFile(s.rootPath, newRel); err == nil {
+				_ = s.db.UpsertFile(res.Record, res.FrontMatter, res.Tasks)
+			}
+			return nil
+		})
+	}
+
+	s.broadcastEvent(req.To)
+	respondJSON(w, map[string]string{"status": "moved", "to": req.To})
+}
+
+// ─── Workspace Handlers ───────────────────────────────────────────────────────
+
+var validWorkspaceNameRe = regexp.MustCompile(`^[\w][\w\s\-]*$`)
+
+// handleListWorkspaces returns all top-level non-hidden directories in the vault.
+func (s *Server) handleListWorkspaces(w http.ResponseWriter, r *http.Request) {
+	entries, err := os.ReadDir(s.rootPath)
+	if err != nil {
+		http.Error(w, "failed to read vault", http.StatusInternalServerError)
+		return
+	}
+	workspaces := []string{}
+	for _, e := range entries {
+		if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+			workspaces = append(workspaces, e.Name())
+		}
+	}
+	respondJSON(w, map[string]interface{}{"workspaces": workspaces})
+}
+
+// handleCreateWorkspace creates a new workspace directory with standard section subdirs.
+func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" || !validWorkspaceNameRe.MatchString(name) {
+		http.Error(w, "invalid workspace name", http.StatusBadRequest)
+		return
+	}
+
+	sections := []string{"Documents", "Boards", "Canvas", "MindMaps"}
+	for _, section := range sections {
+		if err := os.MkdirAll(filepath.Join(s.rootPath, name, section), 0755); err != nil {
+			http.Error(w, fmt.Sprintf("failed to create %s: %v", section, err), http.StatusInternalServerError)
+			return
+		}
+	}
+	s.watcher.WatchPath(filepath.Join(s.rootPath, name))
+	respondJSON(w, map[string]string{"name": name})
+}
+
+// handleRenameWorkspace renames a workspace directory and updates all DB path records.
+func (s *Server) handleRenameWorkspace(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		OldName string `json:"oldName"`
+		NewName string `json:"newName"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	oldName := strings.TrimSpace(req.OldName)
+	newName := strings.TrimSpace(req.NewName)
+	if oldName == "" || newName == "" || oldName == newName {
+		http.Error(w, "invalid names", http.StatusBadRequest)
+		return
+	}
+	if !validWorkspaceNameRe.MatchString(newName) {
+		http.Error(w, "invalid workspace name", http.StatusBadRequest)
+		return
+	}
+
+	src := filepath.Join(s.rootPath, oldName)
+	dst := filepath.Join(s.rootPath, newName)
+
+	if _, err := os.Stat(src); err != nil {
+		http.Error(w, "workspace not found", http.StatusNotFound)
+		return
+	}
+	if _, err := os.Stat(dst); err == nil {
+		http.Error(w, "workspace name already taken", http.StatusConflict)
+		return
+	}
+
+	if err := os.Rename(src, dst); err != nil {
+		http.Error(w, fmt.Sprintf("failed to rename directory: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := s.db.RenameWorkspacePaths(oldName, newName); err != nil {
+		http.Error(w, fmt.Sprintf("failed to update DB: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	s.watcher.WatchPath(dst)
+	s.broadcastEvent("__workspace_renamed__")
+	respondJSON(w, map[string]string{"oldName": oldName, "newName": newName})
+}
+
+// handleMigrateWorkspace moves existing flat section dirs (Documents/, Boards/, etc.)
+// into a named workspace subdirectory, and updates all DB path records.
+func (s *Server) handleMigrateWorkspace(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = "Default"
+	}
+
+	workspaceDir := filepath.Join(s.rootPath, name)
+	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+		http.Error(w, fmt.Sprintf("failed to create workspace dir: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	sections := []string{"Documents", "Boards", "Canvas", "MindMaps", "Tasks"}
+	for _, section := range sections {
+		src := filepath.Join(s.rootPath, section)
+		dst := filepath.Join(workspaceDir, section)
+		if _, err := os.Stat(src); err == nil {
+			if err := os.Rename(src, dst); err != nil {
+				http.Error(w, fmt.Sprintf("failed to move %s: %v", section, err), http.StatusInternalServerError)
+				return
+			}
+		}
+	}
+
+	if err := s.db.AddWorkspacePrefix(name); err != nil {
+		http.Error(w, fmt.Sprintf("failed to update DB: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	s.watcher.WatchPath(workspaceDir)
+	s.broadcastEvent("__workspace_migrated__")
+	respondJSON(w, map[string]string{"name": name})
 }

@@ -42,6 +42,7 @@ func ParseFile(rootPath, relPath string) (*ParseResult, error) {
 	tee := io.TeeReader(file, hasher)
 
 	scanner := bufio.NewScanner(tee)
+	scanner.Buffer(make([]byte, 64*1024), 32*1024*1024) // allow lines up to 32 MB (base64 images)
 	var lines []string
 	for scanner.Scan() {
 		lines = append(lines, scanner.Text())
@@ -123,6 +124,14 @@ func ParseFile(rootPath, relPath string) (*ParseResult, error) {
 		}
 	}
 
+	// For types that embed binary blobs (base64 images, JSON data), skip full-text
+	// content storage — their content is not human-searchable and can be very large.
+	searchContent := buf.String()
+	switch fileType {
+	case "mindmap", "canvas", "diagram":
+		searchContent = ""
+	}
+
 	// Build file record
 	record := db.FileRecord{
 		Path:        relPath,
@@ -130,7 +139,7 @@ func ParseFile(rootPath, relPath string) (*ParseResult, error) {
 		Type:        fileType,
 		ContentHash: contentHash,
 		UpdatedAt:   updatedAt,
-		Content:     buf.String(),
+		Content:     searchContent,
 	}
 
 	// If it is a canvas type, double check we have Excalidraw or Draw.io config
