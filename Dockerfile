@@ -27,6 +27,9 @@ COPY --from=backend-builder /app/backend/blockforgemd-backend ./
 # Copy compiled frontend assets
 COPY --from=frontend-builder /app/backend/web-dist ./web-dist
 
+# Run as UID/GID 1000 by default (most Linux desktop users).
+# docker-compose overrides this via its 'user:' directive (PUID/PGID).
+USER 1000:1000
 EXPOSE 8080
 VOLUME ["/workspace"]
 

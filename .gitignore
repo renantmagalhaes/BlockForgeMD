@@ -1,3 +1,6 @@
+# Local environment overrides (PUID, PGID, TZ, etc.)
+.env
+
 # OS files
 .DS_Store
 Thumbs.db
