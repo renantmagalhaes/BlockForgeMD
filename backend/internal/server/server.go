@@ -1103,6 +1103,54 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, map[string]string{"name": name})
 }
 
+// handleRenameWorkspace renames a workspace directory and updates all DB path records.
+func (s *Server) handleRenameWorkspace(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		OldName string `json:"oldName"`
+		NewName string `json:"newName"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	oldName := strings.TrimSpace(req.OldName)
+	newName := strings.TrimSpace(req.NewName)
+	if oldName == "" || newName == "" || oldName == newName {
+		http.Error(w, "invalid names", http.StatusBadRequest)
+		return
+	}
+	if !validWorkspaceNameRe.MatchString(newName) {
+		http.Error(w, "invalid workspace name", http.StatusBadRequest)
+		return
+	}
+
+	src := filepath.Join(s.rootPath, oldName)
+	dst := filepath.Join(s.rootPath, newName)
+
+	if _, err := os.Stat(src); err != nil {
+		http.Error(w, "workspace not found", http.StatusNotFound)
+		return
+	}
+	if _, err := os.Stat(dst); err == nil {
+		http.Error(w, "workspace name already taken", http.StatusConflict)
+		return
+	}
+
+	if err := os.Rename(src, dst); err != nil {
+		http.Error(w, fmt.Sprintf("failed to rename directory: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := s.db.RenameWorkspacePaths(oldName, newName); err != nil {
+		http.Error(w, fmt.Sprintf("failed to update DB: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	s.watcher.WatchPath(dst)
+	s.broadcastEvent("__workspace_renamed__")
+	respondJSON(w, map[string]string{"oldName": oldName, "newName": newName})
+}
+
 // handleMigrateWorkspace moves existing flat section dirs (Documents/, Boards/, etc.)
 // into a named workspace subdirectory, and updates all DB path records.
 func (s *Server) handleMigrateWorkspace(w http.ResponseWriter, r *http.Request) {

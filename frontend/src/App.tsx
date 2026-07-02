@@ -556,6 +556,8 @@ export const App: React.FC = () => {
   const [workspaceDropdownOpen, setWorkspaceDropdownOpen] = useState(false)
   const [newWorkspaceModal, setNewWorkspaceModal] = useState(false)
   const [newWorkspaceName, setNewWorkspaceName] = useState('')
+  const [renameWorkspaceTarget, setRenameWorkspaceTarget] = useState<string | null>(null)
+  const [renameWorkspaceName, setRenameWorkspaceName] = useState('')
 
   // W(section) → workspace-qualified section root path
   const W = (section: string) => activeWorkspace ? `${activeWorkspace}/${section}` : section
