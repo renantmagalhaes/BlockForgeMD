@@ -1758,6 +1758,9 @@ export const App: React.FC = () => {
                     ? (newCols) => handleUpdateBoardColumns(selectedPath, newCols)
                     : async (newCols) => { setDefaultColumns(newCols); localStorage.setItem('blockforge_default_columns', JSON.stringify(newCols)) }
                 }
+                boardFrontMatter={selectedPath && activeFile?.type === 'board' ? activeFile?.frontMatter : undefined}
+                onUpdateBoardFrontMatter={selectedPath && activeFile?.type === 'board' ? (updates) => handleUpdateFrontMatter(selectedPath, updates) : undefined}
+                onUpdateTaskFrontMatter={(path, updates) => handleUpdateFrontMatter(path, updates)}
               />
             </motion.div>
           ) : selectedPath && activeFile ? (
