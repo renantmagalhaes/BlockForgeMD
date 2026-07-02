@@ -17,7 +17,8 @@ import {
   Grid,
   Settings,
   Search,
-  History as HistoryIcon
+  History as HistoryIcon,
+  GripVertical,
 } from 'lucide-react'
 import Editor from './components/Editor'
 import Kanban from './components/Kanban'
@@ -226,6 +227,10 @@ const TreeNodeComponent: React.FC<{
   onCreateSubPage: (parentPath: string) => void
   onDeletePath: (path: string) => void
   onContextMenu: (e: React.MouseEvent, node: TreeNode) => void
+  draggingPath: string | null
+  onDragStart: (filePath: string) => void
+  onDragEnd: () => void
+  onDropNode: (fromFilePath: string, toNode: TreeNode) => void
 }> = ({
   node,
   depth,
@@ -236,6 +241,10 @@ const TreeNodeComponent: React.FC<{
   onCreateSubPage,
   onDeletePath,
   onContextMenu,
+  draggingPath,
+  onDragStart,
+  onDragEnd,
+  onDropNode,
 }) => {
   const getIsCollapsed = () => {
     if (collapsedPaths[node.path] !== undefined) return collapsedPaths[node.path]
@@ -245,6 +254,52 @@ const TreeNodeComponent: React.FC<{
 
   const isCollapsed = getIsCollapsed()
   const isSelected = selectedPath && node.hasPage && node.filePath === selectedPath
+  const isBeingDragged = !!(node.filePath && draggingPath === node.filePath)
+
+  const [isDragOver, setIsDragOver] = React.useState(false)
+
+  const handleDragStart = (e: React.DragEvent) => {
+    if (!node.filePath) { e.preventDefault(); return }
+    e.dataTransfer.setData('text/plain', node.filePath)
+    e.dataTransfer.effectAllowed = 'move'
+    onDragStart(node.filePath)
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!node.hasPage || !node.filePath || isBeingDragged) return
+    // Prevent dropping onto a descendant of the dragged item
+    if (draggingPath) {
+      const dragStem = draggingPath.endsWith('.board.md')
+        ? draggingPath.slice(0, -'.board.md'.length)
+        : draggingPath.endsWith('.md') ? draggingPath.slice(0, -3) : draggingPath
+      if (node.filePath.startsWith(dragStem + '/')) return
+    }
+    e.dataTransfer.dropEffect = 'move'
+    if (!isDragOver) setIsDragOver(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.stopPropagation()
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) setIsDragOver(false)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(false)
+    const fromPath = e.dataTransfer.getData('text/plain')
+    if (fromPath && node.hasPage && node.filePath && fromPath !== node.filePath) {
+      onDropNode(fromPath, node)
+    }
+    onDragEnd()
+  }
+
+  const handleDragEnd = () => {
+    onDragEnd()
+    setIsDragOver(false)
+  }
 
   const handleRowClick = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -292,14 +347,37 @@ const TreeNodeComponent: React.FC<{
   return (
     <div className="flex flex-col select-none">
       <div
+        draggable={!!node.filePath}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
         onClick={handleRowClick}
         onContextMenu={handleContextMenu}
         style={{ paddingLeft: `${depth * 8 + 6}px` }}
-        className={`flex items-center justify-between group py-1 px-2 rounded-lg text-xs transition cursor-pointer hover:bg-slate-800/40 ${
-          isSelected ? 'bg-slate-800 text-violet-400 font-semibold border border-slate-700/50' : 'text-slate-300'
+        className={`flex items-center justify-between group py-1 px-2 rounded-lg text-xs transition ${
+          isBeingDragged
+            ? 'opacity-30 cursor-grabbing'
+            : isDragOver
+            ? 'bg-violet-600/15 border border-violet-500/40 text-violet-300 cursor-copy'
+            : isSelected
+            ? 'bg-slate-800 text-violet-400 font-semibold border border-slate-700/50 hover:bg-slate-800/80 cursor-pointer'
+            : 'hover:bg-slate-800/40 text-slate-300 cursor-pointer'
         }`}
       >
-        <div className="flex items-center gap-1.5 truncate">
+        <div className="flex items-center gap-1 truncate min-w-0">
+          {/* Drag handle — takes fixed width so layout doesn't shift */}
+          <span
+            className={`shrink-0 transition-opacity ${
+              node.filePath
+                ? 'opacity-0 group-hover:opacity-50 hover:opacity-100 text-slate-500 cursor-grab active:cursor-grabbing'
+                : 'invisible'
+            }`}
+            style={{ width: 12 }}
+          >
+            {node.filePath && <GripVertical size={10} />}
+          </span>
           {node.isFolder ? (
             <span
               onClick={handleChevronClick}
@@ -308,10 +386,10 @@ const TreeNodeComponent: React.FC<{
               {isCollapsed ? <ChevronRight size={10} /> : <ChevronDown size={10} />}
             </span>
           ) : (
-            <span className="w-4 shrink-0" />
+            <span className="w-3.5 shrink-0" />
           )}
           {getIcon()}
-          <span className="truncate">{node.title || node.name}</span>
+          <span className="truncate ml-0.5">{node.title || node.name}</span>
         </div>
 
         <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 shrink-0 ml-1">
@@ -346,6 +424,10 @@ const TreeNodeComponent: React.FC<{
               onCreateSubPage={onCreateSubPage}
               onDeletePath={onDeletePath}
               onContextMenu={onContextMenu}
+              draggingPath={draggingPath}
+              onDragStart={onDragStart}
+              onDragEnd={onDragEnd}
+              onDropNode={onDropNode}
             />
           ))}
         </div>
@@ -764,6 +846,33 @@ export const App: React.FC = () => {
 
   const activeFile = files.find((f) => f.path === selectedPath)
 
+  // ── Sidebar drag-and-drop state ──────────────────────────────────────────
+  const [draggingPath, setDraggingPath] = useState<string | null>(null)
+
+  const handleMoveNode = async (fromFilePath: string, toNode: TreeNode) => {
+    if (!toNode.filePath) return
+    // Compute destination: the dropped item becomes a child of the target node
+    const targetStem = getNodeParentPath(toNode)
+    const fileName = fromFilePath.split('/').pop()!
+    const toFilePath = `${targetStem}/${fileName}`
+    if (toFilePath === fromFilePath) return // already in that folder, no-op
+
+    try {
+      const res = await fetch(`${API_BASE}/api/file/move`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: fromFilePath, to: toFilePath }),
+      })
+      if (!res.ok) throw new Error('Failed to move file')
+      fetchFiles()
+      // If we moved the currently open file, follow it to its new path
+      if (selectedPath === fromFilePath) fetchFileContent(toFilePath)
+    } catch (e) {
+      console.error('Error moving file', e)
+      alert('Failed to move item.')
+    }
+  }
+
   const COMMAND_ITEMS = [
     { id: 'create-doc',     label: 'Create New Document',          icon: <FilePlus size={14} className="text-blue-400" />,    action: () => handleCreateFile('document', 'Documents', undefined, ['document']) },
     { id: 'create-board',   label: 'Create New Kanban Board',      icon: <LayoutGrid size={14} className="text-rose-400" />,  action: () => handleCreateFile('board', 'Boards', undefined, ['board']) },
@@ -842,6 +951,10 @@ export const App: React.FC = () => {
                           nodeType: targetNode.type,
                         })
                       }}
+                      draggingPath={draggingPath}
+                      onDragStart={setDraggingPath}
+                      onDragEnd={() => setDraggingPath(null)}
+                      onDropNode={handleMoveNode}
                     />
                   ))
                 )}
@@ -890,6 +1003,10 @@ export const App: React.FC = () => {
                           nodeType: targetNode.type,
                         })
                       }}
+                      draggingPath={draggingPath}
+                      onDragStart={setDraggingPath}
+                      onDragEnd={() => setDraggingPath(null)}
+                      onDropNode={handleMoveNode}
                     />
                   ))
                 )}
@@ -938,6 +1055,10 @@ export const App: React.FC = () => {
                           nodeType: targetNode.type,
                         })
                       }}
+                      draggingPath={draggingPath}
+                      onDragStart={setDraggingPath}
+                      onDragEnd={() => setDraggingPath(null)}
+                      onDropNode={handleMoveNode}
                     />
                   ))
                 )}

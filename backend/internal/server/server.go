@@ -78,6 +78,7 @@ func (s *Server) setupRoutes() {
 		r.Get("/file/history", s.handleGetFileHistory)
 		r.Get("/file/history/content", s.handleGetFileHistoryContent)
 		r.Post("/file/rollback", s.handleRollbackFile)
+		r.Post("/file/move", s.handleMoveFile)
 		r.Post("/upload", s.handleUploadAsset)
 		r.Get("/sync/events", s.handleSSE)
 		r.Get("/link-preview", s.handleLinkPreview)
@@ -949,4 +950,105 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, map[string]string{"status": "success"})
+}
+
+// mdStem strips compound markdown extensions to get the stem used for sub-page directories.
+// e.g. "Boards/MyBoard.board.md" → "Boards/MyBoard"
+//      "Documents/Note.md"       → "Documents/Note"
+func mdStem(fullPath string) string {
+	if strings.HasSuffix(fullPath, ".board.md") {
+		return fullPath[:len(fullPath)-len(".board.md")]
+	}
+	if strings.HasSuffix(fullPath, ".md") {
+		return fullPath[:len(fullPath)-3]
+	}
+	return fullPath
+}
+
+// handleMoveFile moves a vault file (and its sub-page directory) to a new path,
+// then re-indexes everything that moved so the DB stays consistent.
+func (s *Server) handleMoveFile(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		From string `json:"from"`
+		To   string `json:"to"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.From == "" || req.To == "" {
+		http.Error(w, "missing from or to", http.StatusBadRequest)
+		return
+	}
+
+	fromFull := filepath.Join(s.rootPath, filepath.Clean(req.From))
+	toFull := filepath.Join(s.rootPath, filepath.Clean(req.To))
+
+	// Prevent path traversal
+	rootAbs := s.rootPath + string(os.PathSeparator)
+	if !strings.HasPrefix(fromFull, rootAbs) || !strings.HasPrefix(toFull, rootAbs) {
+		http.Error(w, "path traversal not allowed", http.StatusBadRequest)
+		return
+	}
+
+	// Prevent move onto self or own subtree
+	fromStemFull := mdStem(fromFull)
+	if fromFull == toFull || strings.HasPrefix(toFull, fromStemFull+string(os.PathSeparator)) {
+		http.Error(w, "cannot move a file onto itself or its own sub-page", http.StatusBadRequest)
+		return
+	}
+
+	// Ensure destination directory exists
+	if err := os.MkdirAll(filepath.Dir(toFull), 0755); err != nil {
+		http.Error(w, "failed to create destination directory: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	s.watcher.LockPath(req.From)
+	s.watcher.LockPath(req.To)
+	defer s.watcher.UnlockPath(req.From)
+	defer s.watcher.UnlockPath(req.To)
+
+	// Move the file itself
+	if err := os.Rename(fromFull, toFull); err != nil {
+		http.Error(w, "failed to move file: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Move the sub-page directory if it exists
+	// e.g. Documents/Note1.md  → sub-dir Documents/Note1/
+	//      Boards/MyBoard.board.md → sub-dir Boards/MyBoard/
+	toStemFull := mdStem(toFull)
+	if info, err := os.Stat(fromStemFull); err == nil && info.IsDir() && fromStemFull != fromFull {
+		if err := os.MkdirAll(filepath.Dir(toStemFull), 0755); err == nil {
+			_ = os.Rename(fromStemFull, toStemFull)
+		}
+	}
+
+	// Update DB: remove old entry, index the moved file
+	_ = s.db.DeleteFile(req.From)
+	if res, err := parser.ParseFile(s.rootPath, req.To); err == nil {
+		_ = s.db.UpsertFile(res.Record, res.FrontMatter, res.Tasks)
+	}
+
+	// Re-index any children that moved with the sub-page directory
+	if info, err := os.Stat(toStemFull); err == nil && info.IsDir() {
+		toStemRel := filepath.ToSlash(toStemFull[len(s.rootPath)+1:])
+		fromStemRel := filepath.ToSlash(fromStemFull[len(s.rootPath)+1:])
+		_ = filepath.Walk(toStemFull, func(path string, fi os.FileInfo, werr error) error {
+			if werr != nil || fi.IsDir() || !strings.HasSuffix(path, ".md") {
+				return nil
+			}
+			newRel := filepath.ToSlash(path[len(s.rootPath)+1:])
+			oldRel := fromStemRel + newRel[len(toStemRel):]
+			_ = s.db.DeleteFile(oldRel)
+			if res, err := parser.ParseFile(s.rootPath, newRel); err == nil {
+				_ = s.db.UpsertFile(res.Record, res.FrontMatter, res.Tasks)
+			}
+			return nil
+		})
+	}
+
+	s.broadcastEvent(req.To)
+	respondJSON(w, map[string]string{"status": "moved", "to": req.To})
 }
