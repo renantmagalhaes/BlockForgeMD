@@ -995,7 +995,7 @@ export const App: React.FC = () => {
     }
 
     const path = `${parentFolder}${sanitizedName}.md`
-    const content = `---\ntitle: ${title}\ntype: task\nstatus: ${status}\npriority: Medium\ndueDate: ${new Date().toISOString().split('T')[0]}\nassignee: Unassigned\ntags: []\n---\n`
+    const content = `---\ntitle: ${title}\ntype: task\nstatus: ${status}\ntags: []\n---\n`
     try {
       await fetch(`${API_BASE}/api/file`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path, content }) })
       fetchFiles()
@@ -1044,7 +1044,7 @@ export const App: React.FC = () => {
       content = `---\ntitle: ${title}\ntype: board\ncolumns: ["Todo", "In Progress", "Done"]\n---\n`
     } else if (type === 'task') {
       path = parentPath ? `${parentPath}/${name}.md` : `${W('Tasks')}/${name}.md`
-      content = `---\ntitle: ${title}\ntype: task\nstatus: Todo\npriority: Medium\ndueDate: ${new Date().toISOString().split('T')[0]}\nassignee: Unassigned\ntags: []\n---\n`
+      content = `---\ntitle: ${title}\ntype: task\nstatus: Todo\ntags: []\n---\n`
     } else if (type === 'canvas') {
       path = parentPath ? `${parentPath}/${name}.excalidraw.md` : `${W('Canvas')}/${name}.excalidraw.md`
       content = `---\ntitle: ${title}\ntype: canvas\neditor: excalidraw\n---\n\n\`\`\`json\n{\n  "type": "excalidraw",\n  "version": 2,\n  "elements": [],\n  "appState": {"viewBackgroundColor": "#121212","theme": "dark"}\n}\n\`\`\`\n`
@@ -1108,6 +1108,25 @@ export const App: React.FC = () => {
   }
 
   const activeFile = files.find((f) => f.path === selectedPath)
+
+  // Tags from sibling tasks in the same board folder — passed to Editor for autocomplete
+  const boardTagsForEditor = React.useMemo(() => {
+    if (!selectedPath) return []
+    const slash = selectedPath.lastIndexOf('/')
+    const folder = slash === -1 ? '' : selectedPath.slice(0, slash + 1)
+    const tagSet = new Set<string>()
+    files.forEach(f => {
+      if (f.path === selectedPath) return
+      const fSlash = f.path.lastIndexOf('/')
+      const fFolder = fSlash === -1 ? '' : f.path.slice(0, fSlash + 1)
+      if (fFolder !== folder) return
+      if (!(f.type === 'task' || f.frontMatter?.status)) return
+      const raw = f.frontMatter?.tags
+      if (!raw) return
+      try { (JSON.parse(raw) as string[]).forEach(t => tagSet.add(t)) } catch { /* */ }
+    })
+    return Array.from(tagSet).sort()
+  }, [files, selectedPath])
 
   // ── Sidebar drag-and-drop state ──────────────────────────────────────────
   const [dragging, setDragging] = useState<{ path: string; type?: string } | null>(null)
@@ -1806,6 +1825,7 @@ export const App: React.FC = () => {
                     onCreateSubPage={(parentPath, onCreated) => handleCreateFile('document', parentPath, onCreated, ['document'], 'Sub Page')}
                     onSelectFile={fetchFileContent}
                     files={files}
+                    boardTags={boardTagsForEditor}
                     globalLayoutOverride={globalLayoutOverride}
                     globalColumnWidthOverride={globalColumnWidthOverride}
                     highlightSearchTerm={activeSearchHighlight}

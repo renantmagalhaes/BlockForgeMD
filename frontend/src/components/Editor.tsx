@@ -1424,6 +1424,7 @@ interface EditorProps {
   onUpdateFrontMatter?: (updates: Record<string, any>) => Promise<void>
   onTitleChange?: (newTitle: string) => void
   boardColumns: string[]
+  boardTags?: string[]
   onCreateSubPage?: (parentPath: string, onCreated: (newPath: string, title: string) => string) => void
   onSelectFile?: (path: string) => void
   files: FileRecord[]
@@ -1470,6 +1471,7 @@ export const Editor: React.FC<EditorProps> = ({
   onUpdateFrontMatter,
   onTitleChange,
   boardColumns,
+  boardTags = [],
   onCreateSubPage,
   onSelectFile,
   files,
@@ -1498,6 +1500,7 @@ export const Editor: React.FC<EditorProps> = ({
 
   // Tag manager input state
   const [newTagInput, setNewTagInput] = useState('')
+  const [tagAutocompleteOpen, setTagAutocompleteOpen] = useState(false)
 
   // Image Viewer & Editor state
   const [editingImageSrc, setEditingImageSrc] = useState<string | null>(null)
@@ -2703,16 +2706,25 @@ export const Editor: React.FC<EditorProps> = ({
     }
   }
 
-  const handleAddTagSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    const cleanTag = newTagInput.trim()
+  const handleAddTag = (tag: string) => {
+    const cleanTag = tag.trim()
     if (!cleanTag) return
     const currentTags = getTagsArray()
     if (!currentTags.includes(cleanTag)) {
       onUpdateFrontMatter?.({ tags: [...currentTags, cleanTag] })
     }
     setNewTagInput('')
+    setTagAutocompleteOpen(false)
   }
+
+  const handleAddTagSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    handleAddTag(newTagInput)
+  }
+
+  const tagSuggestions = newTagInput
+    ? boardTags.filter(t => !getTagsArray().includes(t) && t.toLowerCase().includes(newTagInput.toLowerCase()))
+    : boardTags.filter(t => !getTagsArray().includes(t))
 
   const handleRemoveTag = (tagToRemove: string) => {
     const currentTags = getTagsArray()
@@ -3081,10 +3093,11 @@ export const Editor: React.FC<EditorProps> = ({
                     Priority
                   </span>
                   <select
-                    value={frontMatter.priority || 'Medium'}
-                    onChange={(e) => onUpdateFrontMatter({ priority: e.target.value })}
+                    value={frontMatter.priority || ''}
+                    onChange={(e) => onUpdateFrontMatter({ priority: e.target.value || null })}
                     className="flex-1 bg-slate-900/50 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded px-2.5 py-1 outline-none transition cursor-pointer"
                   >
+                    <option value="">No priority</option>
                     <option value="Low">Low</option>
                     <option value="Medium">Medium</option>
                     <option value="High">High</option>
@@ -3099,7 +3112,7 @@ export const Editor: React.FC<EditorProps> = ({
                   </span>
                   <input
                     type="date"
-                    value={frontMatter.dueDate || ''}
+                    value={frontMatter.dueDate?.split('T')[0] || ''}
                     onChange={(e) => onUpdateFrontMatter({ dueDate: e.target.value })}
                     className="flex-1 bg-slate-900/50 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded px-2.5 py-1 outline-none transition cursor-pointer"
                   />
@@ -3162,13 +3175,16 @@ export const Editor: React.FC<EditorProps> = ({
                     </span>
                   ))}
 
-                  <form onSubmit={handleAddTagSubmit} className="flex items-center gap-1 ml-1.5">
+                  <form onSubmit={handleAddTagSubmit} className="flex items-center gap-1 ml-1.5 relative">
                     <input
                       type="text"
                       placeholder="Add tag..."
                       value={newTagInput}
-                      onChange={(e) => setNewTagInput(e.target.value)}
-                      className="bg-slate-900 border border-slate-850 focus:border-slate-700 text-[10px] rounded px-2 py-0.5 outline-none text-slate-300 w-20 focus:w-28 transition-all"
+                      onChange={(e) => { setNewTagInput(e.target.value); setTagAutocompleteOpen(true) }}
+                      onFocus={() => setTagAutocompleteOpen(true)}
+                      onBlur={() => setTimeout(() => setTagAutocompleteOpen(false), 150)}
+                      onKeyDown={(e) => { if (e.key === 'Escape') { setTagAutocompleteOpen(false); setNewTagInput('') } }}
+                      className="bg-slate-900 border border-slate-700 focus:border-violet-500/50 text-[10px] rounded px-2 py-0.5 outline-none text-slate-300 w-20 focus:w-28 transition-all"
                     />
                     <button
                       type="submit"
@@ -3176,6 +3192,20 @@ export const Editor: React.FC<EditorProps> = ({
                     >
                       <Plus size={10} />
                     </button>
+                    {tagAutocompleteOpen && tagSuggestions.length > 0 && (
+                      <div className="absolute top-full left-0 mt-1 bg-[#1a2236] border border-slate-700 rounded-lg shadow-xl py-1 z-50 min-w-[130px] max-h-36 overflow-y-auto no-scrollbar">
+                        {tagSuggestions.map(s => (
+                          <button
+                            key={s}
+                            type="button"
+                            onMouseDown={() => handleAddTag(s)}
+                            className="flex w-full px-2.5 py-1.5 text-[10px] text-slate-300 hover:bg-slate-800 text-left cursor-pointer"
+                          >
+                            {s}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </form>
                 </div>
               </div>

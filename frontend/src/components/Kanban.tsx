@@ -572,7 +572,7 @@ export const Kanban: React.FC<KanbanProps> = ({
                   const pDef        = getPriorityDef(priority)
                   const pColor      = pDef?.color || '#64748b'
                   const assignee    = task.frontMatter?.assignee
-                  const dueDate     = task.frontMatter?.dueDate
+                  const dueDate     = task.frontMatter?.dueDate?.split('T')[0]
                   const tags        = parseTags(task.frontMatter?.tags)
                   const isDragging  = draggingPath === task.path
                   const showTagEd   = tagEditorCard === task.path
