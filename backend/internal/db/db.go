@@ -341,6 +341,31 @@ func (db *DB) SetSetting(key string, value string) error {
 	return err
 }
 
+// RenameWorkspacePaths updates all path columns when a workspace directory is renamed.
+func (db *DB) RenameWorkspacePaths(oldName, newName string) error {
+	tx, err := db.Conn.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	oldPrefix := oldName + "/"
+	newPrefix := newName + "/"
+	prefixLen := len(oldPrefix) + 1 // sqlite substr is 1-indexed
+
+	q := "WHERE %s LIKE ?"
+	for _, stmt := range []string{
+		fmt.Sprintf("UPDATE files SET path = ? || substr(path, ?) "+q, "path"),
+		fmt.Sprintf("UPDATE front_matter SET file_path = ? || substr(file_path, ?) "+q, "file_path"),
+		fmt.Sprintf("UPDATE tasks SET file_path = ? || substr(file_path, ?) "+q, "file_path"),
+	} {
+		if _, err := tx.Exec(stmt, newPrefix, prefixLen, oldPrefix+"%"); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // AddWorkspacePrefix prepends workspace/name to all path columns.
 // Called once during migration from the flat-directory structure.
 func (db *DB) AddWorkspacePrefix(workspace string) error {

@@ -87,6 +87,7 @@ func (s *Server) setupRoutes() {
 		r.Post("/settings", s.handleSaveSettings)
 		r.Get("/workspaces", s.handleListWorkspaces)
 		r.Post("/workspaces", s.handleCreateWorkspace)
+		r.Post("/workspaces/rename", s.handleRenameWorkspace)
 		r.Post("/workspaces/migrate", s.handleMigrateWorkspace)
 	})
 
