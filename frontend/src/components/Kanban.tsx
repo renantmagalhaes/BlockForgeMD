@@ -44,7 +44,13 @@ export const Kanban: React.FC<KanbanProps> = ({
     return filePath.substring(0, lastSlash + 1)
   }
 
-  const boardFolder = boardPath ? getParentDir(boardPath) : ''
+  // Tasks live under the board's stem folder (Boards/board1/), not its parent dir (Boards/).
+  // Strip .board.md to get the stem; fall back to parent dir for non-.board.md paths.
+  const boardFolder = boardPath
+    ? boardPath.endsWith('.board.md')
+      ? boardPath.slice(0, -'.board.md'.length) + '/'
+      : getParentDir(boardPath)
+    : ''
 
   // Filter tasks from indexed files belonging to the same folder scope
   const tasks = files.filter((f) => {

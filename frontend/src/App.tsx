@@ -62,7 +62,13 @@ const buildTree = (files: FileRecord[]): TreeNode[] => {
       return
     }
 
-    const stem = file.path.endsWith('.md') ? file.path.slice(0, -3) : file.path
+    // Strip compound extensions before .md so board files nest their tasks correctly:
+    // Boards/MyBoard.board.md → stem Boards/MyBoard (tasks live at Boards/MyBoard/*)
+    const stem = file.path.endsWith('.board.md')
+      ? file.path.slice(0, -'.board.md'.length)
+      : file.path.endsWith('.md')
+      ? file.path.slice(0, -3)
+      : file.path
     nodeMap.set(
       hasChildren(stem) ? stem : file.path,
       { filePath: file.path, title: file.title, type: file.type, frontMatter: file.frontMatter }
@@ -146,52 +152,33 @@ const buildTree = (files: FileRecord[]): TreeNode[] => {
   return root.children
 }
 
-const getCategoryChildren = (filesList: FileRecord[], category: string, fallbackType: string): TreeNode[] => {
-  const filtered = filesList.filter(f => {
-    // Exact folder match
-    if (f.path.startsWith(category + '/')) return true
-    
-    // Type match, but exclude files that are in other categories' standard directories
-    if (f.type === fallbackType) {
-      const parts = f.path.split('/')
-      if (parts.length > 1) {
-        const rootDir = parts[0]
-        if (rootDir === 'Boards' || rootDir === 'Tasks' || rootDir === 'Canvas' || rootDir === 'Documents') {
-          return rootDir === category
-        }
-      }
-      return true
-    }
-    return false
-  })
-  
-  const tree = buildTree(filtered)
-  const catNode = tree.find(n => n.name === category)
-  if (catNode) {
-    return catNode.children
-  }
-  return tree
-}
-
-const getBoardChildren = (filesList: FileRecord[]): TreeNode[] => {
+// Returns children of a specific category section, filtering strictly by folder path AND allowed types.
+// This ensures no cross-contamination: tasks created under Documents/ won't appear there, etc.
+const getCategoryChildren = (filesList: FileRecord[], category: string, allowedTypes: string[]): TreeNode[] => {
   const filtered = filesList.filter(f =>
-    f.path.startsWith('Boards/') ||
-    f.path.startsWith('Tasks/') ||
-    f.type === 'board' ||
-    f.type === 'task'
+    f.path.startsWith(category + '/') && allowedTypes.includes(f.type)
   )
   const tree = buildTree(filtered)
-  
+  const catNode = tree.find(n => n.name === category)
+  return catNode ? catNode.children : tree
+}
+
+// Returns boards (with their tasks as children) plus any standalone tasks in Tasks/.
+// Filtering strictly by path and type prevents documents/canvas from leaking in.
+const getBoardChildren = (filesList: FileRecord[]): TreeNode[] => {
+  const filtered = filesList.filter(f =>
+    (f.path.startsWith('Boards/') || f.path.startsWith('Tasks/')) &&
+    (f.type === 'board' || f.type === 'task')
+  )
+  const tree = buildTree(filtered)
+
   let boardChildren: TreeNode[] = []
   const boardsNode = tree.find(n => n.name === 'Boards')
   if (boardsNode) boardChildren = [...boardChildren, ...boardsNode.children]
-  
+
   const tasksNode = tree.find(n => n.name === 'Tasks')
   if (tasksNode) boardChildren = [...boardChildren, ...tasksNode.children]
-  
-  const others = tree.filter(n => n.name !== 'Boards' && n.name !== 'Tasks')
-  boardChildren = [...boardChildren, ...others]
-  
+
   return boardChildren
 }
 
@@ -206,6 +193,10 @@ const getNodeParentPath = (node: TreeNode): string => {
   if (node.filePath.endsWith('/README.md')) {
     return node.filePath.slice(0, -'/README.md'.length)  // legacy folder
   }
+  // Board files use compound extension; tasks nest under the bare name
+  if (node.filePath.endsWith('.board.md')) {
+    return node.filePath.slice(0, -'.board.md'.length)
+  }
   const stem = node.filePath.endsWith('.md') ? node.filePath.slice(0, -3) : node.filePath
   return stem  // sub-pages nest under the page's own stem directory
 }
@@ -217,6 +208,8 @@ const getContextParentPath = (path: string | null): string | undefined => {
   if (path.endsWith('/README.md')) return path.slice(0, -'/README.md'.length)  // legacy folder
   // For section roots (no slash at all: Documents, Tasks, Canvas)
   if (!path.includes('/')) return path
+  // Board files: strip .board.md so tasks nest under the bare folder name
+  if (path.endsWith('.board.md')) return path.slice(0, -'.board.md'.length)
   // For any page: new item goes under its stem
   const stem = path.endsWith('.md') ? path.slice(0, -3) : path
   return stem
@@ -400,7 +393,7 @@ const getSearchSnippet = (content: string, query: string) => {
 // ─── App ──────────────────────────────────────────────────────────────────────
 export const App: React.FC = () => {
   const [files, setFiles] = useState<FileRecord[]>([])
-  const [activeView, setActiveView] = useState<'board' | 'editor'>('board')
+  const [activeView, setActiveView] = useState<'board' | 'editor'>('editor')
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [selectedContent, setSelectedContent] = useState<string>('')
   const [currentFrontMatterStr, setCurrentFrontMatterStr] = useState<string>('')
@@ -419,6 +412,7 @@ export const App: React.FC = () => {
     isOpen: boolean
     type: 'document' | 'task' | 'canvas' | 'board' | 'diagram' | null
     parentPath?: string
+    allowedTypes?: ('document' | 'task' | 'canvas' | 'board' | 'diagram')[]
   }>({ isOpen: false, type: null })
   const [createNameInput, setCreateNameInput] = useState('')
 
@@ -433,6 +427,8 @@ export const App: React.FC = () => {
   const [historyLimitInput, setHistoryLimitInput] = useState('50')
   const [contextMenu, setContextMenu] = useState<{
     isOpen: boolean; x: number; y: number; path: string | null; isFolder: boolean
+    sectionType?: 'documents' | 'boards' | 'canvas'
+    nodeType?: string
   }>({ isOpen: false, x: 0, y: 0, path: null, isFolder: false })
 
   // Search & Command Palette States
@@ -682,10 +678,11 @@ export const App: React.FC = () => {
   const handleCreateFile = (
     type: 'document' | 'task' | 'canvas' | 'board' | 'diagram' | null,
     parentPath?: string,
-    onCreated?: (newPath: string, title: string) => string
+    onCreated?: (newPath: string, title: string) => string,
+    allowedTypes?: ('document' | 'task' | 'canvas' | 'board' | 'diagram')[]
   ) => {
     subpageCallbackRef.current = onCreated || null
-    setCreateModal({ isOpen: true, type, parentPath })
+    setCreateModal({ isOpen: true, type, parentPath, allowedTypes })
     setCreateNameInput('')
   }
 
@@ -758,7 +755,7 @@ export const App: React.FC = () => {
         setSelectedPath(null)
         setSelectedContent('')
         setCurrentFrontMatterStr('')
-        setActiveView('board')
+        setActiveView('editor')
         // Clear hash so refresh doesn't attempt to reload a deleted file
         window.history.replaceState(null, '', window.location.pathname)
       }
@@ -768,13 +765,10 @@ export const App: React.FC = () => {
   const activeFile = files.find((f) => f.path === selectedPath)
 
   const COMMAND_ITEMS = [
-    { id: 'create-doc',     label: 'Create New Document',          icon: <FilePlus size={14} className="text-blue-400" />,    action: () => handleCreateFile('document') },
-    { id: 'create-board',   label: 'Create New Kanban Board',      icon: <LayoutGrid size={14} className="text-rose-400" />,  action: () => handleCreateFile('board') },
-    { id: 'create-canvas',  label: 'Create New Excalidraw Canvas',  icon: <Brush size={14} className="text-emerald-400" />,       action: () => handleCreateFile('canvas') },
-    { id: 'create-diagram', label: 'Create New Draw.io Diagram',   icon: <Grid size={14} className="text-violet-400" />,        action: () => handleCreateFile('diagram') },
-    { id: 'create-folder',  label: 'Create New Folder',            icon: <Plus size={14} className="text-slate-400" />,        action: () => handleCreateFile(null) },
-    { id: 'goto-kanban',    label: 'Go to Kanban Board Dashboard', icon: <LayoutGrid size={14} className="text-slate-400" />,  action: () => { setActiveView('board'); setSelectedPath(null) } },
-    { id: 'open-settings',  label: 'Open Settings',                icon: <Settings size={14} className="text-slate-400" />,    action: () => setAdminModalOpen(true) },
+    { id: 'create-doc',     label: 'Create New Document',          icon: <FilePlus size={14} className="text-blue-400" />,    action: () => handleCreateFile('document', 'Documents', undefined, ['document']) },
+    { id: 'create-board',   label: 'Create New Kanban Board',      icon: <LayoutGrid size={14} className="text-rose-400" />,  action: () => handleCreateFile('board', 'Boards', undefined, ['board']) },
+    { id: 'create-canvas',  label: 'Create New Canvas',            icon: <Brush size={14} className="text-emerald-400" />,    action: () => handleCreateFile('canvas', 'Canvas', undefined, ['canvas', 'diagram']) },
+    { id: 'open-settings',  label: 'Open Settings',                icon: <Settings size={14} className="text-slate-400" />,   action: () => setAdminModalOpen(true) },
   ]
 
   return (
@@ -805,20 +799,6 @@ export const App: React.FC = () => {
             </button>
           </div>
 
-          <div className="p-3">
-            <button
-              onClick={() => { setActiveView('board'); setSelectedPath(null) }}
-              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition font-medium cursor-pointer ${
-                activeView === 'board' && !selectedPath
-                  ? 'bg-violet-600/10 text-violet-400 border border-violet-500/20'
-                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-              }`}
-            >
-              <LayoutGrid size={16} />
-              <span>Kanban Board</span>
-            </button>
-          </div>
-
           <div className="flex-1 overflow-y-auto px-3 py-2 space-y-4 max-h-[calc(100vh-280px)] no-scrollbar">
             {/* Menu 1 - Documents */}
             <div className="space-y-1">
@@ -828,7 +808,7 @@ export const App: React.FC = () => {
                   Documents
                 </span>
                 <button
-                  onClick={() => handleCreateFile('document', 'Documents')}
+                  onClick={() => handleCreateFile('document', 'Documents', undefined, ['document'])}
                   className="hover:text-white text-slate-500 transition cursor-pointer"
                   title="New Document"
                 >
@@ -836,10 +816,10 @@ export const App: React.FC = () => {
                 </button>
               </div>
               <div className="space-y-0.5 pl-1.5">
-                {getCategoryChildren(files, 'Documents', 'document').length === 0 ? (
+                {getCategoryChildren(files, 'Documents', ['document']).length === 0 ? (
                   <div className="px-3 py-1 text-[11px] text-slate-600 italic select-none">No documents</div>
                 ) : (
-                  getCategoryChildren(files, 'Documents', 'document').map((node) => (
+                  getCategoryChildren(files, 'Documents', ['document']).map((node) => (
                     <TreeNodeComponent
                       key={node.path}
                       node={node}
@@ -848,7 +828,7 @@ export const App: React.FC = () => {
                       collapsedPaths={collapsedPaths}
                       onToggleCollapse={(path) => setCollapsedPaths((prev) => ({ ...prev, [path]: !prev[path] }))}
                       onSelectFile={fetchFileContent}
-                      onCreateSubPage={(parentPath) => handleCreateFile('document', parentPath)}
+                      onCreateSubPage={(parentPath) => handleCreateFile('document', parentPath, undefined, ['document'])}
                       onDeletePath={handleDeleteFile}
                       onContextMenu={(e, targetNode) => {
                         e.preventDefault()
@@ -858,6 +838,8 @@ export const App: React.FC = () => {
                           y: e.clientY,
                           path: targetNode.filePath || targetNode.path,
                           isFolder: targetNode.isFolder,
+                          sectionType: 'documents',
+                          nodeType: targetNode.type,
                         })
                       }}
                     />
@@ -874,7 +856,7 @@ export const App: React.FC = () => {
                   Kanban Boards
                 </span>
                 <button
-                  onClick={() => handleCreateFile('board', 'Boards')}
+                  onClick={() => handleCreateFile('board', 'Boards', undefined, ['board'])}
                   className="hover:text-white text-slate-500 transition cursor-pointer"
                   title="New Kanban Board"
                 >
@@ -894,7 +876,7 @@ export const App: React.FC = () => {
                       collapsedPaths={collapsedPaths}
                       onToggleCollapse={(path) => setCollapsedPaths((prev) => ({ ...prev, [path]: !prev[path] }))}
                       onSelectFile={fetchFileContent}
-                      onCreateSubPage={(parentPath) => handleCreateFile('task', parentPath)}
+                      onCreateSubPage={(parentPath) => handleCreateFile('task', parentPath, undefined, ['task'])}
                       onDeletePath={handleDeleteFile}
                       onContextMenu={(e, targetNode) => {
                         e.preventDefault()
@@ -904,6 +886,8 @@ export const App: React.FC = () => {
                           y: e.clientY,
                           path: targetNode.filePath || targetNode.path,
                           isFolder: targetNode.isFolder,
+                          sectionType: 'boards',
+                          nodeType: targetNode.type,
                         })
                       }}
                     />
@@ -920,7 +904,7 @@ export const App: React.FC = () => {
                   Canvas
                 </span>
                 <button
-                  onClick={() => handleCreateFile('canvas', 'Canvas')}
+                  onClick={() => handleCreateFile('canvas', 'Canvas', undefined, ['canvas', 'diagram'])}
                   className="hover:text-white text-slate-500 transition cursor-pointer"
                   title="New Canvas"
                 >
@@ -928,10 +912,10 @@ export const App: React.FC = () => {
                 </button>
               </div>
               <div className="space-y-0.5 pl-1.5">
-                {getCategoryChildren(files, 'Canvas', 'canvas').length === 0 ? (
+                {getCategoryChildren(files, 'Canvas', ['canvas']).length === 0 ? (
                   <div className="px-3 py-1 text-[11px] text-slate-600 italic select-none">No canvases</div>
                 ) : (
-                  getCategoryChildren(files, 'Canvas', 'canvas').map((node) => (
+                  getCategoryChildren(files, 'Canvas', ['canvas']).map((node) => (
                     <TreeNodeComponent
                       key={node.path}
                       node={node}
@@ -940,7 +924,7 @@ export const App: React.FC = () => {
                       collapsedPaths={collapsedPaths}
                       onToggleCollapse={(path) => setCollapsedPaths((prev) => ({ ...prev, [path]: !prev[path] }))}
                       onSelectFile={fetchFileContent}
-                      onCreateSubPage={(parentPath) => handleCreateFile('canvas', parentPath)}
+                      onCreateSubPage={(parentPath) => handleCreateFile('canvas', parentPath, undefined, ['canvas', 'diagram'])}
                       onDeletePath={handleDeleteFile}
                       onContextMenu={(e, targetNode) => {
                         e.preventDefault()
@@ -950,6 +934,8 @@ export const App: React.FC = () => {
                           y: e.clientY,
                           path: targetNode.filePath || targetNode.path,
                           isFolder: targetNode.isFolder,
+                          sectionType: 'canvas',
+                          nodeType: targetNode.type,
                         })
                       }}
                     />
@@ -962,20 +948,27 @@ export const App: React.FC = () => {
 
         <div className="p-4 border-t border-slate-800 bg-[#161b22]/50 space-y-3">
           <div className="grid grid-cols-3 gap-2">
-            {[
-              { type: 'document' as const, label: 'Doc',    icon: <FilePlus    size={16} className="text-blue-400 mb-1"    />, defaultFolder: 'Documents' },
-              { type: 'board'    as const, label: 'Board',  icon: <LayoutGrid  size={16} className="text-amber-500 mb-1"   />, defaultFolder: 'Boards' },
-              { type: 'canvas'   as const, label: 'Canvas', icon: <Brush       size={16} className="text-emerald-400 mb-1" />, defaultFolder: 'Canvas' },
-            ].map(({ type, label, icon, defaultFolder }) => (
-              <button
-                key={type}
-                onClick={() => handleCreateFile(type, defaultFolder)}
-                className="flex flex-col items-center justify-center py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg transition text-[10px] font-semibold cursor-pointer"
-              >
-                {icon}
-                {label}
-              </button>
-            ))}
+            <button
+              onClick={() => handleCreateFile('document', 'Documents', undefined, ['document'])}
+              className="flex flex-col items-center justify-center py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg transition text-[10px] font-semibold cursor-pointer"
+            >
+              <FilePlus size={16} className="text-blue-400 mb-1" />
+              Doc
+            </button>
+            <button
+              onClick={() => handleCreateFile('board', 'Boards', undefined, ['board'])}
+              className="flex flex-col items-center justify-center py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg transition text-[10px] font-semibold cursor-pointer"
+            >
+              <LayoutGrid size={16} className="text-amber-500 mb-1" />
+              Board
+            </button>
+            <button
+              onClick={() => handleCreateFile('canvas', 'Canvas', undefined, ['canvas', 'diagram'])}
+              className="flex flex-col items-center justify-center py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg transition text-[10px] font-semibold cursor-pointer"
+            >
+              <Brush size={16} className="text-emerald-400 mb-1" />
+              Canvas
+            </button>
           </div>
 
           <div className="flex items-center justify-between text-[10px] border-t border-slate-800/60 pt-3">
@@ -1023,7 +1016,7 @@ export const App: React.FC = () => {
           <div className="flex-1 p-6 flex flex-col overflow-hidden main-content-pane">
             <div className="flex justify-between items-center mb-4 no-print">
               <div className="flex items-center gap-1.5 text-xs text-slate-400">
-                <button onClick={() => setActiveView('board')} className="hover:text-violet-400 hover:underline transition">Workspace</button>
+                <button onClick={() => { setSelectedPath(null); setSelectedContent(''); setCurrentFrontMatterStr(''); setActiveView('editor') }} className="hover:text-violet-400 hover:underline transition">Home</button>
                 <ChevronRight size={12} />
                 <span className="font-mono text-slate-500">{selectedPath}</span>
               </div>
@@ -1070,24 +1063,24 @@ export const App: React.FC = () => {
               <p className="text-sm text-slate-400 mb-6">A high-performance, local-first alternative to Notion. All files saved as Markdown on disk.</p>
               <div className="w-full space-y-3">
                 <button
-                  onClick={() => setActiveView('board')}
+                  onClick={() => handleCreateFile('board', 'Boards', undefined, ['board'])}
                   className="w-full flex items-center justify-between px-4 py-3 bg-[#161b22] hover:bg-slate-800 border border-slate-800 rounded-xl transition text-left cursor-pointer text-xs"
                 >
                   <div className="flex items-center gap-3">
                     <LayoutGrid size={16} className="text-violet-400" />
                     <div>
-                      <div className="font-semibold text-slate-200">Open Kanban Board</div>
-                      <div className="text-[10px] text-slate-500">View tasks grouped by column status</div>
+                      <div className="font-semibold text-slate-200">Create Kanban Board</div>
+                      <div className="text-[10px] text-slate-500">Boards are independent — pick one from the sidebar</div>
                     </div>
                   </div>
                   <ArrowRight size={14} className="text-slate-500" />
                 </button>
                 <div className="grid grid-cols-2 gap-3 text-xs">
-                  <button onClick={() => handleCreateFile('document')} className="flex flex-col items-center justify-center p-4 bg-[#161b22]/50 hover:bg-slate-800 border border-slate-800 rounded-xl transition cursor-pointer">
+                  <button onClick={() => handleCreateFile('document', 'Documents', undefined, ['document'])} className="flex flex-col items-center justify-center p-4 bg-[#161b22]/50 hover:bg-slate-800 border border-slate-800 rounded-xl transition cursor-pointer">
                     <FileText size={20} className="text-blue-400 mb-2" />
                     <span className="font-semibold text-slate-300">Create Document</span>
                   </button>
-                  <button onClick={() => handleCreateFile('canvas')} className="flex flex-col items-center justify-center p-4 bg-[#161b22]/50 hover:bg-slate-800 border border-slate-800 rounded-xl transition cursor-pointer">
+                  <button onClick={() => handleCreateFile('canvas', 'Canvas', undefined, ['canvas', 'diagram'])} className="flex flex-col items-center justify-center p-4 bg-[#161b22]/50 hover:bg-slate-800 border border-slate-800 rounded-xl transition cursor-pointer">
                     <Brush size={20} className="text-emerald-400 mb-2" />
                     <span className="font-semibold text-slate-300">Create Canvas</span>
                   </button>
@@ -1099,73 +1092,96 @@ export const App: React.FC = () => {
       </div>
 
       {/* ── Creation Modal ────────────────────────────────────────────────── */}
-      {createModal.isOpen && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-[#161b22] border border-slate-800 rounded-2xl max-w-md w-full shadow-2xl p-6 overflow-hidden animate-in zoom-in-95 duration-150">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="font-bold text-base text-slate-100">
-                {createModal.parentPath
-                  ? `New item inside "${createModal.parentPath.split('/').pop()}"`
-                  : 'Create New Item'}
-              </h3>
-              <button onClick={() => setCreateModal({ isOpen: false, type: null })} className="text-slate-500 hover:text-slate-300 transition cursor-pointer">
-                <X size={16} />
-              </button>
-            </div>
+      {createModal.isOpen && (() => {
+        const TYPE_LABEL_MAP: Record<string, string> = {
+          document: 'Document',
+          task: 'Task',
+          canvas: 'Excalidraw Canvas',
+          diagram: 'Draw.io Diagram',
+          board: 'Kanban Board',
+        }
+        const ALL_TYPE_ITEMS = [
+          { id: 'document', label: 'Document',   icon: <FileText    size={16} className="text-blue-400"    /> },
+          { id: 'task',     label: 'Task',        icon: <CheckSquare size={16} className="text-amber-500"   /> },
+          { id: 'canvas',   label: 'Excalidraw',  icon: <Brush       size={16} className="text-emerald-400" /> },
+          { id: 'diagram',  label: 'Draw.io',     icon: <Grid        size={16} className="text-violet-400"  /> },
+          { id: 'board',    label: 'Board',        icon: <LayoutGrid  size={16} className="text-rose-400"    /> },
+        ]
+        const visibleTypes = createModal.allowedTypes
+          ? ALL_TYPE_ITEMS.filter(item => createModal.allowedTypes!.includes(item.id as any))
+          : ALL_TYPE_ITEMS
+        const isSingleType = visibleTypes.length === 1
+        const folderName = createModal.parentPath?.split('/').pop()
+        const singleLabel = isSingleType ? TYPE_LABEL_MAP[visibleTypes[0].id] : null
+        const modalTitle = createModal.parentPath
+          ? singleLabel
+            ? `New ${singleLabel} in "${folderName}"`
+            : `New item in "${folderName}"`
+          : singleLabel
+          ? `New ${singleLabel}`
+          : 'Create New Item'
 
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Select Item Type</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {[
-                    { id: 'document', label: 'Doc',        icon: <FileText    size={16} className="text-blue-400"    /> },
-                    { id: 'task',     label: 'Task',       icon: <CheckSquare size={16} className="text-amber-500"   /> },
-                    { id: 'canvas',   label: 'Excalidraw', icon: <Brush       size={16} className="text-emerald-400" /> },
-                    { id: 'diagram',  label: 'Draw.io',    icon: <Grid        size={16} className="text-violet-400"  /> },
-                    { id: 'board',    label: 'Board',      icon: <LayoutGrid  size={16} className="text-rose-400"    /> },
-                  ].map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => setCreateModal((prev) => ({ ...prev, type: item.id as any }))}
-                      className={`flex flex-col items-center justify-center p-3 rounded-xl border text-[11px] font-medium transition cursor-pointer ${
-                        createModal.type === item.id
-                          ? 'bg-violet-600/10 border-violet-500 text-violet-300'
-                          : 'bg-slate-900/50 border-slate-850 hover:bg-slate-800 text-slate-400 hover:text-slate-200'
-                      }`}
-                    >
-                      <div className="mb-1.5">{item.icon}</div>
-                      {item.label}
-                    </button>
-                  ))}
+        return (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-[#161b22] border border-slate-800 rounded-2xl max-w-md w-full shadow-2xl p-6 overflow-hidden animate-in zoom-in-95 duration-150">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="font-bold text-base text-slate-100">{modalTitle}</h3>
+                <button onClick={() => setCreateModal({ isOpen: false, type: null })} className="text-slate-500 hover:text-slate-300 transition cursor-pointer">
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {/* Only show type picker when there's more than one option */}
+                {!isSingleType && (
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Select Type</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {visibleTypes.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => setCreateModal((prev) => ({ ...prev, type: item.id as any }))}
+                          className={`flex flex-col items-center justify-center p-3 rounded-xl border text-[11px] font-medium transition cursor-pointer ${
+                            createModal.type === item.id
+                              ? 'bg-violet-600/10 border-violet-500 text-violet-300'
+                              : 'bg-slate-900/50 border-slate-850 hover:bg-slate-800 text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          <div className="mb-1.5">{item.icon}</div>
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Name / Title</label>
+                  <input
+                    type="text"
+                    placeholder="Enter name..."
+                    value={createNameInput}
+                    onChange={(e) => setCreateNameInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleCreateConfirm()}
+                    className="w-full bg-slate-950 border border-slate-850 focus:border-violet-500 rounded-xl px-4 py-2.5 text-sm text-slate-200 outline-none transition"
+                    autoFocus
+                  />
                 </div>
-              </div>
 
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Name / Title</label>
-                <input
-                  type="text"
-                  placeholder="Enter name..."
-                  value={createNameInput}
-                  onChange={(e) => setCreateNameInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleCreateConfirm()}
-                  className="w-full bg-slate-950 border border-slate-850 focus:border-violet-500 rounded-xl px-4 py-2.5 text-sm text-slate-200 outline-none transition"
-                  autoFocus
-                />
-              </div>
+                <div className="text-[10px] text-slate-500 font-mono">
+                  Location: <strong className="text-slate-400">{createModal.parentPath ? `${createModal.parentPath}/` : 'Root (/)'}</strong>
+                </div>
 
-              <div className="text-[10px] text-slate-500 font-mono">
-                Location: <strong className="text-slate-400">{createModal.parentPath ? `${createModal.parentPath}/` : 'Root (/)'}</strong>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2 border-t border-slate-850">
-                <button type="button" onClick={() => setCreateModal({ isOpen: false, type: null })} className="px-4 py-2 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-lg text-xs font-semibold transition cursor-pointer">Cancel</button>
-                <button type="button" disabled={!createModal.type || !createNameInput.trim()} onClick={handleCreateConfirm} className="px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white rounded-lg text-xs font-semibold shadow transition cursor-pointer">Create Item</button>
+                <div className="flex justify-end gap-2 pt-2 border-t border-slate-850">
+                  <button type="button" onClick={() => setCreateModal({ isOpen: false, type: null })} className="px-4 py-2 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-lg text-xs font-semibold transition cursor-pointer">Cancel</button>
+                  <button type="button" disabled={!createModal.type || !createNameInput.trim()} onClick={handleCreateConfirm} className="px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white rounded-lg text-xs font-semibold shadow transition cursor-pointer">Create</button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {/* ── Settings Menu Modal ─────────────────────────────────────────── */}
       {adminModalOpen && (
@@ -1389,49 +1405,67 @@ export const App: React.FC = () => {
       )}
 
       {/* ── Context Menu ─────────────────────────────────────────────────── */}
-      {contextMenu.isOpen && (
-        <div
-          style={{ position: 'fixed', top: `${contextMenu.y}px`, left: `${contextMenu.x}px`, zIndex: 99999 }}
-          className="w-48 bg-[#161b22] border border-slate-800 rounded-xl shadow-2xl p-1.5 flex flex-col space-y-0.5 no-scrollbar select-none animate-in fade-in zoom-in-95 duration-100"
-        >
-          <div className="px-2.5 py-1 text-[9px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-850/60 mb-1 truncate">
-            {contextMenu.path}
-          </div>
-
-          {(
-            [
-              { type: 'document', label: 'New Sub-page',  icon: <FileText    size={13} className="text-blue-400"    /> },
-              { type: 'task',     label: 'New Task',       icon: <CheckSquare size={13} className="text-amber-500"   /> },
-              { type: 'canvas',   label: 'New Excalidraw', icon: <Brush       size={13} className="text-emerald-400" /> },
-              { type: 'diagram',  label: 'New Draw.io',    icon: <Grid        size={13} className="text-violet-400"  /> },
-              { type: 'board',    label: 'New Board',      icon: <LayoutGrid  size={13} className="text-rose-400"    /> },
-            ] as const
-          ).map(({ type, label, icon }) => (
-            <button
-              key={type}
-              onClick={() => {
-                const parent = getContextParentPath(contextMenu.path)
-                handleCreateFile(type, parent)
-                setContextMenu(p => ({ ...p, isOpen: false }))
-              }}
-              className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg text-xs transition cursor-pointer text-left w-full font-medium"
-            >
-              {icon}{label}
-            </button>
-          ))}
-
-          <div className="border-t border-slate-850/60 my-1" />
+      {contextMenu.isOpen && (() => {
+        const ctxParent = getContextParentPath(contextMenu.path)
+        const closeMenu = () => setContextMenu(p => ({ ...p, isOpen: false }))
+        const ctxBtn = (label: string, icon: React.ReactNode, onClick: () => void) => (
           <button
-            onClick={() => {
-              if (contextMenu.path) handleDeleteFile(contextMenu.path)
-              setContextMenu(p => ({ ...p, isOpen: false }))
-            }}
-            className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-red-950/40 text-slate-400 hover:text-red-400 rounded-lg text-xs transition cursor-pointer text-left w-full font-medium"
+            key={label}
+            onClick={() => { onClick(); closeMenu() }}
+            className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg text-xs transition cursor-pointer text-left w-full font-medium"
           >
-            <Trash2 size={13} className="text-red-500" /> Delete Item
+            {icon}{label}
           </button>
-        </div>
-      )}
+        )
+
+        return (
+          <div
+            style={{ position: 'fixed', top: `${contextMenu.y}px`, left: `${contextMenu.x}px`, zIndex: 99999 }}
+            className="w-52 bg-[#161b22] border border-slate-800 rounded-xl shadow-2xl p-1.5 flex flex-col space-y-0.5 no-scrollbar select-none animate-in fade-in zoom-in-95 duration-100"
+          >
+            <div className="px-2.5 py-1 text-[9px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-850/60 mb-1 truncate">
+              {contextMenu.path?.split('/').pop()?.replace(/\.(board|excalidraw|drawio)\.md$/, '').replace(/\.md$/, '') || contextMenu.path}
+            </div>
+
+            {/* Documents section: only document sub-pages */}
+            {contextMenu.sectionType === 'documents' && (
+              ctxBtn('New Document', <FileText size={13} className="text-blue-400" />,
+                () => handleCreateFile('document', ctxParent, undefined, ['document']))
+            )}
+
+            {/* Boards section: boards can spawn tasks; tasks show nothing here */}
+            {contextMenu.sectionType === 'boards' && contextMenu.nodeType === 'board' && (
+              ctxBtn('New Task', <CheckSquare size={13} className="text-amber-500" />,
+                () => handleCreateFile('task', ctxParent, undefined, ['task']))
+            )}
+            {contextMenu.sectionType === 'boards' && !contextMenu.nodeType && (
+              ctxBtn('New Task', <CheckSquare size={13} className="text-amber-500" />,
+                () => handleCreateFile('task', ctxParent, undefined, ['task']))
+            )}
+
+            {/* Canvas section: Excalidraw or Draw.io only */}
+            {contextMenu.sectionType === 'canvas' && (
+              <>
+                {ctxBtn('New Excalidraw', <Brush size={13} className="text-emerald-400" />,
+                  () => handleCreateFile('canvas', ctxParent, undefined, ['canvas']))}
+                {ctxBtn('New Draw.io', <Grid size={13} className="text-violet-400" />,
+                  () => handleCreateFile('diagram', ctxParent, undefined, ['diagram']))}
+              </>
+            )}
+
+            <div className="border-t border-slate-850/60 my-1" />
+            <button
+              onClick={() => {
+                if (contextMenu.path) handleDeleteFile(contextMenu.path)
+                closeMenu()
+              }}
+              className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-red-950/40 text-slate-400 hover:text-red-400 rounded-lg text-xs transition cursor-pointer text-left w-full font-medium"
+            >
+              <Trash2 size={13} className="text-red-500" /> Delete Item
+            </button>
+          </div>
+        )
+      })()}
 
       {/* ── Search & Command Palette Modal ─────────────────────────────── */}
       {searchOpen && (
