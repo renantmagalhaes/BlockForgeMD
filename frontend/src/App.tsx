@@ -929,8 +929,29 @@ export const App: React.FC = () => {
       // Update `title:` field in frontmatter (first matching line)
       fullContent = fullContent.replace(/^title:.*$/m, `title: ${trimmed}`)
 
-      // Update the first H1 heading in the body
-      fullContent = fullContent.replace(/^# .+$/m, `# ${trimmed}`)
+      // Update or insert the first H1 in the body.
+      // Three cases:
+      //  1. H1 already exists → replace it
+      //  2. No H1, but the first body line is the typed title text → promote it to H1
+      //  3. No H1 and first line is different (or body is empty) → prepend H1
+      const { frontMatterStr, body } = splitFrontMatter(fullContent)
+      let updatedBody: string
+      if (/^# .+/m.test(body)) {
+        updatedBody = body.replace(/^# .+$/m, `# ${trimmed}`)
+      } else {
+        const firstLineMatch = body.match(/^([^\n]*)/)
+        const firstLine = firstLineMatch ? firstLineMatch[1].trim() : ''
+        if (firstLine === trimmed) {
+          // User typed the title as a plain paragraph — promote it to H1
+          updatedBody = `# ${trimmed}${body.slice(firstLine.length)}`
+        } else {
+          // Body starts with something else (or is empty) — prepend H1
+          updatedBody = `# ${trimmed}\n\n${body.trimStart()}`
+        }
+      }
+      fullContent = frontMatterStr
+        ? `---\n${frontMatterStr}\n---\n\n${updatedBody}`
+        : updatedBody
 
       // Save the patched content back to the old path
       await fetch(`${API_BASE}/api/file`, {

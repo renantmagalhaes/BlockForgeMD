@@ -1465,8 +1465,13 @@ export const Editor: React.FC<EditorProps> = ({
   const lastFilePathRef = useRef<string | null>(null)
   const lastSyncedTitleRef = useRef<string>(frontMatter?.title || '')
 
-  // Keep lastSyncedTitleRef in sync when switching files so we don't
-  // trigger a spurious rename the moment a different file is opened.
+  // Always-current reference to the frontmatter title — updated on every render
+  // so the file-load effect can read the latest value without a dep-loop.
+  const frontMatterTitleRef = useRef<string>(frontMatter?.title || '')
+  frontMatterTitleRef.current = frontMatter?.title || ''
+
+  // Reset lastSyncedTitleRef when switching files so we don't trigger a
+  // spurious rename the moment a different file is opened.
   useEffect(() => {
     lastSyncedTitleRef.current = frontMatter?.title || ''
   }, [filePath]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -1985,8 +1990,17 @@ export const Editor: React.FC<EditorProps> = ({
 
       if (fileChanged) {
         lastFilePathRef.current = filePath
-        lastSavedContentRef.current = initialContent
-        const html = getHTMLFromMarkdown(initialContent)
+        // Ensure the body always opens with a # Title heading so the first line
+        // is editable as the page name. If the H1 was deleted or never existed,
+        // prepend it from the frontmatter title so sync can work immediately.
+        const pageTitle = frontMatterTitleRef.current
+        const body = initialContent.trimStart()
+        const bodyWithH1 = (pageTitle && !body.startsWith('# '))
+          ? `# ${pageTitle}\n\n${body}`
+          : initialContent
+        lastSavedContentRef.current = bodyWithH1
+        lastSyncedTitleRef.current = pageTitle
+        const html = getHTMLFromMarkdown(bodyWithH1)
         editor.commands.setContent(html)
         setSaveStatus('saved')
       } else if (contentChangedExternally && !editor.isFocused) {
@@ -2091,18 +2105,20 @@ export const Editor: React.FC<EditorProps> = ({
       lastSavedContentRef.current = markdown
       setSaveStatus('saved')
 
-      // After a successful save, check if the first H1 changed and notify the
+      // After a successful save, check if the first line changed and notify the
       // parent to rename the file + frontmatter title. This must run after save
       // (not during typing) to avoid a race between the save and the rename.
+      // We detect both H1 and plain paragraph nodes so that users who cleared
+      // the page and started typing still get their title synced.
       if (onTitleChange && editor) {
         const json = editor.getJSON()
         const firstNode = json.content?.[0]
-        if (firstNode?.type === 'heading' && firstNode.attrs?.level === 1) {
-          const h1Text = (firstNode.content as any[] | undefined)
+        if (firstNode && (firstNode.type === 'heading' || firstNode.type === 'paragraph')) {
+          const firstLineText = (firstNode.content as any[] | undefined)
             ?.map((n: any) => n.text || '').join('') || ''
-          if (h1Text && h1Text !== lastSyncedTitleRef.current) {
-            lastSyncedTitleRef.current = h1Text
-            onTitleChange(h1Text)
+          if (firstLineText && firstLineText !== lastSyncedTitleRef.current) {
+            lastSyncedTitleRef.current = firstLineText
+            onTitleChange(firstLineText)
           }
         }
       }
