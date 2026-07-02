@@ -281,6 +281,11 @@ body {
     display: none !important;
   }
 
+  /* Set print page margins natively */
+  @page {
+    margin: 1.5cm !important;
+  }
+
   /* Reset layout structure so the document centers perfectly on print */
   html,
   body,
@@ -292,6 +297,7 @@ body {
     color: black !important;
     display: block !important;
     height: auto !important;
+    min-height: 0 !important;
     overflow: visible !important;
     margin: 0 !important;
     padding: 0 !important;
@@ -303,19 +309,49 @@ body {
   .print-document-container {
     background: white !important;
     color: black !important;
-    padding: 2.5cm 2cm !important;
+    padding: 0 !important;
     margin: 0 !important;
     width: 100% !important;
     max-width: 100% !important;
     box-sizing: border-box !important;
     display: block !important;
     height: auto !important;
+    min-height: 0 !important;
     overflow: visible !important;
   }
 
-  /* Force dark text color for visibility */
-  h1, h2, h3, h4, h5, h6, p, li, span, td, th {
+  /* Compact typography scaling for printable sheets */
+  .print-document-container input[type="text"] {
+    font-size: 16pt !important;
+    font-weight: 700 !important;
+    margin-bottom: 0.3cm !important;
+    padding: 0 !important;
+    border: none !important;
+    background: transparent !important;
     color: black !important;
+    width: 100% !important;
+  }
+
+  .print-document-container h1 { font-size: 14pt !important; margin-top: 0.5cm !important; margin-bottom: 0.25cm !important; font-weight: 700 !important; }
+  .print-document-container h2 { font-size: 12pt !important; margin-top: 0.4cm !important; margin-bottom: 0.2cm !important; font-weight: 600 !important; }
+  .print-document-container h3 { font-size: 11pt !important; margin-top: 0.3cm !important; margin-bottom: 0.15cm !important; font-weight: 600 !important; }
+  
+  .print-document-container p,
+  .print-document-container li,
+  .print-document-container span,
+  .print-document-container div {
+    font-size: 9.5pt !important;
+    line-height: 1.4 !important;
+    color: #222 !important;
+  }
+
+  .print-document-container p {
+    margin-bottom: 0.2cm !important;
+  }
+
+  .ProseMirror {
+    min-height: 0 !important;
+    height: auto !important;
   }
 
   /* Remove border colors, dark backgrounds, and properties borders in print */
