@@ -228,7 +228,9 @@ const TreeNodeComponent: React.FC<{
   onDeletePath: (path: string) => void
   onContextMenu: (e: React.MouseEvent, node: TreeNode) => void
   draggingPath: string | null
-  onDragStart: (filePath: string) => void
+  draggingType?: string
+  sectionType?: 'documents' | 'boards' | 'canvas'
+  onDragStart: (filePath: string, nodeType?: string) => void
   onDragEnd: () => void
   onDropNode: (fromFilePath: string, toNode: TreeNode) => void
 }> = ({
@@ -242,6 +244,8 @@ const TreeNodeComponent: React.FC<{
   onDeletePath,
   onContextMenu,
   draggingPath,
+  draggingType,
+  sectionType,
   onDragStart,
   onDragEnd,
   onDropNode,
@@ -258,18 +262,29 @@ const TreeNodeComponent: React.FC<{
 
   const [isDragOver, setIsDragOver] = React.useState(false)
 
+  const SECTION_ALLOWED_TYPES: Record<string, string[]> = {
+    documents: ['document'],
+    boards: ['board', 'task'],
+    canvas: ['canvas'],
+  }
+
   const handleDragStart = (e: React.DragEvent) => {
     if (!node.filePath) { e.preventDefault(); return }
     e.dataTransfer.setData('text/plain', node.filePath)
     e.dataTransfer.effectAllowed = 'move'
-    onDragStart(node.filePath)
+    onDragStart(node.filePath, node.type)
   }
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
     if (!node.hasPage || !node.filePath || isBeingDragged) return
-    // Prevent dropping onto a descendant of the dragged item
+    // Block cross-section drops: type must match what this section accepts
+    if (sectionType && draggingType !== undefined) {
+      const allowed = SECTION_ALLOWED_TYPES[sectionType] ?? []
+      if (!allowed.includes(draggingType)) return
+    }
+    // Block dropping onto a descendant of the dragged item
     if (draggingPath) {
       const dragStem = draggingPath.endsWith('.board.md')
         ? draggingPath.slice(0, -'.board.md'.length)
@@ -291,7 +306,10 @@ const TreeNodeComponent: React.FC<{
     setIsDragOver(false)
     const fromPath = e.dataTransfer.getData('text/plain')
     if (fromPath && node.hasPage && node.filePath && fromPath !== node.filePath) {
-      onDropNode(fromPath, node)
+      // Final type-compatibility guard (mirrors handleDragOver)
+      const canDrop = !sectionType || !draggingType ||
+        (SECTION_ALLOWED_TYPES[sectionType] ?? []).includes(draggingType)
+      if (canDrop) onDropNode(fromPath, node)
     }
     onDragEnd()
   }
@@ -425,6 +443,8 @@ const TreeNodeComponent: React.FC<{
               onDeletePath={onDeletePath}
               onContextMenu={onContextMenu}
               draggingPath={draggingPath}
+              draggingType={draggingType}
+              sectionType={sectionType}
               onDragStart={onDragStart}
               onDragEnd={onDragEnd}
               onDropNode={onDropNode}
@@ -847,7 +867,9 @@ export const App: React.FC = () => {
   const activeFile = files.find((f) => f.path === selectedPath)
 
   // ── Sidebar drag-and-drop state ──────────────────────────────────────────
-  const [draggingPath, setDraggingPath] = useState<string | null>(null)
+  const [dragging, setDragging] = useState<{ path: string; type?: string } | null>(null)
+  const draggingPath = dragging?.path ?? null
+  const draggingType = dragging?.type
 
   const handleMoveNode = async (fromFilePath: string, toNode: TreeNode) => {
     if (!toNode.filePath) return
@@ -952,8 +974,10 @@ export const App: React.FC = () => {
                         })
                       }}
                       draggingPath={draggingPath}
-                      onDragStart={setDraggingPath}
-                      onDragEnd={() => setDraggingPath(null)}
+                      draggingType={draggingType}
+                      sectionType="documents"
+                      onDragStart={(p, t) => setDragging({ path: p, type: t })}
+                      onDragEnd={() => setDragging(null)}
                       onDropNode={handleMoveNode}
                     />
                   ))
@@ -1004,8 +1028,10 @@ export const App: React.FC = () => {
                         })
                       }}
                       draggingPath={draggingPath}
-                      onDragStart={setDraggingPath}
-                      onDragEnd={() => setDraggingPath(null)}
+                      draggingType={draggingType}
+                      sectionType="boards"
+                      onDragStart={(p, t) => setDragging({ path: p, type: t })}
+                      onDragEnd={() => setDragging(null)}
                       onDropNode={handleMoveNode}
                     />
                   ))
@@ -1056,8 +1082,10 @@ export const App: React.FC = () => {
                         })
                       }}
                       draggingPath={draggingPath}
-                      onDragStart={setDraggingPath}
-                      onDragEnd={() => setDraggingPath(null)}
+                      draggingType={draggingType}
+                      sectionType="canvas"
+                      onDragStart={(p, t) => setDragging({ path: p, type: t })}
+                      onDragEnd={() => setDragging(null)}
                       onDropNode={handleMoveNode}
                     />
                   ))
