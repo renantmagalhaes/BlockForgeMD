@@ -19,6 +19,7 @@ import {
   Search,
   History as HistoryIcon,
   GripVertical,
+  Pencil,
 } from 'lucide-react'
 import Editor from './components/Editor'
 import Kanban from './components/Kanban'
@@ -534,6 +535,9 @@ export const App: React.FC = () => {
     nodeType?: string
   }>({ isOpen: false, x: 0, y: 0, path: null, isFolder: false })
 
+  const [renameModal, setRenameModal] = useState<{ isOpen: boolean; path: string; currentName: string }>({ isOpen: false, path: '', currentName: '' })
+  const [renameInput, setRenameInput] = useState('')
+
   // Search & Command Palette States
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -806,7 +810,7 @@ export const App: React.FC = () => {
       content = `---\ntitle: ${title}\ntype: canvas\neditor: drawio\n---\n\n# Draw.io Diagram\nBelow is the embedded diagram layout in XML.\n\n\`\`\`xml\n<mxfile host="app.diagrams.net"><diagram id="1" name="Page-1"><mxGraphModel dx="1000" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0"><root><mxCell id="0" /><mxCell id="1" parent="0" /></root></mxGraphModel></diagram></mxfile>\n\`\`\`\n`
     } else if (type === 'board') {
       path = parentPath ? `${parentPath}/${name}.board.md` : `Boards/${name}.board.md`
-      content = `---\ntitle: ${title}\ntype: board\ncolumns: ["Todo", "In Progress", "Done"]\n---\n\n# ${title} Kanban Board\n\nCustomizable Kanban layout.\n`
+      content = `---\ntitle: ${title}\ntype: board\ncolumns: ["Todo", "In Progress", "Done"]\n---\n\n# ${title}\n\nCustomizable Kanban layout.\n`
     } else if (type === 'task') {
       path = parentPath ? `${parentPath}/${name}.md` : `Tasks/${name}.md`
       content = `---\ntitle: ${title}\ntype: task\nstatus: Todo\npriority: Medium\ndueDate: ${new Date().toISOString().split('T')[0]}\nassignee: Unassigned\ntags: []\n---\n\n# ${title}\n\nDescribe the task details here.\n`
@@ -894,6 +898,59 @@ export const App: React.FC = () => {
     } catch (e) {
       console.error('Error moving file', e)
       alert('Failed to move item.')
+    }
+  }
+
+  const handleRenameFile = async (oldPath: string, newTitle: string) => {
+    const trimmed = newTitle.trim()
+    if (!trimmed || !oldPath) return
+    try {
+      // Fetch the full file content (frontmatter + body)
+      const res = await fetch(`${API_BASE}/api/file?path=${encodeURIComponent(oldPath)}`)
+      if (!res.ok) return
+      const data = await res.json()
+      let fullContent: string = data.content || ''
+
+      // Update `title:` field in frontmatter (first matching line)
+      fullContent = fullContent.replace(/^title:.*$/m, `title: ${trimmed}`)
+
+      // Update the first H1 heading in the body
+      fullContent = fullContent.replace(/^# .+$/m, `# ${trimmed}`)
+
+      // Save the patched content back to the old path
+      await fetch(`${API_BASE}/api/file`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: oldPath, content: fullContent }),
+      })
+
+      // Derive new file path from the new title slug
+      const slug = trimmed.replace(/[^a-zA-Z0-9\s-]/g, '').trim().replace(/\s+/g, '-')
+      const dir = oldPath.includes('/') ? oldPath.substring(0, oldPath.lastIndexOf('/') + 1) : ''
+      const oldFileName = oldPath.split('/').pop()!
+      const ext = oldFileName.endsWith('.board.md') ? '.board.md'
+        : oldFileName.endsWith('.excalidraw.md') ? '.excalidraw.md'
+        : oldFileName.endsWith('.drawio.md') ? '.drawio.md'
+        : '.md'
+      const newPath = `${dir}${slug}${ext}`
+
+      if (newPath !== oldPath) {
+        const moveRes = await fetch(`${API_BASE}/api/file/move`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from: oldPath, to: newPath }),
+        })
+        if (!moveRes.ok) { alert('Failed to rename file.'); return }
+      }
+
+      if (selectedPath === oldPath) {
+        setSelectedPath(newPath)
+        fetchFileContent(newPath)
+      }
+      fetchFiles()
+    } catch (e) {
+      console.error('Error renaming file:', e)
+      alert('Failed to rename file.')
     }
   }
 
@@ -1192,6 +1249,7 @@ export const App: React.FC = () => {
                   isSaving={isSaving}
                   frontMatter={activeFile?.frontMatter}
                   onUpdateFrontMatter={(updates) => handleUpdateFrontMatter(selectedPath, updates)}
+                  onTitleChange={(newTitle) => handleRenameFile(selectedPath, newTitle)}
                   boardColumns={defaultColumns}
                   onCreateSubPage={(parentPath, onCreated) => handleCreateFile('document', parentPath, onCreated, ['document'], 'Sub Page')}
                   onSelectFile={fetchFileContent}
@@ -1334,6 +1392,53 @@ export const App: React.FC = () => {
           </div>
         )
       })()}
+
+      {/* ── Rename Modal ────────────────────────────────────────────────── */}
+      {renameModal.isOpen && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#161b22] border border-slate-800 rounded-2xl max-w-sm w-full shadow-2xl p-6 animate-in zoom-in-95 duration-150">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-bold text-base text-slate-100">Rename</h3>
+              <button onClick={() => setRenameModal({ isOpen: false, path: '', currentName: '' })} className="text-slate-500 hover:text-slate-300 transition cursor-pointer">
+                <X size={16} />
+              </button>
+            </div>
+            <input
+              autoFocus
+              type="text"
+              value={renameInput}
+              onChange={e => setRenameInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && renameInput.trim()) {
+                  const { path } = renameModal
+                  setRenameModal({ isOpen: false, path: '', currentName: '' })
+                  handleRenameFile(path, renameInput)
+                }
+                if (e.key === 'Escape') setRenameModal({ isOpen: false, path: '', currentName: '' })
+              }}
+              className="w-full bg-slate-950 border border-slate-700 focus:border-violet-500 rounded-lg px-3 py-2 text-sm text-slate-100 outline-none transition"
+              placeholder="New name…"
+            />
+            <div className="flex gap-2 justify-end mt-4">
+              <button
+                type="button"
+                onClick={() => setRenameModal({ isOpen: false, path: '', currentName: '' })}
+                className="px-4 py-2 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-lg text-xs font-semibold transition cursor-pointer"
+              >Cancel</button>
+              <button
+                type="button"
+                disabled={!renameInput.trim() || renameInput.trim() === renameModal.currentName}
+                onClick={() => {
+                  const { path } = renameModal
+                  setRenameModal({ isOpen: false, path: '', currentName: '' })
+                  handleRenameFile(path, renameInput)
+                }}
+                className="px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white rounded-lg text-xs font-semibold shadow transition cursor-pointer"
+              >Rename</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Settings Menu Modal ─────────────────────────────────────────── */}
       {adminModalOpen && (
@@ -1604,6 +1709,17 @@ export const App: React.FC = () => {
                   () => handleCreateFile('diagram', ctxParent, undefined, ['diagram']))}
               </>
             )}
+
+            {/* Rename — available for all page types */}
+            {!contextMenu.isFolder && (() => {
+              const fileTitle = files.find(f => f.path === contextMenu.path)?.title
+                || contextMenu.path?.split('/').pop()?.replace(/\.(board|excalidraw|drawio)\.md$/, '').replace(/\.md$/, '')
+                || ''
+              return ctxBtn('Rename', <Pencil size={13} className="text-violet-400" />, () => {
+                setRenameInput(fileTitle)
+                setRenameModal({ isOpen: true, path: contextMenu.path!, currentName: fileTitle })
+              })
+            })()}
 
             <div className="border-t border-slate-850/60 my-1" />
             <button

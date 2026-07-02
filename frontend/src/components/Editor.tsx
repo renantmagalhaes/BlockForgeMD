@@ -1294,6 +1294,7 @@ interface EditorProps {
   isSaving: boolean
   frontMatter?: Record<string, string>
   onUpdateFrontMatter?: (updates: Record<string, any>) => Promise<void>
+  onTitleChange?: (newTitle: string) => void
   boardColumns: string[]
   onCreateSubPage?: (parentPath: string, onCreated: (newPath: string, title: string) => string) => void
   onSelectFile?: (path: string) => void
@@ -1339,6 +1340,7 @@ export const Editor: React.FC<EditorProps> = ({
   isSaving,
   frontMatter,
   onUpdateFrontMatter,
+  onTitleChange,
   boardColumns,
   onCreateSubPage,
   onSelectFile,
@@ -1461,6 +1463,13 @@ export const Editor: React.FC<EditorProps> = ({
 
   const lastSavedContentRef = useRef<string>(initialContent || '')
   const lastFilePathRef = useRef<string | null>(null)
+  const lastSyncedTitleRef = useRef<string>(frontMatter?.title || '')
+
+  // Keep lastSyncedTitleRef in sync when switching files so we don't
+  // trigger a spurious rename the moment a different file is opened.
+  useEffect(() => {
+    lastSyncedTitleRef.current = frontMatter?.title || ''
+  }, [filePath]) // eslint-disable-line react-hooks/exhaustive-deps
 
 
 
@@ -2081,6 +2090,23 @@ export const Editor: React.FC<EditorProps> = ({
       await onSave(markdown)
       lastSavedContentRef.current = markdown
       setSaveStatus('saved')
+
+      // After a successful save, check if the first H1 changed and notify the
+      // parent to rename the file + frontmatter title. This must run after save
+      // (not during typing) to avoid a race between the save and the rename.
+      if (onTitleChange && editor) {
+        const json = editor.getJSON()
+        const firstNode = json.content?.[0]
+        if (firstNode?.type === 'heading' && firstNode.attrs?.level === 1) {
+          const h1Text = (firstNode.content as any[] | undefined)
+            ?.map((n: any) => n.text || '').join('') || ''
+          if (h1Text && h1Text !== lastSyncedTitleRef.current) {
+            lastSyncedTitleRef.current = h1Text
+            onTitleChange(h1Text)
+          }
+        }
+      }
+
       if (historyOpen) {
         fetchHistory()
       }
