@@ -62,6 +62,9 @@ import {
   Check,
   Download,
   Brain,
+  Paperclip,
+  ExternalLink,
+  Trash2,
 } from 'lucide-react'
 
 // Configure Turndown for clean Markdown serialization
@@ -1555,6 +1558,9 @@ export const Editor: React.FC<EditorProps> = ({
   const [tagAutocompleteOpen, setTagAutocompleteOpen] = useState(false)
   const [textColorOpen, setTextColorOpen] = useState(false)
   const [bgColorOpen, setBgColorOpen] = useState(false)
+  const [attachmentDragOver, setAttachmentDragOver] = useState(false)
+  const [attachmentUploading, setAttachmentUploading] = useState(false)
+  const attachmentInputRef = useRef<HTMLInputElement>(null)
 
   // Image Viewer & Editor state
   const [editingImageSrc, setEditingImageSrc] = useState<string | null>(null)
@@ -2486,6 +2492,47 @@ export const Editor: React.FC<EditorProps> = ({
     }
   }
 
+  const parseAttachments = (): { name: string; url: string; size: number }[] => {
+    const raw = frontMatter?.attachments
+    if (!raw) return []
+    try { return JSON.parse(raw) } catch { return [] }
+  }
+
+  const formatBytes = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  }
+
+  const uploadAttachment = async (file: File) => {
+    if (!onUpdateFrontMatter) return
+    setAttachmentUploading(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await fetch(`${API_BASE}/api/upload?notePath=${encodeURIComponent(filePath)}`, {
+        method: 'POST',
+        body: formData,
+      })
+      if (!res.ok) throw new Error('Upload failed')
+      const data = await res.json()
+      const existing = parseAttachments()
+      const updated = [...existing, { name: file.name, url: data.url, size: file.size }]
+      await onUpdateFrontMatter({ attachments: JSON.stringify(updated) })
+    } catch (e) {
+      console.error('Failed to upload attachment', e)
+      alert('Failed to upload attachment.')
+    } finally {
+      setAttachmentUploading(false)
+    }
+  }
+
+  const removeAttachment = async (url: string) => {
+    if (!onUpdateFrontMatter) return
+    const updated = parseAttachments().filter(a => a.url !== url)
+    await onUpdateFrontMatter({ attachments: JSON.stringify(updated) })
+  }
+
   const uploadImageAndInsert = async (file: File) => {
     const formData = new FormData()
     formData.append('file', file)
@@ -3358,6 +3405,81 @@ export const Editor: React.FC<EditorProps> = ({
                       </div>
                     )}
                   </form>
+                </div>
+              </div>
+
+              {/* Attachments Section */}
+              <div className="border-t border-slate-800/50 pt-3 text-xs">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-slate-500 font-medium flex items-center gap-1.5">
+                    <Paperclip size={12} />
+                    Attachments
+                  </span>
+                  <button
+                    onClick={() => attachmentInputRef.current?.click()}
+                    disabled={attachmentUploading}
+                    className="flex items-center gap-1 px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 rounded transition cursor-pointer disabled:opacity-50"
+                  >
+                    {attachmentUploading
+                      ? <><Loader2 size={10} className="animate-spin" /> Uploading…</>
+                      : <><Plus size={10} /> Add file</>}
+                  </button>
+                  <input
+                    ref={attachmentInputRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={e => { Array.from(e.target.files ?? []).forEach(uploadAttachment); e.target.value = '' }}
+                  />
+                </div>
+
+                {/* File list */}
+                {parseAttachments().length > 0 && (
+                  <div className="space-y-1 mb-2">
+                    {parseAttachments().map(att => (
+                      <div key={att.url} className="flex items-center gap-2 px-2 py-1.5 bg-slate-900/60 border border-slate-800 rounded-lg group">
+                        <FileText size={12} className="text-slate-500 shrink-0" />
+                        <span className="flex-1 text-slate-300 truncate text-[11px]" title={att.name}>{att.name}</span>
+                        <span className="text-slate-600 text-[10px] shrink-0">{formatBytes(att.size)}</span>
+                        <a
+                          href={att.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-slate-500 hover:text-violet-400 transition shrink-0"
+                          title="Open"
+                        >
+                          <ExternalLink size={11} />
+                        </a>
+                        <button
+                          onClick={() => removeAttachment(att.url)}
+                          className="text-slate-600 hover:text-red-400 transition shrink-0 opacity-0 group-hover:opacity-100 cursor-pointer"
+                          title="Remove attachment"
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Drag-and-drop zone */}
+                <div
+                  onDragOver={e => { e.preventDefault(); setAttachmentDragOver(true) }}
+                  onDragLeave={() => setAttachmentDragOver(false)}
+                  onDrop={e => {
+                    e.preventDefault()
+                    setAttachmentDragOver(false)
+                    Array.from(e.dataTransfer.files).forEach(uploadAttachment)
+                  }}
+                  onClick={() => attachmentInputRef.current?.click()}
+                  className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border border-dashed cursor-pointer transition ${
+                    attachmentDragOver
+                      ? 'border-violet-500 bg-violet-600/10 text-violet-400'
+                      : 'border-slate-700 hover:border-slate-600 text-slate-600 hover:text-slate-500'
+                  }`}
+                >
+                  <Paperclip size={11} />
+                  <span className="text-[11px]">Drop files here or click to upload</span>
                 </div>
               </div>
             </div>
