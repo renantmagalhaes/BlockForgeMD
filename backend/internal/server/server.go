@@ -82,6 +82,8 @@ func (s *Server) setupRoutes() {
 		r.Get("/sync/events", s.handleSSE)
 		r.Get("/link-preview", s.handleLinkPreview)
 		r.Get("/search", s.handleSearch)
+		r.Get("/settings", s.handleGetSettings)
+		r.Post("/settings", s.handleSaveSettings)
 	})
 
 	// Serve assets directly from the vault's assets directory
@@ -412,13 +414,19 @@ func (s *Server) saveFileBackup(relPath, newContent string) {
 		return
 	}
 
-	// Prune history to limit of 20 backups
+	// Prune history to dynamic settings limit (default: 50)
+	limitStr, _ := s.db.GetSetting("history_limit", "50")
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit <= 0 {
+		limit = 50
+	}
+
 	entries, err := os.ReadDir(backupDir)
-	if err == nil && len(entries) > 20 {
+	if err == nil && len(entries) > limit {
 		sort.Slice(entries, func(i, j int) bool {
 			return entries[i].Name() < entries[j].Name()
 		})
-		for i := 0; i < len(entries)-20; i++ {
+		for i := 0; i < len(entries)-limit; i++ {
 			os.Remove(filepath.Join(backupDir, entries[i].Name()))
 		}
 	}
@@ -909,4 +917,36 @@ func (s *Server) handleGetFileHistoryContent(w http.ResponseWriter, r *http.Requ
 	}
 
 	respondJSON(w, map[string]string{"content": string(backupBytes)})
+}
+
+func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
+	limitStr, _ := s.db.GetSetting("history_limit", "50")
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit <= 0 {
+		limit = 50
+	}
+	respondJSON(w, map[string]interface{}{"history_limit": limit})
+}
+
+func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		HistoryLimit int `json:"history_limit"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.HistoryLimit <= 0 {
+		http.Error(w, "invalid history_limit value", http.StatusBadRequest)
+		return
+	}
+
+	err := s.db.SetSetting("history_limit", strconv.Itoa(req.HistoryLimit))
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to save settings: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	respondJSON(w, map[string]string{"status": "success"})
 }

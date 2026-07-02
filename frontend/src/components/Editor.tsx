@@ -4,7 +4,10 @@ import { useEditor, EditorContent, NodeViewWrapper, NodeViewContent, ReactNodeVi
 import { Node, mergeAttributes } from '@tiptap/core'
 import { Excalidraw } from '@excalidraw/excalidraw'
 import StarterKit from '@tiptap/starter-kit'
-import CodeBlock from '@tiptap/extension-code-block'
+import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
+import { all, createLowlight } from 'lowlight'
+
+const lowlight = createLowlight(all)
 import Link from '@tiptap/extension-link'
 import Image from '@tiptap/extension-image'
 import { ImageEditorModal } from './ImageEditorModal'
@@ -47,7 +50,9 @@ import {
   ArrowLeftRight,
   BookMarked,
   MonitorPlay,
-  Link2
+  Link2,
+  Copy,
+  Check
 } from 'lucide-react'
 
 // Configure Turndown for clean Markdown serialization
@@ -1155,26 +1160,53 @@ export const BookmarkNode = Node.create({
 })
 
 const LANGUAGES = [
+  { value: 'markdown', label: 'Markdown' },
   { value: 'javascript', label: 'JavaScript' },
   { value: 'typescript', label: 'TypeScript' },
   { value: 'html', label: 'HTML' },
   { value: 'css', label: 'CSS' },
+  { value: 'json', label: 'JSON' },
+  { value: 'yaml', label: 'YAML' },
   { value: 'python', label: 'Python' },
   { value: 'go', label: 'Go' },
   { value: 'rust', label: 'Rust' },
+  { value: 'c', label: 'C' },
+  { value: 'cpp', label: 'C++' },
+  { value: 'csharp', label: 'C#' },
+  { value: 'java', label: 'Java' },
+  { value: 'php', label: 'PHP' },
+  { value: 'ruby', label: 'Ruby' },
+  { value: 'swift', label: 'Swift' },
+  { value: 'kotlin', label: 'Kotlin' },
+  { value: 'dart', label: 'Dart' },
   { value: 'bash', label: 'Bash / Shell' },
-  { value: 'json', label: 'JSON' },
-  { value: 'yaml', label: 'YAML' },
-  { value: 'markdown', label: 'Markdown' },
   { value: 'sql', label: 'SQL' },
   { value: 'xml', label: 'XML' },
+  { value: 'dockerfile', label: 'Dockerfile' },
+  { value: 'ini', label: 'INI / Conf' },
+  { value: 'diff', label: 'Diff / Patch' },
+  { value: 'lua', label: 'Lua' },
+  { value: 'zig', label: 'Zig' },
+  { value: 'wasm', label: 'WebAssembly' },
+  { value: 'plain', label: 'Plain Text' },
 ]
 
 const CodeBlockComponent = (props: any) => {
   const { language } = props.node.attrs
+  const [copied, setCopied] = useState(false)
 
   const handleLanguageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     props.updateAttributes({ language: e.target.value })
+  }
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(props.node.textContent || '')
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch (err) {
+      console.error('Failed to copy code', err)
+    }
   }
 
   return (
@@ -1182,7 +1214,7 @@ const CodeBlockComponent = (props: any) => {
       {/* Header with language selection */}
       <div className="flex items-center justify-between px-4 py-1.5 bg-[#161b22] border-b border-slate-850 select-none">
         <select
-          value={language || 'javascript'}
+          value={language || 'markdown'}
           onChange={handleLanguageChange}
           className="bg-transparent text-slate-400 hover:text-slate-200 text-xs font-semibold focus:outline-none border-none py-0.5 pr-6 cursor-pointer rounded-lg transition-colors"
         >
@@ -1192,24 +1224,55 @@ const CodeBlockComponent = (props: any) => {
             </option>
           ))}
         </select>
-        <span className="text-[10px] text-slate-500 font-mono select-none opacity-0 group-hover:opacity-100 transition-opacity pr-2">
-          Code Block
-        </span>
+        
+        <div className="flex items-center gap-3">
+          <span className="text-[10px] text-slate-500 font-mono select-none opacity-0 group-hover:opacity-100 transition-opacity">
+            Code Block
+          </span>
+          <button
+            onClick={handleCopy}
+            className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold border transition duration-150 cursor-pointer ${
+              copied
+                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                : 'bg-slate-800/35 text-slate-400 border-transparent hover:border-slate-700 hover:text-slate-200 hover:bg-slate-800/70'
+            }`}
+          >
+            {copied ? (
+              <>
+                <Check size={10} />
+                Copied!
+              </>
+            ) : (
+              <>
+                <Copy size={10} />
+                Copy
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Editor Content Area */}
-      <pre style={{ backgroundColor: 'transparent', padding: '1rem', border: 'none', margin: 0, borderRadius: 0 }} className="overflow-x-auto text-xs font-mono text-slate-100 focus:outline-none leading-relaxed">
+      <pre style={{ backgroundColor: 'transparent', padding: '1rem', border: 'none', margin: 0, borderRadius: 0 }} className="overflow-x-auto text-xs font-mono text-slate-100 focus:outline-none leading-relaxed hljs">
         <NodeViewContent as={"code" as any} />
       </pre>
     </NodeViewWrapper>
   )
 }
 
-export const CustomCodeBlock = CodeBlock.extend({
+export const CustomCodeBlock = CodeBlockLowlight.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      language: {
+        default: 'markdown',
+      },
+    }
+  },
   addNodeView() {
     return ReactNodeViewRenderer(CodeBlockComponent)
   },
-})
+}).configure({ lowlight })
 
 
 
@@ -2052,21 +2115,34 @@ export const Editor: React.FC<EditorProps> = ({
     }
   }
 
-  interface DiffLine {
-    type: 'added' | 'removed' | 'unchanged'
-    text: string
+  interface SideBySideLine {
+    left: {
+      type: 'removed' | 'unchanged' | 'empty'
+      text: string
+      lineNum: number | null
+    }
+    right: {
+      type: 'added' | 'unchanged' | 'empty'
+      text: string
+      lineNum: number | null
+    }
   }
 
-  const getDiffLines = (current: string, snapshot: string): DiffLine[] => {
+  const getSideBySideDiff = (current: string, snapshot: string): SideBySideLine[] => {
     const currentLines = current.split('\n')
     const snapshotLines = snapshot.split('\n')
-    const diff: DiffLine[] = []
+    const diff: SideBySideLine[] = []
     let i = 0, j = 0
+    let currentLineNum = 1
+    let snapshotLineNum = 1
 
     while (i < currentLines.length || j < snapshotLines.length) {
       if (i < currentLines.length && j < snapshotLines.length) {
         if (currentLines[i] === snapshotLines[j]) {
-          diff.push({ type: 'unchanged', text: currentLines[i] })
+          diff.push({
+            left: { type: 'unchanged', text: currentLines[i], lineNum: currentLineNum++ },
+            right: { type: 'unchanged', text: snapshotLines[j], lineNum: snapshotLineNum++ }
+          })
           i++
           j++
         } else {
@@ -2074,7 +2150,10 @@ export const Editor: React.FC<EditorProps> = ({
           for (let k = 1; k <= 5; k++) {
             if (i + k < currentLines.length && currentLines[i + k] === snapshotLines[j]) {
               for (let m = 0; m < k; m++) {
-                diff.push({ type: 'removed', text: currentLines[i + m] })
+                diff.push({
+                  left: { type: 'removed', text: currentLines[i + m], lineNum: currentLineNum++ },
+                  right: { type: 'empty', text: '', lineNum: null }
+                })
               }
               i += k
               foundMatch = true
@@ -2082,7 +2161,10 @@ export const Editor: React.FC<EditorProps> = ({
             }
             if (j + k < snapshotLines.length && currentLines[i] === snapshotLines[j + k]) {
               for (let m = 0; m < k; m++) {
-                diff.push({ type: 'added', text: snapshotLines[j + m] })
+                diff.push({
+                  left: { type: 'empty', text: '', lineNum: null },
+                  right: { type: 'added', text: snapshotLines[j + m], lineNum: snapshotLineNum++ }
+                })
               }
               j += k
               foundMatch = true
@@ -2090,17 +2172,25 @@ export const Editor: React.FC<EditorProps> = ({
             }
           }
           if (!foundMatch) {
-            diff.push({ type: 'removed', text: currentLines[i] })
-            diff.push({ type: 'added', text: snapshotLines[j] })
+            diff.push({
+              left: { type: 'removed', text: currentLines[i], lineNum: currentLineNum++ },
+              right: { type: 'added', text: snapshotLines[j], lineNum: snapshotLineNum++ }
+            })
             i++
             j++
           }
         }
       } else if (i < currentLines.length) {
-        diff.push({ type: 'removed', text: currentLines[i] })
+        diff.push({
+          left: { type: 'removed', text: currentLines[i], lineNum: currentLineNum++ },
+          right: { type: 'empty', text: '', lineNum: null }
+        })
         i++
       } else if (j < snapshotLines.length) {
-        diff.push({ type: 'added', text: snapshotLines[j] })
+        diff.push({
+          left: { type: 'empty', text: '', lineNum: null },
+          right: { type: 'added', text: snapshotLines[j], lineNum: snapshotLineNum++ }
+        })
         j++
       }
     }
@@ -3110,15 +3200,15 @@ export const Editor: React.FC<EditorProps> = ({
       {/* Version History Diff Modal Overlay */}
       {previewVersion && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-6 select-none transition-opacity">
-          <div className="bg-[#161b22] border border-slate-700/80 rounded-2xl shadow-2xl max-w-4xl w-full max-h-[85vh] flex flex-col overflow-hidden text-slate-200">
+          <div className="bg-[#161b22] border border-slate-700/80 rounded-2xl shadow-2xl max-w-5xl w-full max-h-[85vh] flex flex-col overflow-hidden text-slate-200">
             {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 shrink-0">
               <div className="flex items-center gap-2.5">
                 <span className="p-1.5 bg-violet-600/10 text-violet-400 rounded-lg">
                   <RotateCcw size={16} />
                 </span>
                 <div>
-                  <h3 className="text-sm font-bold tracking-wide">Compare Snapshot Version</h3>
+                  <h3 className="text-sm font-bold tracking-wide">Compare Snapshot Version (Side-by-Side)</h3>
                   <p className="text-[10px] text-slate-500 font-mono mt-0.5">{previewVersion.date}</p>
                 </div>
               </div>
@@ -3130,32 +3220,58 @@ export const Editor: React.FC<EditorProps> = ({
               </button>
             </div>
 
+            {/* Split Headers */}
+            <div className="grid grid-cols-2 divide-x divide-slate-800 border-b border-slate-800 bg-[#0d1117] text-[10px] uppercase font-bold tracking-widest text-slate-450 select-none shrink-0">
+              <div className="px-6 py-2.5 flex items-center justify-between">
+                <span>Current Vault Version</span>
+                <span className="text-[9px] bg-red-500/10 text-red-400/90 border border-red-500/15 px-1.5 py-0.5 rounded uppercase">Current State</span>
+              </div>
+              <div className="px-6 py-2.5 flex items-center justify-between">
+                <span>Rollback Snapshot Target</span>
+                <span className="text-[9px] bg-emerald-500/10 text-emerald-400/90 border border-emerald-500/15 px-1.5 py-0.5 rounded uppercase">Target State</span>
+              </div>
+            </div>
+
             {/* Diff content container */}
-            <div className="flex-1 overflow-y-auto p-6 font-mono text-xs bg-[#0d1117] leading-relaxed no-scrollbar select-text">
-              <div className="border border-slate-850 rounded-xl overflow-hidden divide-y divide-slate-900 bg-slate-950/20">
-                {getDiffLines(initialContent || '', previewVersion.content).map((line, idx) => {
-                  let bgColor = 'bg-transparent text-slate-350'
-                  let marker = ' '
-                  if (line.type === 'added') {
-                    bgColor = 'bg-emerald-500/10 text-emerald-300 border-l-2 border-emerald-500/80 px-2'
-                    marker = '+'
-                  } else if (line.type === 'removed') {
-                    bgColor = 'bg-red-500/10 text-red-300 border-l-2 border-red-500/80 px-2'
-                    marker = '-'
-                  } else {
-                    bgColor = 'px-2'
+            <div className="flex-1 overflow-y-auto no-scrollbar font-mono text-[11px] bg-[#0d1117] select-text">
+              <div className="flex flex-col divide-y divide-slate-900 bg-slate-950/20">
+                {getSideBySideDiff(initialContent || '', previewVersion.content).map((row, idx) => {
+                  // Style left side
+                  let leftBg = 'bg-transparent text-slate-350'
+                  if (row.left.type === 'removed') {
+                    leftBg = 'bg-red-500/10 text-red-300 border-l-2 border-red-500/80'
+                  } else if (row.left.type === 'empty') {
+                    leftBg = 'bg-slate-900/10 opacity-20'
                   }
+
+                  // Style right side
+                  let rightBg = 'bg-transparent text-slate-350'
+                  if (row.right.type === 'added') {
+                    rightBg = 'bg-emerald-500/10 text-emerald-300 border-l-2 border-emerald-500/80'
+                  } else if (row.right.type === 'empty') {
+                    rightBg = 'bg-slate-900/10 opacity-20'
+                  }
+
                   return (
-                    <div key={idx} className={`py-1.5 flex gap-4 min-w-0 transition-colors hover:bg-slate-900/10 ${bgColor}`}>
-                      <span className="w-8 shrink-0 text-right text-[10px] text-slate-600 select-none border-r border-slate-900 pr-2">
-                        {idx + 1}
-                      </span>
-                      <span className="w-3 shrink-0 text-center select-none font-bold">
-                        {marker}
-                      </span>
-                      <span className="flex-1 whitespace-pre-wrap break-all">
-                        {line.text || ' '}
-                      </span>
+                    <div key={idx} className="grid grid-cols-2 divide-x divide-slate-900 min-w-0 transition-colors hover:bg-slate-900/10">
+                      {/* Left Cell (Current) */}
+                      <div className={`py-1 flex gap-3 min-w-0 px-3 ${leftBg}`}>
+                        <span className="w-8 shrink-0 text-right text-[10px] text-slate-600 select-none border-r border-slate-900/40 pr-2">
+                          {row.left.lineNum || '~'}
+                        </span>
+                        <span className="flex-1 whitespace-pre-wrap break-all min-h-[1.25rem]">
+                          {row.left.text}
+                        </span>
+                      </div>
+                      {/* Right Cell (Snapshot) */}
+                      <div className={`py-1 flex gap-3 min-w-0 px-3 ${rightBg}`}>
+                        <span className="w-8 shrink-0 text-right text-[10px] text-slate-600 select-none border-r border-slate-900/40 pr-2">
+                          {row.right.lineNum || '~'}
+                        </span>
+                        <span className="flex-1 whitespace-pre-wrap break-all min-h-[1.25rem]">
+                          {row.right.text}
+                        </span>
+                      </div>
                     </div>
                   )
                 })}
@@ -3163,10 +3279,10 @@ export const Editor: React.FC<EditorProps> = ({
             </div>
 
             {/* Actions bar */}
-            <div className="px-6 py-4 bg-slate-900/40 border-t border-slate-800 flex justify-between items-center">
+            <div className="px-6 py-4 bg-slate-900/40 border-t border-slate-800 flex justify-between items-center shrink-0">
               <span className="text-[10px] text-slate-500 flex gap-4 select-none">
-                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 bg-red-500/20 border border-red-500/50 rounded-sm"></span> Current (will replace)</span>
-                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 bg-emerald-500/20 border border-emerald-500/50 rounded-sm"></span> Target Snapshot</span>
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 bg-red-500/20 border border-red-500/50 rounded-sm"></span> Removed Lines</span>
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 bg-emerald-500/20 border border-emerald-500/50 rounded-sm"></span> Added Lines</span>
               </span>
               <div className="flex gap-3 select-none">
                 <button

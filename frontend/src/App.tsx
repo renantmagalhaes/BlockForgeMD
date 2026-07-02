@@ -16,7 +16,8 @@ import {
   X,
   Grid,
   Settings,
-  Search
+  Search,
+  History as HistoryIcon
 } from 'lucide-react'
 import Editor from './components/Editor'
 import Kanban from './components/Kanban'
@@ -373,14 +374,14 @@ export const App: React.FC = () => {
   const [createNameInput, setCreateNameInput] = useState('')
 
   const [adminModalOpen, setAdminModalOpen] = useState(false)
-  const [settingsTab, setSettingsTab] = useState<'editor' | 'cache' | 'about'>('editor')
+  const [settingsTab, setSettingsTab] = useState<'editor' | 'history' | 'cache' | 'about'>('editor')
   const [globalLayoutOverride, setGlobalLayoutOverride] = useState<string>(() => {
     return localStorage.getItem('blockforge_global_layout_override') || 'per-page'
   })
   const [globalColumnWidthOverride, setGlobalColumnWidthOverride] = useState<string>(() => {
     return localStorage.getItem('blockforge_global_column_width_override') || 'per-page'
   })
-
+  const [historyLimitInput, setHistoryLimitInput] = useState('50')
   const [contextMenu, setContextMenu] = useState<{
     isOpen: boolean; x: number; y: number; path: string | null; isFolder: boolean
   }>({ isOpen: false, x: 0, y: 0, path: null, isFolder: false })
@@ -404,6 +405,32 @@ export const App: React.FC = () => {
       setSyncError(true)
     } finally {
       setIsSyncing(false)
+    }
+  }
+
+  const fetchSettings = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/settings`)
+      if (res.ok) {
+        const data = await res.json()
+        if (data && typeof data.history_limit === 'number') {
+          setHistoryLimitInput(data.history_limit.toString())
+        }
+      }
+    } catch (e) {
+      console.error('Failed to fetch settings', e)
+    }
+  }
+
+  const handleSaveHistoryLimit = async (limit: number) => {
+    try {
+      await fetch(`${API_BASE}/api/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ history_limit: limit }),
+      })
+    } catch (e) {
+      console.error('Failed to save settings', e)
     }
   }
 
@@ -432,6 +459,7 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     fetchFiles()
+    fetchSettings()
     const es = new EventSource(`${API_BASE}/api/sync/events`)
     es.addEventListener('file_update', (e: any) => {
       fetchFiles()
@@ -999,6 +1027,7 @@ export const App: React.FC = () => {
                 <div className="space-y-1">
                   {[
                     { id: 'editor' as const, label: 'Editor Layout', icon: <LayoutGrid size={14} className="text-violet-400" /> },
+                    { id: 'history' as const, label: 'Backups & History', icon: <HistoryIcon size={14} className="text-rose-400" /> },
                     { id: 'cache'  as const, label: 'System & Sync', icon: <CheckSquare size={14} className="text-amber-500" /> },
                     { id: 'about'  as const, label: 'About Vault',  icon: <Layers size={14} className="text-blue-400" /> },
                   ].map((tab) => (
@@ -1022,8 +1051,8 @@ export const App: React.FC = () => {
               </div>
 
               {/* Settings Content Pane */}
-              <div className="flex-1 pl-6 overflow-y-auto no-scrollbar flex flex-col justify-between min-h-0">
-                <div className="min-h-0">
+              <div className="flex-1 pl-6 flex flex-col min-h-0">
+                <div className="flex-1 overflow-y-auto no-scrollbar pr-1 min-h-0">
                   {settingsTab === 'editor' && (
                     <div className="space-y-5 animate-in fade-in duration-150">
                       {/* Global Layout Alignment Dropdown */}
@@ -1086,6 +1115,40 @@ export const App: React.FC = () => {
                             </svg>
                           </div>
                         </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {settingsTab === 'history' && (
+                    <div className="space-y-4 animate-in fade-in duration-150">
+                      <div className="space-y-1.5">
+                        <h4 className="font-bold text-sm text-slate-100">Backups & History</h4>
+                        <p className="text-xs text-slate-400 leading-relaxed">
+                          Configure automatic snapshot backup settings. When document contents change, timestamped markdown backups are created to allow comparison previews and rollbacks.
+                        </p>
+                      </div>
+
+                      <div className="space-y-2 pt-2">
+                        <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
+                          Version Rollback Limit
+                        </label>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Maximum number of timestamped backup snapshots kept per note (oldest are automatically pruned).
+                        </p>
+                        <input
+                          type="number"
+                          min={1}
+                          max={500}
+                          value={historyLimitInput}
+                          onChange={(e) => {
+                            setHistoryLimitInput(e.target.value)
+                            const val = parseInt(e.target.value, 10)
+                            if (!isNaN(val) && val > 0) {
+                              handleSaveHistoryLimit(val)
+                            }
+                          }}
+                          className="w-full bg-[#1f242c] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 outline-none focus:border-violet-500 transition font-medium"
+                        />
                       </div>
                     </div>
                   )}

@@ -89,6 +89,10 @@ func (db *DB) createTables() error {
 			line_number INTEGER NOT NULL,
 			FOREIGN KEY (file_path) REFERENCES files(path) ON DELETE CASCADE
 		);`,
+		`CREATE TABLE IF NOT EXISTS settings (
+			key TEXT PRIMARY KEY,
+			value TEXT
+		);`,
 	}
 
 	for _, q := range queries {
@@ -97,8 +101,9 @@ func (db *DB) createTables() error {
 		}
 	}
 
-	// Automatic migration: add content column to files table if it doesn't exist
+	// Automatic migrations
 	_, _ = db.Conn.Exec("ALTER TABLE files ADD COLUMN content TEXT;")
+	_, _ = db.Conn.Exec("INSERT OR IGNORE INTO settings (key, value) VALUES ('history_limit', '50');")
 
 	return nil
 }
@@ -320,6 +325,20 @@ func (db *DB) Search(query string) ([]FileRecord, error) {
 		}
 	}
 	return records, nil
+}
+
+func (db *DB) GetSetting(key string, defaultValue string) (string, error) {
+	var val string
+	err := db.Conn.QueryRow("SELECT value FROM settings WHERE key = ?", key).Scan(&val)
+	if err != nil {
+		return defaultValue, nil
+	}
+	return val, nil
+}
+
+func (db *DB) SetSetting(key string, value string) error {
+	_, err := db.Conn.Exec("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", key, value)
+	return err
 }
 
 func (db *DB) Close() error {
