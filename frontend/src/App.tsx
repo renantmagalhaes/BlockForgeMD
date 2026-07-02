@@ -23,6 +23,8 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
+  ChevronsDown,
+  ChevronsUp,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import Editor from './components/Editor'
@@ -546,6 +548,36 @@ export const App: React.FC = () => {
       })
     }
   }
+
+  // Collect all collapsible node paths within given section dirs (to support collapse/expand all)
+  const getSectionPaths = (dirs: string[]): string[] => {
+    const set = new Set<string>()
+    files.forEach(f => {
+      if (!dirs.some(d => f.path.startsWith(d + '/'))) return
+      const stem = f.path.endsWith('.board.md') ? f.path.slice(0, -'.board.md'.length)
+        : f.path.endsWith('.excalidraw.md') ? f.path.slice(0, -'.excalidraw.md'.length)
+        : f.path.endsWith('.drawio.md') ? f.path.slice(0, -'.drawio.md'.length)
+        : f.path.endsWith('.md') ? f.path.slice(0, -3)
+        : f.path
+      const parts = stem.split('/')
+      for (let i = 1; i <= parts.length; i++) set.add(parts.slice(0, i).join('/'))
+    })
+    return [...set]
+  }
+
+  const isSectionExpanded = (dirs: string[]): boolean =>
+    getSectionPaths(dirs).some(p => collapsedPaths[p] === false)
+
+  const toggleSectionCollapse = (dirs: string[]) => {
+    const paths = getSectionPaths(dirs)
+    const collapse = paths.some(p => collapsedPaths[p] === false)
+    setCollapsedPaths(prev => {
+      const next = { ...prev }
+      paths.forEach(p => { next[p] = collapse })
+      return next
+    })
+  }
+
   const [defaultColumns, setDefaultColumns] = useState<string[]>(() => {
     const saved = localStorage.getItem('blockforge_default_columns')
     return saved ? JSON.parse(saved) : ['Todo', 'In Progress', 'Done']
@@ -1118,6 +1150,13 @@ export const App: React.FC = () => {
                 </span>
                 <span className="flex items-center gap-1">
                   <button
+                    onClick={() => toggleSectionCollapse(['Documents'])}
+                    className="hover:text-white text-slate-500 transition cursor-pointer"
+                    title={isSectionExpanded(['Documents']) ? 'Collapse all' : 'Expand all'}
+                  >
+                    {isSectionExpanded(['Documents']) ? <ChevronsUp size={12} /> : <ChevronsDown size={12} />}
+                  </button>
+                  <button
                     onClick={() => handleCreateFile('folder', 'Documents', undefined, ['folder'])}
                     className="hover:text-white text-slate-500 transition cursor-pointer"
                     title="New Folder"
@@ -1201,6 +1240,13 @@ export const App: React.FC = () => {
                 </span>
                 <span className="flex items-center gap-1">
                   <button
+                    onClick={() => toggleSectionCollapse(['Boards', 'Tasks'])}
+                    className="hover:text-white text-slate-500 transition cursor-pointer"
+                    title={isSectionExpanded(['Boards', 'Tasks']) ? 'Collapse all' : 'Expand all'}
+                  >
+                    {isSectionExpanded(['Boards', 'Tasks']) ? <ChevronsUp size={12} /> : <ChevronsDown size={12} />}
+                  </button>
+                  <button
                     onClick={() => handleCreateFile('folder', 'Boards', undefined, ['folder'])}
                     className="hover:text-white text-slate-500 transition cursor-pointer"
                     title="New Folder"
@@ -1283,6 +1329,13 @@ export const App: React.FC = () => {
                   Canvas
                 </span>
                 <span className="flex items-center gap-1">
+                  <button
+                    onClick={() => toggleSectionCollapse(['Canvas'])}
+                    className="hover:text-white text-slate-500 transition cursor-pointer"
+                    title={isSectionExpanded(['Canvas']) ? 'Collapse all' : 'Expand all'}
+                  >
+                    {isSectionExpanded(['Canvas']) ? <ChevronsUp size={12} /> : <ChevronsDown size={12} />}
+                  </button>
                   <button
                     onClick={() => handleCreateFile('folder', 'Canvas', undefined, ['folder'])}
                     className="hover:text-white text-slate-500 transition cursor-pointer"
