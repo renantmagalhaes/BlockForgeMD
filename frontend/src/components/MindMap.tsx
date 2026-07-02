@@ -140,6 +140,23 @@ const MindMapComponent: React.FC<MindMapProps> = ({ filePath, onSave, isSaving }
             },
           },
           {
+            name: '🔍 Open Image in New Tab',
+            onclick: () => {
+              const node = me?.currentNode
+              const url = (node as any)?.nodeObj?.image?.url
+              if (!url) return
+              fetch(url)
+                .then(r => r.blob())
+                .then(blob => {
+                  const blobUrl = URL.createObjectURL(blob)
+                  const w = window.open(blobUrl, '_blank')
+                  // revoke after the tab has had time to load
+                  setTimeout(() => URL.revokeObjectURL(blobUrl), 10000)
+                  if (!w) URL.revokeObjectURL(blobUrl)
+                })
+            },
+          },
+          {
             name: '✕ Remove Image',
             onclick: () => {
               const node = me?.currentNode

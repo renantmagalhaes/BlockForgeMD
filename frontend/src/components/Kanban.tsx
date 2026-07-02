@@ -583,7 +583,8 @@ export const Kanban: React.FC<KanbanProps> = ({
                       draggable
                       onDragStart={e => handleDragStart(e, task.path)}
                       onDragEnd={handleDragEnd}
-                      className={`p-3 rounded-lg cursor-grab active:cursor-grabbing transition shadow-sm hover:shadow-md select-none group relative border ${
+                      onClick={() => onSelectFile(task.path)}
+                      className={`p-3 rounded-lg cursor-pointer transition shadow-sm hover:shadow-md select-none group relative border ${
                         isDragging
                           ? 'opacity-40 border-violet-500/50 border-dashed scale-95 bg-[#161c24]'
                           : 'border-slate-700/40 hover:border-slate-600/60 bg-[#161c24] hover:bg-[#1a2130]'
@@ -591,10 +592,7 @@ export const Kanban: React.FC<KanbanProps> = ({
                       style={{ borderLeft: `3px solid ${accent}55` }}
                     >
                       {/* Title */}
-                      <div
-                        onClick={() => onSelectFile(task.path)}
-                        className="font-medium text-slate-200 hover:text-white transition mb-2.5 text-[13px] leading-snug cursor-pointer"
-                      >
+                      <div className="font-medium text-slate-200 group-hover:text-white transition mb-2.5 text-[13px] leading-snug break-words min-w-0">
                         {task.title}
                       </div>
 
