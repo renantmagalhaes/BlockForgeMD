@@ -515,6 +515,7 @@ export const App: React.FC = () => {
     type: 'document' | 'task' | 'canvas' | 'board' | 'diagram' | null
     parentPath?: string
     allowedTypes?: ('document' | 'task' | 'canvas' | 'board' | 'diagram')[]
+    modeLabel?: string
   }>({ isOpen: false, type: null })
   const [createNameInput, setCreateNameInput] = useState('')
 
@@ -781,10 +782,11 @@ export const App: React.FC = () => {
     type: 'document' | 'task' | 'canvas' | 'board' | 'diagram' | null,
     parentPath?: string,
     onCreated?: (newPath: string, title: string) => string,
-    allowedTypes?: ('document' | 'task' | 'canvas' | 'board' | 'diagram')[]
+    allowedTypes?: ('document' | 'task' | 'canvas' | 'board' | 'diagram')[],
+    modeLabel?: string
   ) => {
     subpageCallbackRef.current = onCreated || null
-    setCreateModal({ isOpen: true, type, parentPath, allowedTypes })
+    setCreateModal({ isOpen: true, type, parentPath, allowedTypes, modeLabel })
     setCreateNameInput('')
   }
 
@@ -959,7 +961,7 @@ export const App: React.FC = () => {
                       collapsedPaths={collapsedPaths}
                       onToggleCollapse={(path) => setCollapsedPaths((prev) => ({ ...prev, [path]: !prev[path] }))}
                       onSelectFile={fetchFileContent}
-                      onCreateSubPage={(parentPath) => handleCreateFile('document', parentPath, undefined, ['document'])}
+                      onCreateSubPage={(parentPath) => handleCreateFile('document', parentPath, undefined, ['document'], 'Sub Page')}
                       onDeletePath={handleDeleteFile}
                       onContextMenu={(e, targetNode) => {
                         e.preventDefault()
@@ -1191,7 +1193,7 @@ export const App: React.FC = () => {
                   frontMatter={activeFile?.frontMatter}
                   onUpdateFrontMatter={(updates) => handleUpdateFrontMatter(selectedPath, updates)}
                   boardColumns={defaultColumns}
-                  onCreateSubPage={(parentPath, onCreated) => handleCreateFile('document', parentPath, onCreated)}
+                  onCreateSubPage={(parentPath, onCreated) => handleCreateFile('document', parentPath, onCreated, ['document'], 'Sub Page')}
                   onSelectFile={fetchFileContent}
                   files={files}
                   globalLayoutOverride={globalLayoutOverride}
@@ -1262,12 +1264,13 @@ export const App: React.FC = () => {
         const isSingleType = visibleTypes.length === 1
         const folderName = createModal.parentPath?.split('/').pop()
         const singleLabel = isSingleType ? TYPE_LABEL_MAP[visibleTypes[0].id] : null
+        const effectiveLabel = createModal.modeLabel || singleLabel
         const modalTitle = createModal.parentPath
-          ? singleLabel
-            ? `New ${singleLabel} in "${folderName}"`
+          ? effectiveLabel
+            ? `New ${effectiveLabel} in "${folderName}"`
             : `New item in "${folderName}"`
-          : singleLabel
-          ? `New ${singleLabel}`
+          : effectiveLabel
+          ? `New ${effectiveLabel}`
           : 'Create New Item'
 
         return (
@@ -1578,8 +1581,8 @@ export const App: React.FC = () => {
 
             {/* Documents section: only document sub-pages */}
             {contextMenu.sectionType === 'documents' && (
-              ctxBtn('New Document', <FileText size={13} className="text-blue-400" />,
-                () => handleCreateFile('document', ctxParent, undefined, ['document']))
+              ctxBtn('New Sub Page', <FileText size={13} className="text-blue-400" />,
+                () => handleCreateFile('document', ctxParent, undefined, ['document'], 'Sub Page'))
             )}
 
             {/* Boards section: boards can spawn tasks; tasks show nothing here */}
