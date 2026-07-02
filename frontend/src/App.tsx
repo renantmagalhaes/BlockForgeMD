@@ -995,7 +995,7 @@ export const App: React.FC = () => {
     }
 
     const path = `${parentFolder}${sanitizedName}.md`
-    const content = `---\ntitle: ${title}\ntype: task\nstatus: ${status}\npriority: Medium\ndueDate: ${new Date().toISOString().split('T')[0]}\nassignee: Unassigned\ntags: []\n---\n\n# ${title}\n\nTask created directly from Kanban Board.\n`
+    const content = `---\ntitle: ${title}\ntype: task\nstatus: ${status}\npriority: Medium\ndueDate: ${new Date().toISOString().split('T')[0]}\nassignee: Unassigned\ntags: []\n---\n`
     try {
       await fetch(`${API_BASE}/api/file`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path, content }) })
       fetchFiles()
@@ -1038,25 +1038,25 @@ export const App: React.FC = () => {
 
     if (type === 'diagram') {
       path = parentPath ? `${parentPath}/${name}.drawio.md` : `${W('Canvas')}/${name}.drawio.md`
-      content = `---\ntitle: ${title}\ntype: canvas\neditor: drawio\n---\n\n# Draw.io Diagram\nBelow is the embedded diagram layout in XML.\n\n\`\`\`xml\n<mxfile host="app.diagrams.net"><diagram id="1" name="Page-1"><mxGraphModel dx="1000" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0"><root><mxCell id="0" /><mxCell id="1" parent="0" /></root></mxGraphModel></diagram></mxfile>\n\`\`\`\n`
+      content = `---\ntitle: ${title}\ntype: canvas\neditor: drawio\n---\n\n\`\`\`xml\n<mxfile host="app.diagrams.net"><diagram id="1" name="Page-1"><mxGraphModel dx="1000" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0"><root><mxCell id="0" /><mxCell id="1" parent="0" /></root></mxGraphModel></diagram></mxfile>\n\`\`\`\n`
     } else if (type === 'board') {
       path = parentPath ? `${parentPath}/${name}.board.md` : `${W('Boards')}/${name}.board.md`
-      content = `---\ntitle: ${title}\ntype: board\ncolumns: ["Todo", "In Progress", "Done"]\n---\n\n# ${title}\n\nCustomizable Kanban layout.\n`
+      content = `---\ntitle: ${title}\ntype: board\ncolumns: ["Todo", "In Progress", "Done"]\n---\n`
     } else if (type === 'task') {
       path = parentPath ? `${parentPath}/${name}.md` : `${W('Tasks')}/${name}.md`
-      content = `---\ntitle: ${title}\ntype: task\nstatus: Todo\npriority: Medium\ndueDate: ${new Date().toISOString().split('T')[0]}\nassignee: Unassigned\ntags: []\n---\n\n# ${title}\n\nDescribe the task details here.\n`
+      content = `---\ntitle: ${title}\ntype: task\nstatus: Todo\npriority: Medium\ndueDate: ${new Date().toISOString().split('T')[0]}\nassignee: Unassigned\ntags: []\n---\n`
     } else if (type === 'canvas') {
       path = parentPath ? `${parentPath}/${name}.excalidraw.md` : `${W('Canvas')}/${name}.excalidraw.md`
-      content = `---\ntitle: ${title}\ntype: canvas\neditor: excalidraw\n---\n\n# Drawing Canvas\nBelow is the embedded drawing data.\n\n\`\`\`json\n{\n  "type": "excalidraw",\n  "version": 2,\n  "elements": [],\n  "appState": {"viewBackgroundColor": "#121212","theme": "dark"}\n}\n\`\`\`\n`
+      content = `---\ntitle: ${title}\ntype: canvas\neditor: excalidraw\n---\n\n\`\`\`json\n{\n  "type": "excalidraw",\n  "version": 2,\n  "elements": [],\n  "appState": {"viewBackgroundColor": "#121212","theme": "dark"}\n}\n\`\`\`\n`
     } else if (type === 'mindmap') {
       path = parentPath ? `${parentPath}/${name}.mindmap.md` : `${W('MindMaps')}/${name}.mindmap.md`
       content = `---\ntitle: ${title}\ntype: mindmap\n---\n\n\`\`\`json\n{"nodeData":{"id":"root","topic":"${title}","root":true,"children":[]},"arrows":[],"summaries":[],"direction":2}\n\`\`\`\n`
     } else if (type === 'folder') {
       path = parentPath ? `${parentPath}/${name}.md` : `${W('Documents')}/${name}.md`
-      content = `---\ntitle: ${title}\ntype: folder\n---\n\n# ${title}\n`
+      content = `---\ntitle: ${title}\ntype: folder\n---\n`
     } else {
       path = parentPath ? `${parentPath}/${name}.md` : `${W('Documents')}/${name}.md`
-      content = `---\ntitle: ${title}\ntype: document\n---\n\n# ${title}\n\nStart writing note content here.\n`
+      content = `---\ntitle: ${title}\ntype: document\n---\n`
     }
 
     try {

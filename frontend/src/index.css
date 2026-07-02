@@ -40,6 +40,18 @@ body {
   padding: 1rem 0;
 }
 
+/* Placeholder on the first empty paragraph (works both for empty editors and docs with just a title) */
+.ProseMirror.is-editor-empty p:first-child::before,
+.ProseMirror p.is-empty:first-of-type::before {
+  content: attr(data-placeholder);
+  color: #3d4a5c;
+  float: left;
+  height: 0;
+  pointer-events: none;
+  font-style: italic;
+  font-size: 0.95em;
+}
+
 .ProseMirror p {
   margin-bottom: 0.75rem;
   line-height: 1.6;

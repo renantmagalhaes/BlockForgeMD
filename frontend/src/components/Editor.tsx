@@ -17,6 +17,7 @@ import { Table } from '@tiptap/extension-table'
 import TableRow from '@tiptap/extension-table-row'
 import TableCell from '@tiptap/extension-table-cell'
 import TableHeader from '@tiptap/extension-table-header'
+import Placeholder from '@tiptap/extension-placeholder'
 import { marked } from 'marked'
 import TurndownService from 'turndown'
 import MindElixir from 'mind-elixir'
@@ -1752,6 +1753,12 @@ export const Editor: React.FC<EditorProps> = ({
       MindmapNode.configure({
         onSelectFile: (path: string) => onSelectFile?.(path)
       } as any),
+      Placeholder.configure({
+        placeholder: 'Start typing, or press / for commands…',
+        emptyEditorClass: 'is-editor-empty',
+        emptyNodeClass: 'is-empty',
+        showOnlyCurrent: false,
+      }),
     ],
     content: getHTMLFromMarkdown(initialContent),
     editorProps: {
@@ -2578,7 +2585,7 @@ export const Editor: React.FC<EditorProps> = ({
         }).run()
         break
       case 'table':
-        editor.chain().focus().insertContent('<table><thead><tr><th>Header 1</th><th>Header 2</th></tr></thead><tbody><tr><td>Cell 1</td><td>Cell 2</td></tr></tbody></table>').run()
+        editor.chain().focus().insertTable({ rows: 2, cols: 2, withHeaderRow: true }).run()
         break
       case 'code':
         editor.chain().focus().insertContent('<pre><code>\n// Code here\n</code></pre>').run()
