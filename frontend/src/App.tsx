@@ -25,12 +25,14 @@ import {
   FolderPlus,
   ChevronsDown,
   ChevronsUp,
+  Brain,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import Editor from './components/Editor'
 import Kanban from './components/Kanban'
 import Canvas from './components/Canvas'
 import Diagram from './components/Diagram'
+import MindMap from './components/MindMap'
 
 interface TreeNode {
   name: string
@@ -227,6 +229,7 @@ const SECTION_ALLOWED_TYPES: Record<string, string[]> = {
   documents: ['document', 'folder'],
   boards: ['board', 'task', 'folder'],
   canvas: ['canvas', 'folder'],
+  mindmaps: ['mindmap', 'folder'],
 }
 
 // ─── TreeNodeComponent ───────────────────────────────────────────────────────
@@ -242,7 +245,7 @@ const TreeNodeComponent: React.FC<{
   onContextMenu: (e: React.MouseEvent, node: TreeNode) => void
   draggingPath: string | null
   draggingType?: string
-  sectionType?: 'documents' | 'boards' | 'canvas'
+  sectionType?: 'documents' | 'boards' | 'canvas' | 'mindmaps'
   onDragStart: (filePath: string, nodeType?: string) => void
   onDragEnd: () => void
   onDropNode: (fromFilePath: string, toNode: TreeNode) => void
@@ -293,8 +296,10 @@ const TreeNodeComponent: React.FC<{
     }
     // Block dropping onto a descendant of the dragged item
     if (draggingPath) {
-      const dragStem = draggingPath.endsWith('.board.md')
-        ? draggingPath.slice(0, -'.board.md'.length)
+      const dragStem = draggingPath.endsWith('.board.md') ? draggingPath.slice(0, -'.board.md'.length)
+        : draggingPath.endsWith('.excalidraw.md') ? draggingPath.slice(0, -'.excalidraw.md'.length)
+        : draggingPath.endsWith('.drawio.md') ? draggingPath.slice(0, -'.drawio.md'.length)
+        : draggingPath.endsWith('.mindmap.md') ? draggingPath.slice(0, -'.mindmap.md'.length)
         : draggingPath.endsWith('.md') ? draggingPath.slice(0, -3) : draggingPath
       if (node.filePath.startsWith(dragStem + '/')) return
     }
@@ -535,6 +540,7 @@ export const App: React.FC = () => {
     const stem = filePath.endsWith('.board.md') ? filePath.slice(0, -'.board.md'.length)
       : filePath.endsWith('.excalidraw.md') ? filePath.slice(0, -'.excalidraw.md'.length)
       : filePath.endsWith('.drawio.md') ? filePath.slice(0, -'.drawio.md'.length)
+      : filePath.endsWith('.mindmap.md') ? filePath.slice(0, -'.mindmap.md'.length)
       : filePath.endsWith('.md') ? filePath.slice(0, -3)
       : filePath
     const parts = stem.split('/')
@@ -557,6 +563,7 @@ export const App: React.FC = () => {
       const stem = f.path.endsWith('.board.md') ? f.path.slice(0, -'.board.md'.length)
         : f.path.endsWith('.excalidraw.md') ? f.path.slice(0, -'.excalidraw.md'.length)
         : f.path.endsWith('.drawio.md') ? f.path.slice(0, -'.drawio.md'.length)
+        : f.path.endsWith('.mindmap.md') ? f.path.slice(0, -'.mindmap.md'.length)
         : f.path.endsWith('.md') ? f.path.slice(0, -3)
         : f.path
       const parts = stem.split('/')
@@ -587,9 +594,9 @@ export const App: React.FC = () => {
 
   const [createModal, setCreateModal] = useState<{
     isOpen: boolean
-    type: 'document' | 'task' | 'canvas' | 'board' | 'diagram' | 'folder' | null
+    type: 'document' | 'task' | 'canvas' | 'board' | 'diagram' | 'folder' | 'mindmap' | null
     parentPath?: string
-    allowedTypes?: ('document' | 'task' | 'canvas' | 'board' | 'diagram' | 'folder')[]
+    allowedTypes?: ('document' | 'task' | 'canvas' | 'board' | 'diagram' | 'folder' | 'mindmap')[]
     modeLabel?: string
   }>({ isOpen: false, type: null })
   const [createNameInput, setCreateNameInput] = useState('')
@@ -605,7 +612,7 @@ export const App: React.FC = () => {
   const [historyLimitInput, setHistoryLimitInput] = useState('50')
   const [contextMenu, setContextMenu] = useState<{
     isOpen: boolean; x: number; y: number; path: string | null; isFolder: boolean
-    sectionType?: 'documents' | 'boards' | 'canvas'
+    sectionType?: 'documents' | 'boards' | 'canvas' | 'mindmaps'
     nodeType?: string
   }>({ isOpen: false, x: 0, y: 0, path: null, isFolder: false })
 
@@ -868,10 +875,10 @@ export const App: React.FC = () => {
   }
 
   const handleCreateFile = (
-    type: 'document' | 'task' | 'canvas' | 'board' | 'diagram' | 'folder' | null,
+    type: 'document' | 'task' | 'canvas' | 'board' | 'diagram' | 'folder' | 'mindmap' | null,
     parentPath?: string,
     onCreated?: (newPath: string, title: string) => string,
-    allowedTypes?: ('document' | 'task' | 'canvas' | 'board' | 'diagram' | 'folder')[],
+    allowedTypes?: ('document' | 'task' | 'canvas' | 'board' | 'diagram' | 'folder' | 'mindmap')[],
     modeLabel?: string
   ) => {
     subpageCallbackRef.current = onCreated || null
@@ -902,6 +909,9 @@ export const App: React.FC = () => {
     } else if (type === 'canvas') {
       path = parentPath ? `${parentPath}/${name}.excalidraw.md` : `Canvas/${name}.excalidraw.md`
       content = `---\ntitle: ${title}\ntype: canvas\neditor: excalidraw\n---\n\n# Drawing Canvas\nBelow is the embedded drawing data.\n\n\`\`\`json\n{\n  "type": "excalidraw",\n  "version": 2,\n  "elements": [],\n  "appState": {"viewBackgroundColor": "#121212","theme": "dark"}\n}\n\`\`\`\n`
+    } else if (type === 'mindmap') {
+      path = parentPath ? `${parentPath}/${name}.mindmap.md` : `MindMaps/${name}.mindmap.md`
+      content = `---\ntitle: ${title}\ntype: mindmap\n---\n\n\`\`\`json\n{"nodeData":{"id":"root","topic":"${title}","root":true,"children":[]},"arrows":[],"summaries":[],"direction":2}\n\`\`\`\n`
     } else if (type === 'folder') {
       path = parentPath ? `${parentPath}/${name}.md` : `Documents/${name}.md`
       content = `---\ntitle: ${title}\ntype: folder\n---\n\n# ${title}\n`
@@ -1060,6 +1070,7 @@ export const App: React.FC = () => {
       const ext = oldFileName.endsWith('.board.md') ? '.board.md'
         : oldFileName.endsWith('.excalidraw.md') ? '.excalidraw.md'
         : oldFileName.endsWith('.drawio.md') ? '.drawio.md'
+        : oldFileName.endsWith('.mindmap.md') ? '.mindmap.md'
         : '.md'
       const newPath = `${dir}${slug}${ext}`
 
@@ -1089,6 +1100,7 @@ export const App: React.FC = () => {
     { id: 'create-doc',     label: 'Create New Document',          icon: <FilePlus size={14} className="text-blue-400" />,    action: () => handleCreateFile('document', 'Documents', undefined, ['document']) },
     { id: 'create-board',   label: 'Create New Kanban Board',      icon: <LayoutGrid size={14} className="text-rose-400" />,  action: () => handleCreateFile('board', 'Boards', undefined, ['board']) },
     { id: 'create-canvas',  label: 'Create New Canvas',            icon: <Brush size={14} className="text-emerald-400" />,    action: () => handleCreateFile('canvas', 'Canvas', undefined, ['canvas', 'diagram']) },
+    { id: 'create-mindmap', label: 'Create New Mind Map',          icon: <Brain size={14} className="text-violet-400" />,     action: () => handleCreateFile('mindmap', 'MindMaps', undefined, ['mindmap']) },
     { id: 'open-settings',  label: 'Open Settings',                icon: <Settings size={14} className="text-slate-400" />,   action: () => setAdminModalOpen(true) },
   ]
 
@@ -1390,11 +1402,101 @@ export const App: React.FC = () => {
                 )}
               </div>
             </div>
+
+            {/* Menu 4 - Mind Maps */}
+            <div className="space-y-1">
+              <div
+                className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider flex justify-between items-center group rounded-lg transition ${
+                  dragOverSection === 'mindmaps' ? 'text-violet-400 bg-violet-600/15 border border-violet-500/40' : 'text-slate-500'
+                }`}
+                onDragOver={(e) => {
+                  if (!draggingPath) return
+                  const allowed = SECTION_ALLOWED_TYPES.mindmaps
+                  if (draggingType && !allowed.includes(draggingType)) return
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setDragOverSection('mindmaps')
+                }}
+                onDragLeave={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverSection(null)
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  setDragOverSection(null)
+                  if (draggingPath) handleMoveToSectionRoot(draggingPath, 'MindMaps')
+                }}
+              >
+                <span className="flex items-center gap-1.5">
+                  <Brain size={12} className="text-violet-400" />
+                  Mind Maps
+                </span>
+                <span className="flex items-center gap-1">
+                  <button
+                    onClick={() => toggleSectionCollapse(['MindMaps'])}
+                    className="hover:text-white text-slate-500 transition cursor-pointer"
+                    title={isSectionExpanded(['MindMaps']) ? 'Collapse all' : 'Expand all'}
+                  >
+                    {isSectionExpanded(['MindMaps']) ? <ChevronsUp size={12} /> : <ChevronsDown size={12} />}
+                  </button>
+                  <button
+                    onClick={() => handleCreateFile('folder', 'MindMaps', undefined, ['folder'])}
+                    className="hover:text-white text-slate-500 transition cursor-pointer"
+                    title="New Folder"
+                  >
+                    <FolderPlus size={12} />
+                  </button>
+                  <button
+                    onClick={() => handleCreateFile('mindmap', 'MindMaps', undefined, ['mindmap'])}
+                    className="hover:text-white text-slate-500 transition cursor-pointer"
+                    title="New Mind Map"
+                  >
+                    <Plus size={12} />
+                  </button>
+                </span>
+              </div>
+              <div className="space-y-0.5 pl-1.5">
+                {getCategoryChildren(files, 'MindMaps', ['mindmap', 'folder']).length === 0 ? (
+                  <div className="px-3 py-1 text-[11px] text-slate-600 italic select-none">No mind maps</div>
+                ) : (
+                  getCategoryChildren(files, 'MindMaps', ['mindmap', 'folder']).map((node) => (
+                    <TreeNodeComponent
+                      key={node.path}
+                      node={node}
+                      depth={0}
+                      selectedPath={selectedPath}
+                      collapsedPaths={collapsedPaths}
+                      onToggleCollapse={(path) => setCollapsedPaths((prev) => ({ ...prev, [path]: !prev[path] }))}
+                      onSelectFile={fetchFileContent}
+                      onCreateSubPage={(parentPath) => handleCreateFile('mindmap', parentPath, undefined, ['mindmap'])}
+                      onDeletePath={handleDeleteFile}
+                      onContextMenu={(e, targetNode) => {
+                        e.preventDefault()
+                        setContextMenu({
+                          isOpen: true,
+                          x: e.clientX,
+                          y: e.clientY,
+                          path: targetNode.filePath || targetNode.path,
+                          isFolder: targetNode.isFolder,
+                          sectionType: 'mindmaps',
+                          nodeType: targetNode.type,
+                        })
+                      }}
+                      draggingPath={draggingPath}
+                      draggingType={draggingType}
+                      sectionType="mindmaps"
+                      onDragStart={(p, t) => setDragging({ path: p, type: t })}
+                      onDragEnd={() => setDragging(null)}
+                      onDropNode={handleMoveNode}
+                    />
+                  ))
+                )}
+              </div>
+            </div>
           </div>
         </div>
 
         <div className="p-4 border-t border-slate-800 bg-[#161b22]/50 space-y-3">
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-4 gap-2">
             <button
               onClick={() => handleCreateFile('document', 'Documents', undefined, ['document'])}
               className="flex flex-col items-center justify-center py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg transition text-[10px] font-semibold cursor-pointer"
@@ -1415,6 +1517,13 @@ export const App: React.FC = () => {
             >
               <Brush size={16} className="text-emerald-400 mb-1" />
               Canvas
+            </button>
+            <button
+              onClick={() => handleCreateFile('mindmap', 'MindMaps', undefined, ['mindmap'])}
+              className="flex flex-col items-center justify-center py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg transition text-[10px] font-semibold cursor-pointer"
+            >
+              <Brain size={16} className="text-violet-400 mb-1" />
+              Map
             </button>
           </div>
 
@@ -1491,7 +1600,9 @@ export const App: React.FC = () => {
               </div>
 
               <div className="flex-1 overflow-hidden">
-                {activeFile.type === 'canvas' && activeFile.frontMatter?.editor === 'drawio' ? (
+                {activeFile.type === 'mindmap' ? (
+                  <MindMap filePath={selectedPath} initialContent={selectedContent} onSave={handleSaveFile} isSaving={isSaving} />
+                ) : activeFile.type === 'canvas' && activeFile.frontMatter?.editor === 'drawio' ? (
                   <Diagram filePath={selectedPath} initialContent={selectedContent} onSave={handleSaveFile} isSaving={isSaving} />
                 ) : activeFile.type === 'canvas' ? (
                   <Canvas filePath={selectedPath} initialContent={selectedContent} onSave={handleSaveFile} isSaving={isSaving} />
@@ -1545,14 +1656,18 @@ export const App: React.FC = () => {
                     </div>
                     <ArrowRight size={14} className="text-slate-500" />
                   </button>
-                  <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="grid grid-cols-3 gap-3 text-xs">
                     <button onClick={() => handleCreateFile('document', 'Documents', undefined, ['document'])} className="flex flex-col items-center justify-center p-4 bg-[#161b22]/50 hover:bg-slate-800 border border-slate-800 rounded-xl transition cursor-pointer">
                       <FileText size={20} className="text-blue-400 mb-2" />
-                      <span className="font-semibold text-slate-300">Create Document</span>
+                      <span className="font-semibold text-slate-300">Document</span>
                     </button>
                     <button onClick={() => handleCreateFile('canvas', 'Canvas', undefined, ['canvas', 'diagram'])} className="flex flex-col items-center justify-center p-4 bg-[#161b22]/50 hover:bg-slate-800 border border-slate-800 rounded-xl transition cursor-pointer">
                       <Brush size={20} className="text-emerald-400 mb-2" />
-                      <span className="font-semibold text-slate-300">Create Canvas</span>
+                      <span className="font-semibold text-slate-300">Canvas</span>
+                    </button>
+                    <button onClick={() => handleCreateFile('mindmap', 'MindMaps', undefined, ['mindmap'])} className="flex flex-col items-center justify-center p-4 bg-[#161b22]/50 hover:bg-slate-800 border border-slate-800 rounded-xl transition cursor-pointer">
+                      <Brain size={20} className="text-violet-400 mb-2" />
+                      <span className="font-semibold text-slate-300">Mind Map</span>
                     </button>
                   </div>
                 </div>
@@ -1572,6 +1687,7 @@ export const App: React.FC = () => {
           diagram: 'Draw.io Diagram',
           board: 'Kanban Board',
           folder: 'Folder',
+          mindmap: 'Mind Map',
         }
         const ALL_TYPE_ITEMS = [
           { id: 'document', label: 'Document',   icon: <FileText    size={16} className="text-blue-400"    /> },
@@ -1579,6 +1695,7 @@ export const App: React.FC = () => {
           { id: 'canvas',   label: 'Excalidraw',  icon: <Brush       size={16} className="text-emerald-400" /> },
           { id: 'diagram',  label: 'Draw.io',     icon: <Grid        size={16} className="text-violet-400"  /> },
           { id: 'board',    label: 'Board',        icon: <LayoutGrid  size={16} className="text-rose-400"    /> },
+          { id: 'mindmap',  label: 'Mind Map',    icon: <Brain       size={16} className="text-violet-400"  /> },
           { id: 'folder',   label: 'Folder',      icon: <Folder      size={16} className="text-slate-400"   /> },
         ]
         const visibleTypes = createModal.allowedTypes
@@ -1992,7 +2109,7 @@ export const App: React.FC = () => {
             className="w-52 bg-[#161b22] border border-slate-800 rounded-xl shadow-2xl p-1.5 flex flex-col space-y-0.5 no-scrollbar select-none"
           >
             <div className="px-2.5 py-1 text-[9px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-850/60 mb-1 truncate">
-              {contextMenu.path?.split('/').pop()?.replace(/\.(board|excalidraw|drawio)\.md$/, '').replace(/\.md$/, '') || contextMenu.path}
+              {contextMenu.path?.split('/').pop()?.replace(/\.(board|excalidraw|drawio|mindmap)\.md$/, '').replace(/\.md$/, '') || contextMenu.path}
             </div>
 
             {/* Documents section */}
@@ -2027,10 +2144,20 @@ export const App: React.FC = () => {
               </>
             )}
 
+            {/* Mind Maps section */}
+            {contextMenu.sectionType === 'mindmaps' && (
+              <>
+                {ctxBtn('New Mind Map', <Brain size={13} className="text-violet-400" />,
+                  () => handleCreateFile('mindmap', ctxParent, undefined, ['mindmap']))}
+                {ctxBtn('New Folder', <FolderPlus size={13} className="text-slate-400" />,
+                  () => handleCreateFile('folder', ctxParent, undefined, ['folder']))}
+              </>
+            )}
+
             {/* Rename — available for all page types */}
             {!contextMenu.isFolder && (() => {
               const fileTitle = files.find(f => f.path === contextMenu.path)?.title
-                || contextMenu.path?.split('/').pop()?.replace(/\.(board|excalidraw|drawio)\.md$/, '').replace(/\.md$/, '')
+                || contextMenu.path?.split('/').pop()?.replace(/\.(board|excalidraw|drawio|mindmap)\.md$/, '').replace(/\.md$/, '')
                 || ''
               return ctxBtn('Rename', <Pencil size={13} className="text-violet-400" />, () => {
                 setRenameInput(fileTitle)
