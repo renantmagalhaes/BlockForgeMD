@@ -221,6 +221,12 @@ const getContextParentPath = (path: string | null): string | undefined => {
   return stem
 }
 
+const SECTION_ALLOWED_TYPES: Record<string, string[]> = {
+  documents: ['document', 'folder'],
+  boards: ['board', 'task', 'folder'],
+  canvas: ['canvas', 'folder'],
+}
+
 // ─── TreeNodeComponent ───────────────────────────────────────────────────────
 const TreeNodeComponent: React.FC<{
   node: TreeNode
@@ -266,12 +272,6 @@ const TreeNodeComponent: React.FC<{
   const isBeingDragged = !!(node.filePath && draggingPath === node.filePath)
 
   const [isDragOver, setIsDragOver] = React.useState(false)
-
-  const SECTION_ALLOWED_TYPES: Record<string, string[]> = {
-    documents: ['document', 'folder'],
-    boards: ['board', 'task', 'folder'],
-    canvas: ['canvas', 'folder'],
-  }
 
   const handleDragStart = (e: React.DragEvent) => {
     if (!node.filePath) { e.preventDefault(); return }
@@ -902,6 +902,26 @@ export const App: React.FC = () => {
   const [dragging, setDragging] = useState<{ path: string; type?: string } | null>(null)
   const draggingPath = dragging?.path ?? null
   const draggingType = dragging?.type
+  const [dragOverSection, setDragOverSection] = useState<string | null>(null)
+
+  const handleMoveToSectionRoot = async (fromFilePath: string, sectionDir: string) => {
+    const fileName = fromFilePath.split('/').pop()!
+    const toFilePath = `${sectionDir}/${fileName}`
+    if (toFilePath === fromFilePath) return
+    try {
+      const res = await fetch(`${API_BASE}/api/file/move`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: fromFilePath, to: toFilePath }),
+      })
+      if (!res.ok) throw new Error('Failed to move file')
+      fetchFiles()
+      if (selectedPath === fromFilePath) fetchFileContent(toFilePath)
+    } catch (e) {
+      console.error('Error moving file:', e)
+      alert('Failed to move item.')
+    }
+  }
 
   const handleMoveNode = async (fromFilePath: string, toNode: TreeNode) => {
     if (!toNode.filePath) return
@@ -1041,7 +1061,27 @@ export const App: React.FC = () => {
           <div className="flex-1 overflow-y-auto px-3 py-2 space-y-4 max-h-[calc(100vh-280px)] no-scrollbar">
             {/* Menu 1 - Documents */}
             <div className="space-y-1">
-              <div className="px-3 py-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider flex justify-between items-center group">
+              <div
+                className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider flex justify-between items-center group rounded-lg transition ${
+                  dragOverSection === 'documents' ? 'text-violet-400 bg-violet-600/15 border border-violet-500/40' : 'text-slate-500'
+                }`}
+                onDragOver={(e) => {
+                  if (!draggingPath) return
+                  const allowed = SECTION_ALLOWED_TYPES.documents
+                  if (draggingType && !allowed.includes(draggingType)) return
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setDragOverSection('documents')
+                }}
+                onDragLeave={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverSection(null)
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  setDragOverSection(null)
+                  if (draggingPath) handleMoveToSectionRoot(draggingPath, 'Documents')
+                }}
+              >
                 <span className="flex items-center gap-1.5">
                   <FileText size={12} className="text-blue-400" />
                   Documents
@@ -1104,7 +1144,27 @@ export const App: React.FC = () => {
 
             {/* Menu 2 - Kanban Boards */}
             <div className="space-y-1">
-              <div className="px-3 py-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider flex justify-between items-center group">
+              <div
+                className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider flex justify-between items-center group rounded-lg transition ${
+                  dragOverSection === 'boards' ? 'text-violet-400 bg-violet-600/15 border border-violet-500/40' : 'text-slate-500'
+                }`}
+                onDragOver={(e) => {
+                  if (!draggingPath) return
+                  const allowed = SECTION_ALLOWED_TYPES.boards
+                  if (draggingType && !allowed.includes(draggingType)) return
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setDragOverSection('boards')
+                }}
+                onDragLeave={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverSection(null)
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  setDragOverSection(null)
+                  if (draggingPath) handleMoveToSectionRoot(draggingPath, 'Boards')
+                }}
+              >
                 <span className="flex items-center gap-1.5">
                   <LayoutGrid size={12} className="text-amber-400" />
                   Kanban Boards
@@ -1167,7 +1227,27 @@ export const App: React.FC = () => {
 
             {/* Menu 3 - Canvas */}
             <div className="space-y-1">
-              <div className="px-3 py-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider flex justify-between items-center group">
+              <div
+                className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider flex justify-between items-center group rounded-lg transition ${
+                  dragOverSection === 'canvas' ? 'text-violet-400 bg-violet-600/15 border border-violet-500/40' : 'text-slate-500'
+                }`}
+                onDragOver={(e) => {
+                  if (!draggingPath) return
+                  const allowed = SECTION_ALLOWED_TYPES.canvas
+                  if (draggingType && !allowed.includes(draggingType)) return
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setDragOverSection('canvas')
+                }}
+                onDragLeave={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverSection(null)
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  setDragOverSection(null)
+                  if (draggingPath) handleMoveToSectionRoot(draggingPath, 'Canvas')
+                }}
+              >
                 <span className="flex items-center gap-1.5">
                   <Brush size={12} className="text-emerald-400" />
                   Canvas
