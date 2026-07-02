@@ -1,14 +1,15 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import MindElixir, { type MindElixirData, type MindElixirInstance } from 'mind-elixir'
 import 'mind-elixir/style.css'
 import { Maximize2, ZoomIn, ZoomOut } from 'lucide-react'
 
 interface MindMapProps {
   filePath: string
-  initialContent: string
   onSave: (content: string) => Promise<void>
   isSaving: boolean
 }
+
+const API_BASE = import.meta.env.DEV ? 'http://localhost:8080' : ''
 
 const DARK_THEME = {
   name: 'blockforge-dark',
@@ -59,14 +60,18 @@ function getTitleFromFrontMatter(fm: string): string {
   return m ? m[1].trim() : 'Mind Map'
 }
 
-const MindMapComponent: React.FC<MindMapProps> = ({ filePath, initialContent, onSave, isSaving }) => {
+const MindMapComponent: React.FC<MindMapProps> = ({ filePath, onSave, isSaving }) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const meRef = useRef<MindElixirInstance | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const frontMatterRef = useRef<string>('')
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (!containerRef.current) return
+
+    let cancelled = false
+    setLoading(true)
 
     if (meRef.current) {
       try { meRef.current.destroy() } catch {}
@@ -74,136 +79,153 @@ const MindMapComponent: React.FC<MindMapProps> = ({ filePath, initialContent, on
     }
     containerRef.current.innerHTML = ''
 
-    frontMatterRef.current = extractFrontMatter(initialContent)
-    const title = getTitleFromFrontMatter(frontMatterRef.current)
-    const initialData = extractData(initialContent) || MindElixir.new(title)
+    // Fetch our own content — avoids stale-prop race when navigating from another page
+    fetch(`${API_BASE}/api/file?path=${encodeURIComponent(filePath)}`)
+      .then(r => r.json())
+      .then(data => {
+        if (cancelled || !containerRef.current) return
 
-    // Capture me before assignment so closures work after init
-    let me: MindElixirInstance
+        const content: string = data.content ?? ''
+        frontMatterRef.current = extractFrontMatter(content)
+        const title = getTitleFromFrontMatter(frontMatterRef.current)
+        const initialData = extractData(content) || MindElixir.new(title)
 
-    const contextMenuExtend = [
-      {
-        name: '🔗 Set Hyperlink',
-        onclick: () => {
-          const node = me?.currentNode
-          if (!node) return
-          const current = (node as any).nodeObj?.hyperLink ?? ''
-          const url = prompt('Enter URL (leave empty to remove):', current)
-          if (url === null) return
-          me.reshapeNode(node, { hyperLink: url || undefined })
-        },
-      },
-      {
-        name: '🖼 Add / Replace Image',
-        onclick: () => {
-          const node = me?.currentNode
-          if (!node) return
-          const input = document.createElement('input')
-          input.type = 'file'
-          input.accept = 'image/*'
-          input.onchange = () => {
-            const file = input.files?.[0]
-            if (!file) return
-            const reader = new FileReader()
-            reader.onload = (evt) => {
-              const dataUrl = evt.target?.result as string
-              if (!dataUrl) return
-              const img = new Image()
-              img.onload = () => {
-                const MAX_W = 280
-                const scale = img.naturalWidth > MAX_W ? MAX_W / img.naturalWidth : 1
-                me.reshapeNode(node, {
-                  image: {
-                    url: dataUrl,
-                    width: Math.round(img.naturalWidth * scale),
-                    height: Math.round(img.naturalHeight * scale),
-                    fit: 'contain',
-                  },
-                })
-              }
-              img.src = dataUrl
-            }
-            reader.readAsDataURL(file)
-          }
-          input.click()
-        },
-      },
-      {
-        name: '✕ Remove Image',
-        onclick: () => {
-          const node = me?.currentNode
-          if (!node || !(node as any).nodeObj?.image) return
-          me.reshapeNode(node, { image: undefined as any })
-        },
-      },
-    ]
+        let me: MindElixirInstance
 
-    me = new MindElixir({
-      el: containerRef.current,
-      direction: MindElixir.SIDE,
-      draggable: true,
-      contextMenu: { extend: contextMenuExtend },
-      toolBar: false,
-      keypress: true,
-      newTopicName: 'New Topic',
-      allowUndo: true,
-      theme: DARK_THEME,
-    })
-
-    me.init(initialData)
-    meRef.current = me
-
-    const onOperation = () => {
-      if (saveTimer.current) clearTimeout(saveTimer.current)
-      saveTimer.current = setTimeout(() => {
-        const data = me.getData()
-        onSave(buildContent(frontMatterRef.current, data))
-      }, 800)
-    }
-
-    me.bus.addListener('operation', onOperation)
-
-    const handlePaste = (e: ClipboardEvent) => {
-      // Only act when this mind map container has focus
-      if (!containerRef.current?.contains(document.activeElement)) return
-      // Don't intercept while the user is editing a node's text
-      if (document.activeElement?.getAttribute('contenteditable') === 'true') return
-      const node = me?.currentNode
-      if (!node) return
-      const imageItem = Array.from(e.clipboardData?.items ?? []).find(i => i.type.startsWith('image/'))
-      if (!imageItem) return
-      e.preventDefault()
-      const file = imageItem.getAsFile()
-      if (!file) return
-      const reader = new FileReader()
-      reader.onload = (evt) => {
-        const dataUrl = evt.target?.result as string
-        if (!dataUrl) return
-        const img = new Image()
-        img.onload = () => {
-          const MAX_W = 280
-          const scale = img.naturalWidth > MAX_W ? MAX_W / img.naturalWidth : 1
-          me.reshapeNode(node, {
-            image: {
-              url: dataUrl,
-              width: Math.round(img.naturalWidth * scale),
-              height: Math.round(img.naturalHeight * scale),
-              fit: 'contain',
+        const contextMenuExtend = [
+          {
+            name: '🔗 Set Hyperlink',
+            onclick: () => {
+              const node = me?.currentNode
+              if (!node) return
+              const current = (node as any).nodeObj?.hyperLink ?? ''
+              const url = prompt('Enter URL (leave empty to remove):', current)
+              if (url === null) return
+              me.reshapeNode(node, { hyperLink: url || undefined })
             },
-          })
-        }
-        img.src = dataUrl
-      }
-      reader.readAsDataURL(file)
-    }
+          },
+          {
+            name: '🖼 Add / Replace Image',
+            onclick: () => {
+              const node = me?.currentNode
+              if (!node) return
+              const input = document.createElement('input')
+              input.type = 'file'
+              input.accept = 'image/*'
+              input.onchange = () => {
+                const file = input.files?.[0]
+                if (!file) return
+                const reader = new FileReader()
+                reader.onload = (evt) => {
+                  const dataUrl = evt.target?.result as string
+                  if (!dataUrl) return
+                  const img = new Image()
+                  img.onload = () => {
+                    const MAX_W = 280
+                    const scale = img.naturalWidth > MAX_W ? MAX_W / img.naturalWidth : 1
+                    me.reshapeNode(node, {
+                      image: {
+                        url: dataUrl,
+                        width: Math.round(img.naturalWidth * scale),
+                        height: Math.round(img.naturalHeight * scale),
+                        fit: 'contain',
+                      },
+                    })
+                  }
+                  img.src = dataUrl
+                }
+                reader.readAsDataURL(file)
+              }
+              input.click()
+            },
+          },
+          {
+            name: '✕ Remove Image',
+            onclick: () => {
+              const node = me?.currentNode
+              if (!node || !(node as any).nodeObj?.image) return
+              me.reshapeNode(node, { image: undefined as any })
+            },
+          },
+        ]
 
-    document.addEventListener('paste', handlePaste)
+        me = new MindElixir({
+          el: containerRef.current,
+          direction: MindElixir.SIDE,
+          draggable: true,
+          contextMenu: { extend: contextMenuExtend },
+          toolBar: false,
+          keypress: true,
+          newTopicName: 'New Topic',
+          allowUndo: true,
+          theme: DARK_THEME,
+        })
+
+        me.init(initialData)
+        meRef.current = me
+        setLoading(false)
+
+        const onOperation = () => {
+          if (saveTimer.current) clearTimeout(saveTimer.current)
+          saveTimer.current = setTimeout(() => {
+            const d = me.getData()
+            onSave(buildContent(frontMatterRef.current, d))
+          }, 800)
+        }
+
+        me.bus.addListener('operation', onOperation)
+
+        const handlePaste = (e: ClipboardEvent) => {
+          if (!containerRef.current?.contains(document.activeElement)) return
+          if (document.activeElement?.getAttribute('contenteditable') === 'true') return
+          const node = me?.currentNode
+          if (!node) return
+          const imageItem = Array.from(e.clipboardData?.items ?? []).find(i => i.type.startsWith('image/'))
+          if (!imageItem) return
+          e.preventDefault()
+          const file = imageItem.getAsFile()
+          if (!file) return
+          const reader = new FileReader()
+          reader.onload = (evt) => {
+            const dataUrl = evt.target?.result as string
+            if (!dataUrl) return
+            const img = new Image()
+            img.onload = () => {
+              const MAX_W = 280
+              const scale = img.naturalWidth > MAX_W ? MAX_W / img.naturalWidth : 1
+              me.reshapeNode(node, {
+                image: {
+                  url: dataUrl,
+                  width: Math.round(img.naturalWidth * scale),
+                  height: Math.round(img.naturalHeight * scale),
+                  fit: 'contain',
+                },
+              })
+            }
+            img.src = dataUrl
+          }
+          reader.readAsDataURL(file)
+        }
+
+        document.addEventListener('paste', handlePaste)
+        // Store cleanup on the me ref so the return can reach it
+        ;(me as any)._pasteCleanup = () => document.removeEventListener('paste', handlePaste)
+      })
+      .catch(err => {
+        if (!cancelled) {
+          console.error('Failed to load mind map:', err)
+          setLoading(false)
+        }
+      })
 
     return () => {
+      cancelled = true
       if (saveTimer.current) clearTimeout(saveTimer.current)
-      document.removeEventListener('paste', handlePaste)
-      try { me.destroy() } catch {}
-      meRef.current = null
+      if (meRef.current) {
+        ;(meRef.current as any)._pasteCleanup?.()
+        try { meRef.current.destroy() } catch {}
+        meRef.current = null
+      }
     }
   }, [filePath])
 
@@ -238,11 +260,16 @@ const MindMapComponent: React.FC<MindMapProps> = ({ filePath, initialContent, on
           </button>
         </div>
       </div>
-      <div
-        ref={containerRef}
-        className="flex-1 rounded-xl overflow-hidden border border-slate-800"
-        style={{ background: '#0d1117' }}
-      />
+      {/* Wrapper keeps container always in the DOM with real dimensions so mind-elixir
+          can measure nodes during init. Loading overlay sits on top instead. */}
+      <div className="flex-1 relative rounded-xl overflow-hidden border border-slate-800" style={{ background: '#0d1117' }}>
+        {loading && (
+          <div className="absolute inset-0 flex items-center justify-center text-slate-500 text-sm select-none z-10" style={{ background: '#0d1117' }}>
+            Loading…
+          </div>
+        )}
+        <div ref={containerRef} className="w-full h-full" />
+      </div>
     </div>
   )
 }

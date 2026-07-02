@@ -1601,7 +1601,7 @@ export const App: React.FC = () => {
 
               <div className="flex-1 overflow-hidden">
                 {activeFile.type === 'mindmap' ? (
-                  <MindMap filePath={selectedPath} initialContent={selectedContent} onSave={handleSaveFile} isSaving={isSaving} />
+                  <MindMap filePath={selectedPath} onSave={handleSaveFile} isSaving={isSaving} />
                 ) : activeFile.type === 'canvas' && activeFile.frontMatter?.editor === 'drawio' ? (
                   <Diagram filePath={selectedPath} initialContent={selectedContent} onSave={handleSaveFile} isSaving={isSaving} />
                 ) : activeFile.type === 'canvas' ? (

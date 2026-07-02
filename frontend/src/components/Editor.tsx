@@ -19,6 +19,8 @@ import TableCell from '@tiptap/extension-table-cell'
 import TableHeader from '@tiptap/extension-table-header'
 import { marked } from 'marked'
 import TurndownService from 'turndown'
+import MindElixir from 'mind-elixir'
+import 'mind-elixir/style.css'
 import {
   Bold,
   Italic,
@@ -53,7 +55,8 @@ import {
   Link2,
   Copy,
   Check,
-  Download
+  Download,
+  Brain,
 } from 'lucide-react'
 
 // Configure Turndown for clean Markdown serialization
@@ -134,6 +137,15 @@ turndownService.addRule('excalidraw', {
   replacement: (_content, node) => {
     const path = (node as HTMLElement).getAttribute('path') || ''
     return `\n<excalidraw path="${path}">excalidraw-canvas</excalidraw>\n`
+  }
+})
+
+// Custom rule for mindmap embeds in Turndown
+turndownService.addRule('mindmap', {
+  filter: (node) => node.nodeName.toLowerCase() === 'mindmap',
+  replacement: (_content, node) => {
+    const path = (node as HTMLElement).getAttribute('path') || ''
+    return `\n<mindmap path="${path}">mindmap-embed</mindmap>\n`
   }
 })
 
@@ -1011,6 +1023,120 @@ export const ExcalidrawNode = Node.create({
   },
 })
 
+const MINDMAP_EMBED_THEME = {
+  name: 'blockforge-dark',
+  type: 'dark' as const,
+  palette: ['#8b5cf6', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#06b6d4'],
+  cssVar: {
+    '--node-gap-x': '28px', '--node-gap-y': '6px',
+    '--main-gap-x': '36px', '--main-gap-y': '10px',
+    '--main-color': '#f1f5f9', '--main-bgcolor': '#6d28d9',
+    '--main-bgcolor-transparent': 'rgba(109,40,217,0.15)',
+    '--color': '#cbd5e1', '--bgcolor': '#1e293b',
+    '--selected': '#8b5cf6', '--accent-color': '#8b5cf6',
+    '--root-color': '#ffffff', '--root-bgcolor': '#7c3aed',
+    '--root-border-color': '#a78bfa', '--root-radius': '10px',
+    '--main-radius': '7px', '--topic-padding': '4px 12px',
+    '--panel-color': '#94a3b8', '--panel-bgcolor': '#1e293b',
+    '--panel-border-color': '#334155', '--map-padding': '40px',
+  },
+}
+
+const MindMapEmbedComponent = (props: any) => {
+  const filePath = props.node.attrs.path
+  const containerRef = useRef<HTMLDivElement>(null)
+  const meRef = useRef<any>(null)
+  const [mapTitle, setMapTitle] = useState<string>(
+    filePath ? filePath.split('/').pop()?.replace('.mindmap.md', '') : 'Mind Map'
+  )
+  const API_BASE = import.meta.env.DEV ? 'http://localhost:8080' : ''
+
+  useEffect(() => {
+    if (!filePath || !containerRef.current) return
+    let destroyed = false
+
+    fetch(`${API_BASE}/api/file?path=${encodeURIComponent(filePath)}`)
+      .then(r => r.json())
+      .then(data => {
+        if (destroyed || !containerRef.current || !data?.content) return
+        const m = data.content.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
+        if (!m) return
+        const mindData = JSON.parse(m[1])
+        if (mindData.nodeData?.topic) setMapTitle(mindData.nodeData.topic)
+        containerRef.current.innerHTML = ''
+        const me = new MindElixir({
+          el: containerRef.current,
+          direction: MindElixir.SIDE,
+          editable: false,
+          contextMenu: false,
+          toolBar: false,
+          keypress: false,
+          theme: MINDMAP_EMBED_THEME,
+        })
+        me.init(mindData)
+        meRef.current = me
+      })
+      .catch(err => console.error('Failed to load embedded mindmap', err))
+
+    return () => {
+      destroyed = true
+      try { meRef.current?.destroy() } catch {}
+      meRef.current = null
+    }
+  }, [filePath])
+
+  return (
+    <NodeViewWrapper className="mindmap-embed my-4 border border-slate-800 rounded-xl overflow-hidden shadow-lg bg-[#0d1117] text-slate-200">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-slate-800 bg-[#161b22]/50">
+        <div className="flex items-center gap-2 select-none">
+          <Brain size={14} className="text-violet-400 shrink-0" />
+          <span className="text-xs font-semibold text-slate-350 truncate">Mind Map: {mapTitle}</span>
+        </div>
+        <a
+          href={`/${filePath}`}
+          onClick={(e) => { e.preventDefault(); props.extension.options.onSelectFile?.(filePath) }}
+          className="text-[10px] text-violet-400 hover:text-violet-300 font-bold underline transition cursor-pointer select-none"
+        >
+          Open Map
+        </a>
+      </div>
+      <div
+        ref={containerRef}
+        className="w-full"
+        style={{ height: '360px', background: '#0d1117' }}
+      />
+    </NodeViewWrapper>
+  )
+}
+
+export const MindmapNode = Node.create({
+  name: 'mindmap',
+  group: 'block',
+  selectable: true,
+  draggable: true,
+  atom: true,
+
+  addOptions() {
+    return { onSelectFile: null }
+  },
+
+  addAttributes() {
+    return { path: { default: null } }
+  },
+
+  parseHTML() {
+    return [{ tag: 'mindmap' }]
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ['mindmap', mergeAttributes(HTMLAttributes), 'mindmap-embed']
+  },
+
+  addNodeView() {
+    return ReactNodeViewRenderer(MindMapEmbedComponent)
+  },
+})
+
 const BookmarkComponent = (props: any) => {
   const { url, title, description, image, favicon, siteName } = props.node.attrs
   const [loading, setLoading] = useState(!title)
@@ -1330,7 +1456,7 @@ const COMMANDS = [
   { id: 'table', label: 'Table Grid', desc: 'Insert a 2x2 grid table', search: 'table grid columns cell' },
   { id: 'code', label: 'Code Block', desc: 'Monospace fenced code block', search: 'code block script pre' },
   { id: 'subpage', label: 'Sub-page', desc: 'Create a sub-page inside this page', search: 'subpage sub page child nested' },
-  { id: 'embed', label: 'Embed Link / Canvas', desc: 'Embed a website link, iframe, or Draw.io canvas', search: 'embed iframe link website canvas drawio' },
+  { id: 'embed', label: 'Embed Link / Canvas / Mind Map', desc: 'Embed a website, canvas, or mind map', search: 'embed iframe link website canvas drawio mindmap mind map brain' },
 ]
 
 export const Editor: React.FC<EditorProps> = ({
@@ -1376,9 +1502,10 @@ export const Editor: React.FC<EditorProps> = ({
 
   // Embed states
   const [embedModalOpen, setEmbedModalOpen] = useState(false)
-  const [embedType, setEmbedType] = useState<'url' | 'drawio'>('url')
+  const [embedType, setEmbedType] = useState<'url' | 'drawio' | 'mindmap'>('url')
   const [embedUrl, setEmbedUrl] = useState('')
   const [selectedCanvasPath, setSelectedCanvasPath] = useState('')
+  const [selectedMindmapPath, setSelectedMindmapPath] = useState('')
 
   // Layout state (left, center, full)
   const [localLayout, setLocalLayout] = useState<'left' | 'center' | 'full'>('left')
@@ -1575,6 +1702,7 @@ export const Editor: React.FC<EditorProps> = ({
       .replace(/<p>\s*(<bookmark[^>]*>.*?<\/bookmark>)\s*<\/p>/gi, '$1')
       .replace(/<p>\s*(<drawio[^>]*>.*?<\/drawio>)\s*<\/p>/gi, '$1')
       .replace(/<p>\s*(<excalidraw[^>]*>.*?<\/excalidraw>)\s*<\/p>/gi, '$1')
+      .replace(/<p>\s*(<mindmap[^>]*>.*?<\/mindmap>)\s*<\/p>/gi, '$1')
       // Convert <callout emoji="X" label="Y" color="Z">...</callout> → <div data-callout="true" ...>
       .replace(/<callout([^>]*)>([\s\S]*?)<\/callout>/gi, (_, attrs, content) => {
         const emoji = (attrs.match(/emoji="([^"]*)"/) || [])[1] || '📝'
@@ -1619,6 +1747,9 @@ export const Editor: React.FC<EditorProps> = ({
         onSelectFile: (path: string) => onSelectFile?.(path)
       } as any),
       ExcalidrawNode.configure({
+        onSelectFile: (path: string) => onSelectFile?.(path)
+      } as any),
+      MindmapNode.configure({
         onSelectFile: (path: string) => onSelectFile?.(path)
       } as any),
     ],
@@ -2338,7 +2469,7 @@ export const Editor: React.FC<EditorProps> = ({
       }
 
       editor.chain().focus().insertContent(`<iframe src="${finalSrc}"></iframe>`).run()
-    } else {
+    } else if (embedType === 'drawio') {
       if (!selectedCanvasPath) {
         alert('Please select a canvas drawing to embed.')
         return
@@ -2352,6 +2483,12 @@ export const Editor: React.FC<EditorProps> = ({
       } else {
         editor.chain().focus().insertContent(`<excalidraw path="${selectedCanvasPath}">excalidraw-canvas</excalidraw>`).run()
       }
+    } else if (embedType === 'mindmap') {
+      if (!selectedMindmapPath) {
+        alert('Please select a mind map to embed.')
+        return
+      }
+      editor.chain().focus().insertContent(`<mindmap path="${selectedMindmapPath}">mindmap-embed</mindmap>`).run()
     }
 
     setEmbedModalOpen(false)
@@ -2469,6 +2606,7 @@ export const Editor: React.FC<EditorProps> = ({
       case 'embed': {
         setEmbedUrl('')
         setSelectedCanvasPath('')
+        setSelectedMindmapPath('')
         setEmbedType('url')
         setEmbedModalOpen(true)
         break
@@ -3262,6 +3400,20 @@ export const Editor: React.FC<EditorProps> = ({
               >
                 Canvas Drawing
               </button>
+              <button
+                onClick={() => {
+                  setEmbedType('mindmap')
+                  const mindmapFiles = files.filter(f => f.type === 'mindmap')
+                  if (mindmapFiles.length > 0 && !selectedMindmapPath) {
+                    setSelectedMindmapPath(mindmapFiles[0].path)
+                  }
+                }}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                  embedType === 'mindmap' ? 'bg-violet-600 text-white shadow-md' : 'text-slate-455 hover:text-slate-200'
+                }`}
+              >
+                Mind Map
+              </button>
             </div>
 
             {/* Content panel */}
@@ -3278,7 +3430,7 @@ export const Editor: React.FC<EditorProps> = ({
                   />
                   <p className="text-[10px] text-slate-500 mt-1.5 font-medium">Supports regular websites, direct iframe src URLs, YouTube videos, and more.</p>
                 </div>
-              ) : (
+              ) : embedType === 'drawio' ? (
                 <div>
                   <label className="block text-xs font-semibold text-slate-455 mb-1.5 uppercase tracking-wider">Select Workspace Drawing</label>
                   {files.filter(f => f.type === 'canvas').length > 0 ? (
@@ -3300,6 +3452,28 @@ export const Editor: React.FC<EditorProps> = ({
                     </div>
                   )}
                 </div>
+              ) : (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-455 mb-1.5 uppercase tracking-wider">Select Mind Map</label>
+                  {files.filter(f => f.type === 'mindmap').length > 0 ? (
+                    <select
+                      value={selectedMindmapPath}
+                      onChange={(e) => setSelectedMindmapPath(e.target.value)}
+                      className="w-full bg-[#0d1117] border border-slate-750 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-violet-500/80 focus:ring-1 focus:ring-violet-500/30 transition cursor-pointer"
+                    >
+                      {files.filter(f => f.type === 'mindmap').map(f => (
+                        <option key={f.path} value={f.path}>
+                          {f.title || f.path.split('/').pop()?.replace('.mindmap.md', '')}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="text-center py-4 bg-[#0d1117] border border-slate-800 rounded-xl select-none">
+                      <p className="text-xs text-slate-500 font-medium">No mind maps found in the vault.</p>
+                      <p className="text-[10px] text-slate-600 mt-1">Create a mind map from the sidebar first.</p>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
 
@@ -3313,7 +3487,10 @@ export const Editor: React.FC<EditorProps> = ({
               </button>
               <button
                 onClick={handleInsertEmbed}
-                disabled={embedType === 'drawio' && files.filter(f => f.type === 'canvas').length === 0}
+                disabled={
+                  (embedType === 'drawio' && files.filter(f => f.type === 'canvas').length === 0) ||
+                  (embedType === 'mindmap' && files.filter(f => f.type === 'mindmap').length === 0)
+                }
                 className="px-4 py-2 bg-violet-600 hover:bg-violet-550 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition shadow-lg cursor-pointer"
               >
                 Insert Embed
