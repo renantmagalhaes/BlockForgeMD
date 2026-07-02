@@ -18,6 +18,9 @@ import TableRow from '@tiptap/extension-table-row'
 import TableCell from '@tiptap/extension-table-cell'
 import TableHeader from '@tiptap/extension-table-header'
 import Placeholder from '@tiptap/extension-placeholder'
+import { TextStyle } from '@tiptap/extension-text-style'
+import { Color } from '@tiptap/extension-color'
+import Highlight from '@tiptap/extension-highlight'
 import { marked } from 'marked'
 import TurndownService from 'turndown'
 import MindElixir from 'mind-elixir'
@@ -177,6 +180,55 @@ turndownService.addRule('callout', {
     return `\n<callout emoji="${emoji}" label="${label}" color="${color}">\n${content}\n</callout>\n`
   }
 })
+
+// Serialize text color spans → <font color="...">
+turndownService.addRule('textColor', {
+  filter: (node) => node.nodeName === 'SPAN' && !!(node as HTMLElement).style?.color,
+  replacement: (content, node) => {
+    const color = (node as HTMLElement).style.color
+    return `<font color="${color}">${content}</font>`
+  },
+})
+
+// Serialize highlight marks → <mark style="background: ...">
+turndownService.addRule('highlight', {
+  filter: 'mark',
+  replacement: (content, node) => {
+    const bg = (node as HTMLElement).style.backgroundColor
+    if (!bg) return content
+    return `<mark style="background: ${bg};">${content}</mark>`
+  },
+})
+
+const TEXT_COLORS = [
+  { label: 'Default', value: null },
+  { label: 'Red', value: '#ef4444' },
+  { label: 'Orange', value: '#f97316' },
+  { label: 'Amber', value: '#f59e0b' },
+  { label: 'Yellow', value: '#eab308' },
+  { label: 'Green', value: '#22c55e' },
+  { label: 'Teal', value: '#14b8a6' },
+  { label: 'Blue', value: '#3b82f6' },
+  { label: 'Indigo', value: '#6366f1' },
+  { label: 'Purple', value: '#a78bfa' },
+  { label: 'Pink', value: '#f472b6' },
+  { label: 'Gray', value: '#94a3b8' },
+]
+
+const BG_COLORS = [
+  { label: 'None', value: null },
+  { label: 'Red', value: 'rgba(239,68,68,0.3)' },
+  { label: 'Orange', value: 'rgba(249,115,22,0.3)' },
+  { label: 'Amber', value: 'rgba(245,158,11,0.3)' },
+  { label: 'Yellow', value: 'rgba(234,179,8,0.3)' },
+  { label: 'Green', value: 'rgba(34,197,94,0.3)' },
+  { label: 'Teal', value: 'rgba(20,184,166,0.3)' },
+  { label: 'Blue', value: 'rgba(59,130,246,0.3)' },
+  { label: 'Indigo', value: 'rgba(99,102,241,0.3)' },
+  { label: 'Purple', value: 'rgba(167,139,250,0.3)' },
+  { label: 'Pink', value: 'rgba(244,114,182,0.3)' },
+  { label: 'Gray', value: 'rgba(148,163,184,0.2)' },
+]
 
 // Callout color palette
 const CALLOUT_COLORS = [
@@ -1501,6 +1553,8 @@ export const Editor: React.FC<EditorProps> = ({
   // Tag manager input state
   const [newTagInput, setNewTagInput] = useState('')
   const [tagAutocompleteOpen, setTagAutocompleteOpen] = useState(false)
+  const [textColorOpen, setTextColorOpen] = useState(false)
+  const [bgColorOpen, setBgColorOpen] = useState(false)
 
   // Image Viewer & Editor state
   const [editingImageSrc, setEditingImageSrc] = useState<string | null>(null)
@@ -1628,6 +1682,19 @@ export const Editor: React.FC<EditorProps> = ({
     }
   }, [pasteInfo])
 
+  // Close color pickers on outside click
+  useEffect(() => {
+    if (!textColorOpen && !bgColorOpen) return
+    const close = (e: MouseEvent) => {
+      if (!(e.target as Element)?.closest?.('[data-color-picker]')) {
+        setTextColorOpen(false)
+        setBgColorOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [textColorOpen, bgColorOpen])
+
   // Click outside & Escape key to close inline emoji picker
   useEffect(() => {
     if (!emojiActive) return
@@ -1704,6 +1771,11 @@ export const Editor: React.FC<EditorProps> = ({
     let rawHtml = marked.parse(markdown)
     if (typeof rawHtml !== 'string') rawHtml = ''
     rawHtml = rawHtml
+      // Convert <font color="..."> → <span style="color: ..."> for TipTap Color extension
+      .replace(/<font color="([^"]+)">/gi, '<span style="color: $1">')
+      .replace(/<\/font>/gi, '</span>')
+      // Normalize <mark style="background:"> → background-color for Highlight extension
+      .replace(/<mark style="background:\s*([^"]+)">/gi, '<mark style="background-color: $1">')
       .replace(/<p>\s*(<bookmark[^>]*>.*?<\/bookmark>)\s*<\/p>/gi, '$1')
       .replace(/<p>\s*(<drawio[^>]*>.*?<\/drawio>)\s*<\/p>/gi, '$1')
       .replace(/<p>\s*(<excalidraw[^>]*>.*?<\/excalidraw>)\s*<\/p>/gi, '$1')
@@ -1763,6 +1835,9 @@ export const Editor: React.FC<EditorProps> = ({
         emptyNodeClass: 'is-empty',
         showOnlyCurrent: false,
       }),
+      TextStyle,
+      Color,
+      Highlight.configure({ multicolor: true }),
     ],
     content: getHTMLFromMarkdown(initialContent),
     editorProps: {
@@ -2792,6 +2867,82 @@ export const Editor: React.FC<EditorProps> = ({
             >
               <Italic size={16} />
             </button>
+
+            {/* Text color */}
+            <div className="relative" data-color-picker>
+              <button
+                onClick={() => { setTextColorOpen(v => !v); setBgColorOpen(false) }}
+                className={`p-2 rounded-lg hover:bg-slate-800 hover:text-white transition flex flex-col items-center gap-0.5 ${textColorOpen ? 'bg-violet-600/20 border border-violet-500/30' : 'text-slate-400'}`}
+                title="Text Color"
+              >
+                <span className="font-bold text-sm leading-none" style={{ color: editor.getAttributes('textStyle').color || 'currentColor' }}>A</span>
+                <span className="block w-3.5 h-0.5 rounded-full" style={{ backgroundColor: editor.getAttributes('textStyle').color || '#64748b' }} />
+              </button>
+              {textColorOpen && (
+                <div className="absolute top-full left-0 mt-1 bg-[#1a2236] border border-slate-700 rounded-lg shadow-xl py-1.5 z-50 min-w-[160px]" data-color-picker>
+                  <div className="text-[10px] text-slate-500 mb-1 font-medium uppercase tracking-wider px-3">Text color</div>
+                  {TEXT_COLORS.map(c => {
+                    const active = c.value === null
+                      ? !editor.getAttributes('textStyle').color
+                      : c.value === editor.getAttributes('textStyle').color
+                    return (
+                      <button
+                        key={c.label}
+                        onMouseDown={e => { e.preventDefault(); if (c.value) editor.chain().focus().setColor(c.value).run(); else editor.chain().focus().unsetColor().run(); setTextColorOpen(false) }}
+                        className={`w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-slate-700/50 transition text-left ${active ? 'bg-slate-700/40' : ''}`}
+                      >
+                        <span
+                          className="w-4 h-4 rounded-full border border-slate-600 shrink-0 flex items-center justify-center"
+                          style={{ backgroundColor: c.value ?? 'transparent' }}
+                        >
+                          {c.value === null && <span className="text-slate-400 text-[9px]">✕</span>}
+                        </span>
+                        <span className="text-sm" style={{ color: c.value ?? '#e2e8f0' }}>{c.label}</span>
+                        {active && <span className="ml-auto text-violet-400 text-xs">✓</span>}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Background / highlight color */}
+            <div className="relative" data-color-picker>
+              <button
+                onClick={() => { setBgColorOpen(v => !v); setTextColorOpen(false) }}
+                className={`p-2 rounded-lg hover:bg-slate-800 hover:text-white transition flex flex-col items-center gap-0.5 ${bgColorOpen ? 'bg-violet-600/20 border border-violet-500/30' : 'text-slate-400'}`}
+                title="Highlight / Background Color"
+              >
+                <span className="font-bold text-sm leading-none text-slate-300">A</span>
+                <span className="block w-3.5 h-1.5 rounded-sm" style={{ backgroundColor: editor.getAttributes('highlight').color || '#64748b' }} />
+              </button>
+              {bgColorOpen && (
+                <div className="absolute top-full left-0 mt-1 bg-[#1a2236] border border-slate-700 rounded-lg shadow-xl py-1.5 z-50 min-w-[160px]" data-color-picker>
+                  <div className="text-[10px] text-slate-500 mb-1 font-medium uppercase tracking-wider px-3">Highlight</div>
+                  {BG_COLORS.map(c => {
+                    const active = c.value === null
+                      ? !editor.getAttributes('highlight').color
+                      : c.value === editor.getAttributes('highlight').color
+                    return (
+                      <button
+                        key={c.label}
+                        onMouseDown={e => { e.preventDefault(); if (c.value) editor.chain().focus().setHighlight({ color: c.value }).run(); else editor.chain().focus().unsetHighlight().run(); setBgColorOpen(false) }}
+                        className={`w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-slate-700/50 transition text-left ${active ? 'bg-slate-700/40' : ''}`}
+                      >
+                        <span
+                          className="w-4 h-4 rounded-sm border border-slate-600 shrink-0 flex items-center justify-center"
+                          style={{ backgroundColor: c.value ?? 'transparent' }}
+                        >
+                          {c.value === null && <span className="text-slate-400 text-[9px]">✕</span>}
+                        </span>
+                        <span className="text-sm text-slate-200">{c.label}</span>
+                        {active && <span className="ml-auto text-violet-400 text-xs">✓</span>}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
 
             <span className="w-px h-6 bg-slate-800 mx-1" />
 
