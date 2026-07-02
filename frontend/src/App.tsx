@@ -387,6 +387,7 @@ const TreeNodeComponent: React.FC<{
         onDrop={handleDrop}
         onClick={handleRowClick}
         onContextMenu={handleContextMenu}
+        data-sidebar-path={node.filePath || undefined}
         style={{ paddingLeft: `${depth * 8 + 6}px` }}
         className={`flex items-center justify-between group py-1 px-2 rounded-lg text-xs transition ${
           isBeingDragged
@@ -527,6 +528,24 @@ export const App: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState(true)
   const [syncError, setSyncError] = useState(false)
   const [collapsedPaths, setCollapsedPaths] = useState<Record<string, boolean>>({})
+
+  const revealInSidebar = (filePath: string) => {
+    const stem = filePath.endsWith('.board.md') ? filePath.slice(0, -'.board.md'.length)
+      : filePath.endsWith('.excalidraw.md') ? filePath.slice(0, -'.excalidraw.md'.length)
+      : filePath.endsWith('.drawio.md') ? filePath.slice(0, -'.drawio.md'.length)
+      : filePath.endsWith('.md') ? filePath.slice(0, -3)
+      : filePath
+    const parts = stem.split('/')
+    const ancestors: string[] = []
+    for (let i = 1; i < parts.length; i++) ancestors.push(parts.slice(0, i).join('/'))
+    if (ancestors.length > 0) {
+      setCollapsedPaths(prev => {
+        const next = { ...prev }
+        ancestors.forEach(p => { next[p] = false })
+        return next
+      })
+    }
+  }
   const [defaultColumns, setDefaultColumns] = useState<string[]>(() => {
     const saved = localStorage.getItem('blockforge_default_columns')
     return saved ? JSON.parse(saved) : ['Todo', 'In Progress', 'Done']
@@ -619,6 +638,7 @@ export const App: React.FC = () => {
       setSelectedContent(body)
       setCurrentFrontMatterStr(frontMatterStr)
       setSelectedPath(path)
+      revealInSidebar(path)
       setActiveView(data.meta?.type === 'board' ? 'board' : 'editor')
       // Sync URL hash so the file can be restored on refresh or shared
       if (!skipHistory) {
@@ -644,6 +664,16 @@ export const App: React.FC = () => {
     es.onopen = () => setSyncError(false)
     return () => es.close()
   }, [selectedPath, isSaving])
+
+  // Scroll selected sidebar item into view after it becomes visible (e.g. after expanding ancestors)
+  useEffect(() => {
+    if (!selectedPath) return
+    const timer = setTimeout(() => {
+      const el = document.querySelector(`[data-sidebar-path="${selectedPath.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"]`)
+      el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    }, 80)
+    return () => clearTimeout(timer)
+  }, [selectedPath]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Restore file from URL hash on initial page load
   useEffect(() => {
