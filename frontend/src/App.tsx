@@ -744,6 +744,30 @@ export const App: React.FC = () => {
     }
   }
 
+  const handleRenameWorkspace = async () => {
+    if (!renameWorkspaceTarget) return
+    const newName = renameWorkspaceName.trim()
+    if (!newName || newName === renameWorkspaceTarget) return
+    try {
+      const res = await fetch(`${API_BASE}/api/workspaces/rename`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ oldName: renameWorkspaceTarget, newName }),
+      })
+      if (!res.ok) { alert('Failed to rename workspace'); return }
+      setWorkspaces(prev => prev.map(w => w === renameWorkspaceTarget ? newName : w))
+      if (activeWorkspace === renameWorkspaceTarget) {
+        setActiveWorkspace(newName)
+        localStorage.setItem('blockforge_workspace', newName)
+      }
+      setRenameWorkspaceTarget(null)
+      setRenameWorkspaceName('')
+      fetchFiles()
+    } catch (e) {
+      console.error('Error renaming workspace', e)
+    }
+  }
+
   const handleSwitchWorkspace = (ws: string) => {
     setActiveWorkspace(ws)
     localStorage.setItem('blockforge_workspace', ws)
@@ -1247,15 +1271,23 @@ export const App: React.FC = () => {
               {workspaceDropdownOpen && (
                 <div className="absolute top-full left-0 right-0 mt-1 bg-[#1c2433] border border-slate-700 rounded-lg shadow-xl z-50 py-1 overflow-hidden">
                   {workspaces.map(ws => (
-                    <button
-                      key={ws}
-                      onClick={e => { e.stopPropagation(); handleSwitchWorkspace(ws) }}
-                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-slate-700/50 transition cursor-pointer flex items-center gap-2 ${ws === activeWorkspace ? 'text-violet-400 font-semibold' : 'text-slate-300'}`}
-                    >
-                      <Layers size={10} className={ws === activeWorkspace ? 'text-violet-400' : 'text-slate-500'} />
-                      <span className="truncate">{ws}</span>
-                      {ws === activeWorkspace && <span className="ml-auto text-[9px] text-violet-500">active</span>}
-                    </button>
+                    <div key={ws} className="flex items-center group/ws">
+                      <button
+                        onClick={e => { e.stopPropagation(); handleSwitchWorkspace(ws) }}
+                        className={`flex-1 text-left px-3 py-1.5 text-xs hover:bg-slate-700/50 transition cursor-pointer flex items-center gap-2 min-w-0 ${ws === activeWorkspace ? 'text-violet-400 font-semibold' : 'text-slate-300'}`}
+                      >
+                        <Layers size={10} className={ws === activeWorkspace ? 'text-violet-400' : 'text-slate-500'} shrink-0 />
+                        <span className="truncate">{ws}</span>
+                        {ws === activeWorkspace && <span className="text-[9px] text-violet-500 shrink-0">active</span>}
+                      </button>
+                      <button
+                        onClick={e => { e.stopPropagation(); setWorkspaceDropdownOpen(false); setRenameWorkspaceTarget(ws); setRenameWorkspaceName(ws) }}
+                        className="pr-2 pl-1 py-1.5 text-slate-600 hover:text-slate-300 opacity-0 group-hover/ws:opacity-100 transition cursor-pointer shrink-0"
+                        title="Rename workspace"
+                      >
+                        <Pencil size={10} />
+                      </button>
+                    </div>
                   ))}
                   <div className="border-t border-slate-700/60 mt-1 pt-1">
                     <button
@@ -2491,6 +2523,48 @@ export const App: React.FC = () => {
                 <span>⏎ select</span>
               </div>
               <span>Esc to close</span>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+      </AnimatePresence>
+
+      {/* ── Rename Workspace Modal ───────────────────────────────────────── */}
+      <AnimatePresence>
+      {renameWorkspaceTarget && (
+        <motion.div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50"
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          onClick={() => setRenameWorkspaceTarget(null)}
+        >
+          <motion.div
+            className="bg-[#1c2433] border border-slate-700 rounded-2xl shadow-2xl p-6 w-80"
+            initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2 mb-1">
+              <Pencil size={14} className="text-violet-400" />
+              <h2 className="text-sm font-bold text-slate-100">Rename Workspace</h2>
+            </div>
+            <p className="text-[11px] text-slate-500 mb-4">Renaming <span className="text-slate-400 font-mono">{renameWorkspaceTarget}</span></p>
+            <input
+              autoFocus
+              type="text"
+              value={renameWorkspaceName}
+              onChange={e => setRenameWorkspaceName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleRenameWorkspace(); if (e.key === 'Escape') setRenameWorkspaceTarget(null) }}
+              placeholder="New name..."
+              className="w-full bg-[#0d1117] border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-violet-500 mb-4"
+            />
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setRenameWorkspaceTarget(null)} className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 transition cursor-pointer">Cancel</button>
+              <button
+                onClick={handleRenameWorkspace}
+                disabled={!renameWorkspaceName.trim() || renameWorkspaceName.trim() === renameWorkspaceTarget}
+                className="px-4 py-1.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg transition cursor-pointer"
+              >
+                Rename
+              </button>
             </div>
           </motion.div>
         </motion.div>
