@@ -37,8 +37,30 @@ export const Kanban: React.FC<KanbanProps> = ({
   const [editingColumn, setEditingColumn] = useState<string | null>(null)
   const [editColVal, setEditColVal] = useState('')
 
-  // Filter tasks from indexed files
-  const tasks = files.filter((f) => f.type === 'task' || (f.frontMatter && f.frontMatter.status))
+  // Helper to resolve parent directory folder
+  const getParentDir = (filePath: string): string => {
+    const lastSlash = filePath.lastIndexOf('/')
+    if (lastSlash === -1) return ''
+    return filePath.substring(0, lastSlash + 1)
+  }
+
+  const boardFolder = boardPath ? getParentDir(boardPath) : ''
+
+  // Filter tasks from indexed files belonging to the same folder scope
+  const tasks = files.filter((f) => {
+    const isTask = f.type === 'task' || (f.frontMatter && f.frontMatter.status)
+    if (!isTask) return false
+
+    const taskFolder = getParentDir(f.path)
+    
+    // If the board is in a folder, match strictly inside that folder
+    if (boardFolder) {
+      return taskFolder === boardFolder
+    }
+    
+    // If board is at the root, show root tasks or Tasks/ folder tasks
+    return taskFolder === '' || taskFolder === 'Tasks/'
+  })
 
   // Group tasks by status
   const getTasksByColumn = (col: string) => {

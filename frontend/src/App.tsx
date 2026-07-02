@@ -146,6 +146,55 @@ const buildTree = (files: FileRecord[]): TreeNode[] => {
   return root.children
 }
 
+const getCategoryChildren = (filesList: FileRecord[], category: string, fallbackType: string): TreeNode[] => {
+  const filtered = filesList.filter(f => {
+    // Exact folder match
+    if (f.path.startsWith(category + '/')) return true
+    
+    // Type match, but exclude files that are in other categories' standard directories
+    if (f.type === fallbackType) {
+      const parts = f.path.split('/')
+      if (parts.length > 1) {
+        const rootDir = parts[0]
+        if (rootDir === 'Boards' || rootDir === 'Tasks' || rootDir === 'Canvas' || rootDir === 'Documents') {
+          return rootDir === category
+        }
+      }
+      return true
+    }
+    return false
+  })
+  
+  const tree = buildTree(filtered)
+  const catNode = tree.find(n => n.name === category)
+  if (catNode) {
+    return catNode.children
+  }
+  return tree
+}
+
+const getBoardChildren = (filesList: FileRecord[]): TreeNode[] => {
+  const filtered = filesList.filter(f =>
+    f.path.startsWith('Boards/') ||
+    f.path.startsWith('Tasks/') ||
+    f.type === 'board' ||
+    f.type === 'task'
+  )
+  const tree = buildTree(filtered)
+  
+  let boardChildren: TreeNode[] = []
+  const boardsNode = tree.find(n => n.name === 'Boards')
+  if (boardsNode) boardChildren = [...boardChildren, ...boardsNode.children]
+  
+  const tasksNode = tree.find(n => n.name === 'Tasks')
+  if (tasksNode) boardChildren = [...boardChildren, ...tasksNode.children]
+  
+  const others = tree.filter(n => n.name !== 'Boards' && n.name !== 'Tasks')
+  boardChildren = [...boardChildren, ...others]
+  
+  return boardChildren
+}
+
 // Given a node, return the directory where new sub-items should be placed.
 // For any page with a filePath, sub-items go INSIDE that page (under its stem).
 // e.g. Documents/Note.md  → Documents/Note
@@ -598,7 +647,20 @@ export const App: React.FC = () => {
   const handleCreateTaskWithStatus = async (title: string, status: string) => {
     const sanitizedName = title.replace(/[^a-zA-Z0-9\s-]/g, '').trim().replace(/\s+/g, '-')
     if (!sanitizedName) return
-    const path = `Tasks/${sanitizedName}.md`
+
+    // Resolve target parent folder from selectedPath (the parent board page)
+    let parentFolder = 'Tasks/'
+    if (selectedPath) {
+      let stem = selectedPath
+      if (stem.endsWith('.board.md')) {
+        stem = stem.slice(0, -9)
+      } else if (stem.endsWith('.md')) {
+        stem = stem.slice(0, -3)
+      }
+      parentFolder = stem + '/'
+    }
+
+    const path = `${parentFolder}${sanitizedName}.md`
     const content = `---\ntitle: ${title}\ntype: task\nstatus: ${status}\npriority: Medium\ndueDate: ${new Date().toISOString().split('T')[0]}\nassignee: Unassigned\ntags: []\n---\n\n# ${title}\n\nTask created directly from Kanban Board.\n`
     try {
       await fetch(`${API_BASE}/api/file`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path, content }) })
@@ -642,7 +704,7 @@ export const App: React.FC = () => {
       path = parentPath ? `${parentPath}/${name}.drawio.md` : `Canvas/${name}.drawio.md`
       content = `---\ntitle: ${title}\ntype: canvas\neditor: drawio\n---\n\n# Draw.io Diagram\nBelow is the embedded diagram layout in XML.\n\n\`\`\`xml\n<mxfile host="app.diagrams.net"><diagram id="1" name="Page-1"><mxGraphModel dx="1000" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0"><root><mxCell id="0" /><mxCell id="1" parent="0" /></root></mxGraphModel></diagram></mxfile>\n\`\`\`\n`
     } else if (type === 'board') {
-      path = parentPath ? `${parentPath}/${name}.board.md` : `Documents/${name}.board.md`
+      path = parentPath ? `${parentPath}/${name}.board.md` : `Boards/${name}.board.md`
       content = `---\ntitle: ${title}\ntype: board\ncolumns: ["Todo", "In Progress", "Done"]\n---\n\n# ${title} Kanban Board\n\nCustomizable Kanban layout.\n`
     } else if (type === 'task') {
       path = parentPath ? `${parentPath}/${name}.md` : `Tasks/${name}.md`
@@ -757,40 +819,143 @@ export const App: React.FC = () => {
             </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2 max-h-[calc(100vh-280px)] no-scrollbar">
-            <div className="px-3 py-1 text-xs font-semibold text-slate-500 uppercase tracking-wider flex justify-between items-center">
-              <span>Workspace Explorer</span>
-              <button
-                onClick={() => handleCreateFile('document')}
-                className="hover:text-white text-slate-500 transition cursor-pointer"
-                title="New Document"
-              >
-                <FilePlus size={12} className="inline mr-1" />
-              </button>
+          <div className="flex-1 overflow-y-auto px-3 py-2 space-y-4 max-h-[calc(100vh-280px)] no-scrollbar">
+            {/* Menu 1 - Documents */}
+            <div className="space-y-1">
+              <div className="px-3 py-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider flex justify-between items-center group">
+                <span className="flex items-center gap-1.5">
+                  <FileText size={12} className="text-blue-400" />
+                  Documents
+                </span>
+                <button
+                  onClick={() => handleCreateFile('document', 'Documents')}
+                  className="hover:text-white text-slate-500 transition cursor-pointer"
+                  title="New Document"
+                >
+                  <Plus size={12} />
+                </button>
+              </div>
+              <div className="space-y-0.5 pl-1.5">
+                {getCategoryChildren(files, 'Documents', 'document').length === 0 ? (
+                  <div className="px-3 py-1 text-[11px] text-slate-600 italic select-none">No documents</div>
+                ) : (
+                  getCategoryChildren(files, 'Documents', 'document').map((node) => (
+                    <TreeNodeComponent
+                      key={node.path}
+                      node={node}
+                      depth={0}
+                      selectedPath={selectedPath}
+                      collapsedPaths={collapsedPaths}
+                      onToggleCollapse={(path) => setCollapsedPaths((prev) => ({ ...prev, [path]: !prev[path] }))}
+                      onSelectFile={fetchFileContent}
+                      onCreateSubPage={(parentPath) => handleCreateFile('document', parentPath)}
+                      onDeletePath={handleDeleteFile}
+                      onContextMenu={(e, targetNode) => {
+                        e.preventDefault()
+                        setContextMenu({
+                          isOpen: true,
+                          x: e.clientX,
+                          y: e.clientY,
+                          path: targetNode.filePath || targetNode.path,
+                          isFolder: targetNode.isFolder,
+                        })
+                      }}
+                    />
+                  ))
+                )}
+              </div>
             </div>
-            <div className="mt-1 space-y-0.5">
-              {buildTree(files).map((node) => (
-                <TreeNodeComponent
-                  key={node.path}
-                  node={node}
-                  depth={0}
-                  selectedPath={selectedPath}
-                  collapsedPaths={collapsedPaths}
-                  onToggleCollapse={(path) => setCollapsedPaths((prev) => ({ ...prev, [path]: !prev[path] }))}
-                  onSelectFile={fetchFileContent}
-                  onCreateSubPage={(parentPath) => handleCreateFile(null, parentPath)}
-                  onDeletePath={handleDeleteFile}
-                  onContextMenu={(e, targetNode) => {
-                    setContextMenu({
-                      isOpen: true,
-                      x: e.clientX,
-                      y: e.clientY,
-                      path: targetNode.filePath || targetNode.path,
-                      isFolder: targetNode.isFolder,
-                    })
-                  }}
-                />
-              ))}
+
+            {/* Menu 2 - Kanban Boards */}
+            <div className="space-y-1">
+              <div className="px-3 py-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider flex justify-between items-center group">
+                <span className="flex items-center gap-1.5">
+                  <LayoutGrid size={12} className="text-amber-400" />
+                  Kanban Boards
+                </span>
+                <button
+                  onClick={() => handleCreateFile('board', 'Boards')}
+                  className="hover:text-white text-slate-500 transition cursor-pointer"
+                  title="New Kanban Board"
+                >
+                  <Plus size={12} />
+                </button>
+              </div>
+              <div className="space-y-0.5 pl-1.5">
+                {getBoardChildren(files).length === 0 ? (
+                  <div className="px-3 py-1 text-[11px] text-slate-600 italic select-none">No boards</div>
+                ) : (
+                  getBoardChildren(files).map((node) => (
+                    <TreeNodeComponent
+                      key={node.path}
+                      node={node}
+                      depth={0}
+                      selectedPath={selectedPath}
+                      collapsedPaths={collapsedPaths}
+                      onToggleCollapse={(path) => setCollapsedPaths((prev) => ({ ...prev, [path]: !prev[path] }))}
+                      onSelectFile={fetchFileContent}
+                      onCreateSubPage={(parentPath) => handleCreateFile('task', parentPath)}
+                      onDeletePath={handleDeleteFile}
+                      onContextMenu={(e, targetNode) => {
+                        e.preventDefault()
+                        setContextMenu({
+                          isOpen: true,
+                          x: e.clientX,
+                          y: e.clientY,
+                          path: targetNode.filePath || targetNode.path,
+                          isFolder: targetNode.isFolder,
+                        })
+                      }}
+                    />
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Menu 3 - Canvas */}
+            <div className="space-y-1">
+              <div className="px-3 py-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider flex justify-between items-center group">
+                <span className="flex items-center gap-1.5">
+                  <Brush size={12} className="text-emerald-400" />
+                  Canvas
+                </span>
+                <button
+                  onClick={() => handleCreateFile('canvas', 'Canvas')}
+                  className="hover:text-white text-slate-500 transition cursor-pointer"
+                  title="New Canvas"
+                >
+                  <Plus size={12} />
+                </button>
+              </div>
+              <div className="space-y-0.5 pl-1.5">
+                {getCategoryChildren(files, 'Canvas', 'canvas').length === 0 ? (
+                  <div className="px-3 py-1 text-[11px] text-slate-600 italic select-none">No canvases</div>
+                ) : (
+                  getCategoryChildren(files, 'Canvas', 'canvas').map((node) => (
+                    <TreeNodeComponent
+                      key={node.path}
+                      node={node}
+                      depth={0}
+                      selectedPath={selectedPath}
+                      collapsedPaths={collapsedPaths}
+                      onToggleCollapse={(path) => setCollapsedPaths((prev) => ({ ...prev, [path]: !prev[path] }))}
+                      onSelectFile={fetchFileContent}
+                      onCreateSubPage={(parentPath) => handleCreateFile('canvas', parentPath)}
+                      onDeletePath={handleDeleteFile}
+                      onContextMenu={(e, targetNode) => {
+                        e.preventDefault()
+                        setContextMenu({
+                          isOpen: true,
+                          x: e.clientX,
+                          y: e.clientY,
+                          path: targetNode.filePath || targetNode.path,
+                          isFolder: targetNode.isFolder,
+                        })
+                      }}
+                    />
+                  ))
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -798,13 +963,13 @@ export const App: React.FC = () => {
         <div className="p-4 border-t border-slate-800 bg-[#161b22]/50 space-y-3">
           <div className="grid grid-cols-3 gap-2">
             {[
-              { type: 'document' as const, label: 'Doc',    icon: <FilePlus    size={16} className="text-blue-400 mb-1"    /> },
-              { type: 'task'     as const, label: 'Task',   icon: <CheckSquare size={16} className="text-amber-500 mb-1"   /> },
-              { type: 'canvas'   as const, label: 'Canvas', icon: <Brush       size={16} className="text-emerald-400 mb-1" /> },
-            ].map(({ type, label, icon }) => (
+              { type: 'document' as const, label: 'Doc',    icon: <FilePlus    size={16} className="text-blue-400 mb-1"    />, defaultFolder: 'Documents' },
+              { type: 'board'    as const, label: 'Board',  icon: <LayoutGrid  size={16} className="text-amber-500 mb-1"   />, defaultFolder: 'Boards' },
+              { type: 'canvas'   as const, label: 'Canvas', icon: <Brush       size={16} className="text-emerald-400 mb-1" />, defaultFolder: 'Canvas' },
+            ].map(({ type, label, icon, defaultFolder }) => (
               <button
                 key={type}
-                onClick={() => handleCreateFile(type)}
+                onClick={() => handleCreateFile(type, defaultFolder)}
                 className="flex flex-col items-center justify-center py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg transition text-[10px] font-semibold cursor-pointer"
               >
                 {icon}
