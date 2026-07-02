@@ -611,10 +611,7 @@ export const App: React.FC = () => {
     })
   }
 
-  const [defaultColumns, setDefaultColumns] = useState<string[]>(() => {
-    const saved = localStorage.getItem('blockforge_default_columns')
-    return saved ? JSON.parse(saved) : ['Todo', 'In Progress', 'Done']
-  })
+  const defaultColumns = ['Todo', 'In Progress', 'Done']
 
   const subpageCallbackRef = useRef<((newPath: string, title: string) => string) | null>(null)
 
@@ -1766,19 +1763,19 @@ export const App: React.FC = () => {
                 onMoveCard={handleMoveCard}
                 onSelectFile={fetchFileContent}
                 onCreateTaskInColumn={handleCreateTaskWithStatus}
-                boardPath={selectedPath && activeFile?.type === 'board' ? selectedPath : null}
+                boardPath={selectedPath ?? null}
                 boardColumns={
-                  selectedPath && activeFile?.type === 'board' && activeFile?.frontMatter?.columns
-                    ? JSON.parse(activeFile.frontMatter.columns)
+                  activeFile?.frontMatter?.columns
+                    ? (() => { try { return JSON.parse(activeFile.frontMatter.columns) } catch { return defaultColumns } })()
                     : defaultColumns
                 }
                 onUpdateColumns={
-                  selectedPath && activeFile?.type === 'board'
+                  selectedPath
                     ? (newCols) => handleUpdateBoardColumns(selectedPath, newCols)
-                    : async (newCols) => { setDefaultColumns(newCols); localStorage.setItem('blockforge_default_columns', JSON.stringify(newCols)) }
+                    : undefined
                 }
-                boardFrontMatter={selectedPath && activeFile?.type === 'board' ? activeFile?.frontMatter : undefined}
-                onUpdateBoardFrontMatter={selectedPath && activeFile?.type === 'board' ? (updates) => handleUpdateFrontMatter(selectedPath, updates) : undefined}
+                boardFrontMatter={activeFile?.frontMatter}
+                onUpdateBoardFrontMatter={selectedPath ? (updates) => handleUpdateFrontMatter(selectedPath, updates) : undefined}
                 onUpdateTaskFrontMatter={(path, updates) => handleUpdateFrontMatter(path, updates)}
               />
             </motion.div>
