@@ -24,6 +24,7 @@ import {
   FolderOpen,
   FolderPlus,
 } from 'lucide-react'
+import { AnimatePresence, motion } from 'framer-motion'
 import Editor from './components/Editor'
 import Kanban from './components/Kanban'
 import Canvas from './components/Canvas'
@@ -441,30 +442,40 @@ const TreeNodeComponent: React.FC<{
         </div>
       </div>
 
-      {(node.isFolder || node.type === 'folder') && !isCollapsed && node.children && (
-        <div className="flex flex-col mt-0.5 border-l border-slate-800/60 ml-2.5 space-y-0.5">
-          {node.children.map((child) => (
-            <TreeNodeComponent
-              key={child.path}
-              node={child}
-              depth={depth + 1}
-              selectedPath={selectedPath}
-              collapsedPaths={collapsedPaths}
-              onToggleCollapse={onToggleCollapse}
-              onSelectFile={onSelectFile}
-              onCreateSubPage={onCreateSubPage}
-              onDeletePath={onDeletePath}
-              onContextMenu={onContextMenu}
-              draggingPath={draggingPath}
-              draggingType={draggingType}
-              sectionType={sectionType}
-              onDragStart={onDragStart}
-              onDragEnd={onDragEnd}
-              onDropNode={onDropNode}
-            />
-          ))}
-        </div>
-      )}
+      <AnimatePresence initial={false}>
+        {(node.isFolder || node.type === 'folder') && !isCollapsed && node.children && (
+          <motion.div
+            key="children"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.18, ease: 'easeInOut' }}
+            style={{ overflow: 'hidden' }}
+            className="flex flex-col mt-0.5 border-l border-slate-800/60 ml-2.5 space-y-0.5"
+          >
+            {node.children.map((child) => (
+              <TreeNodeComponent
+                key={child.path}
+                node={child}
+                depth={depth + 1}
+                selectedPath={selectedPath}
+                collapsedPaths={collapsedPaths}
+                onToggleCollapse={onToggleCollapse}
+                onSelectFile={onSelectFile}
+                onCreateSubPage={onCreateSubPage}
+                onDeletePath={onDeletePath}
+                onContextMenu={onContextMenu}
+                draggingPath={draggingPath}
+                draggingType={draggingType}
+                sectionType={sectionType}
+                onDragStart={onDragStart}
+                onDragEnd={onDragEnd}
+                onDropNode={onDropNode}
+              />
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
@@ -980,6 +991,8 @@ export const App: React.FC = () => {
       }
 
       if (selectedPath === oldPath) {
+        // Optimistically update files so activeFile stays defined during transition (prevents welcome-screen flicker)
+        setFiles(prev => prev.map(f => f.path === oldPath ? { ...f, path: newPath, title: trimmed } : f))
         setSelectedPath(newPath)
         fetchFileContent(newPath)
       }
@@ -1263,107 +1276,131 @@ export const App: React.FC = () => {
 
       {/* ── Main Panel ───────────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col overflow-hidden bg-[#0d1117]">
-        {activeView === 'board' ? (
-          <div className="flex-1 p-6 overflow-hidden">
-            <Kanban
-              files={files}
-              onMoveCard={handleMoveCard}
-              onSelectFile={fetchFileContent}
-              onCreateTaskInColumn={handleCreateTaskWithStatus}
-              boardPath={selectedPath && activeFile?.type === 'board' ? selectedPath : null}
-              boardColumns={
-                selectedPath && activeFile?.type === 'board' && activeFile?.frontMatter?.columns
-                  ? JSON.parse(activeFile.frontMatter.columns)
-                  : defaultColumns
-              }
-              onUpdateColumns={
-                selectedPath && activeFile?.type === 'board'
-                  ? (newCols) => handleUpdateBoardColumns(selectedPath, newCols)
-                  : async (newCols) => { setDefaultColumns(newCols); localStorage.setItem('blockforge_default_columns', JSON.stringify(newCols)) }
-              }
-            />
-          </div>
-        ) : selectedPath && activeFile ? (
-          <div className="flex-1 p-6 flex flex-col overflow-hidden main-content-pane">
-            <div className="flex justify-between items-center mb-4 no-print">
-              <div className="flex items-center gap-1.5 text-xs text-slate-400">
-                <button onClick={() => { setSelectedPath(null); setSelectedContent(''); setCurrentFrontMatterStr(''); setActiveView('editor') }} className="hover:text-violet-400 hover:underline transition">Home</button>
-                <ChevronRight size={12} />
-                <span className="font-mono text-slate-500">{selectedPath}</span>
-              </div>
-              <button
-                onClick={() => handleDeleteFile(selectedPath)}
-                className="flex items-center gap-1 px-3 py-1 hover:bg-red-500/10 text-slate-500 hover:text-red-400 border border-transparent hover:border-red-500/20 text-xs font-semibold rounded-lg transition cursor-pointer"
-              >
-                <Trash2 size={12} /> Delete
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-hidden">
-              {activeFile.type === 'canvas' && activeFile.frontMatter?.editor === 'drawio' ? (
-                <Diagram filePath={selectedPath} initialContent={selectedContent} onSave={handleSaveFile} isSaving={isSaving} />
-              ) : activeFile.type === 'canvas' ? (
-                <Canvas filePath={selectedPath} initialContent={selectedContent} onSave={handleSaveFile} isSaving={isSaving} />
-              ) : (
-                <Editor
-                  filePath={selectedPath}
-                  initialContent={selectedContent}
-                  onSave={handleSaveFile}
-                  isSaving={isSaving}
-                  frontMatter={activeFile?.frontMatter}
-                  onUpdateFrontMatter={(updates) => handleUpdateFrontMatter(selectedPath, updates)}
-                  onTitleChange={(newTitle) => handleRenameFile(selectedPath, newTitle)}
-                  boardColumns={defaultColumns}
-                  onCreateSubPage={(parentPath, onCreated) => handleCreateFile('document', parentPath, onCreated, ['document'], 'Sub Page')}
-                  onSelectFile={fetchFileContent}
-                  files={files}
-                  globalLayoutOverride={globalLayoutOverride}
-                  globalColumnWidthOverride={globalColumnWidthOverride}
-                  highlightSearchTerm={activeSearchHighlight}
-                  onClearSearchHighlight={() => setActiveSearchHighlight(null)}
-                />
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="flex-1 flex flex-col justify-center items-center text-slate-400 p-12">
-            <div className="max-w-md w-full bg-[#161b22]/40 border border-slate-800/80 rounded-2xl p-8 backdrop-blur-md shadow-2xl flex flex-col items-center text-center">
-              <div className="h-16 w-16 bg-violet-600/10 border border-violet-500/25 rounded-2xl flex items-center justify-center text-violet-400 shadow-xl shadow-violet-500/5 mb-6">
-                <Layers size={32} />
-              </div>
-              <h2 className="text-xl font-bold text-slate-100 mb-2">Welcome to BlockForgeMD</h2>
-              <p className="text-sm text-slate-400 mb-6">A high-performance, local-first alternative to Notion. All files saved as Markdown on disk.</p>
-              <div className="w-full space-y-3">
+        <AnimatePresence mode="wait" initial={false}>
+          {activeView === 'board' ? (
+            <motion.div
+              key="board"
+              className="flex-1 p-6 overflow-hidden"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.12 }}
+            >
+              <Kanban
+                files={files}
+                onMoveCard={handleMoveCard}
+                onSelectFile={fetchFileContent}
+                onCreateTaskInColumn={handleCreateTaskWithStatus}
+                boardPath={selectedPath && activeFile?.type === 'board' ? selectedPath : null}
+                boardColumns={
+                  selectedPath && activeFile?.type === 'board' && activeFile?.frontMatter?.columns
+                    ? JSON.parse(activeFile.frontMatter.columns)
+                    : defaultColumns
+                }
+                onUpdateColumns={
+                  selectedPath && activeFile?.type === 'board'
+                    ? (newCols) => handleUpdateBoardColumns(selectedPath, newCols)
+                    : async (newCols) => { setDefaultColumns(newCols); localStorage.setItem('blockforge_default_columns', JSON.stringify(newCols)) }
+                }
+              />
+            </motion.div>
+          ) : selectedPath && activeFile ? (
+            <motion.div
+              key="editor"
+              className="flex-1 p-6 flex flex-col overflow-hidden main-content-pane"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.12 }}
+            >
+              <div className="flex justify-between items-center mb-4 no-print">
+                <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                  <button onClick={() => { setSelectedPath(null); setSelectedContent(''); setCurrentFrontMatterStr(''); setActiveView('editor') }} className="hover:text-violet-400 hover:underline transition">Home</button>
+                  <ChevronRight size={12} />
+                  <span className="font-mono text-slate-500">{selectedPath}</span>
+                </div>
                 <button
-                  onClick={() => handleCreateFile('board', 'Boards', undefined, ['board'])}
-                  className="w-full flex items-center justify-between px-4 py-3 bg-[#161b22] hover:bg-slate-800 border border-slate-800 rounded-xl transition text-left cursor-pointer text-xs"
+                  onClick={() => handleDeleteFile(selectedPath)}
+                  className="flex items-center gap-1 px-3 py-1 hover:bg-red-500/10 text-slate-500 hover:text-red-400 border border-transparent hover:border-red-500/20 text-xs font-semibold rounded-lg transition cursor-pointer"
                 >
-                  <div className="flex items-center gap-3">
-                    <LayoutGrid size={16} className="text-violet-400" />
-                    <div>
-                      <div className="font-semibold text-slate-200">Create Kanban Board</div>
-                      <div className="text-[10px] text-slate-500">Boards are independent — pick one from the sidebar</div>
-                    </div>
-                  </div>
-                  <ArrowRight size={14} className="text-slate-500" />
+                  <Trash2 size={12} /> Delete
                 </button>
-                <div className="grid grid-cols-2 gap-3 text-xs">
-                  <button onClick={() => handleCreateFile('document', 'Documents', undefined, ['document'])} className="flex flex-col items-center justify-center p-4 bg-[#161b22]/50 hover:bg-slate-800 border border-slate-800 rounded-xl transition cursor-pointer">
-                    <FileText size={20} className="text-blue-400 mb-2" />
-                    <span className="font-semibold text-slate-300">Create Document</span>
+              </div>
+
+              <div className="flex-1 overflow-hidden">
+                {activeFile.type === 'canvas' && activeFile.frontMatter?.editor === 'drawio' ? (
+                  <Diagram filePath={selectedPath} initialContent={selectedContent} onSave={handleSaveFile} isSaving={isSaving} />
+                ) : activeFile.type === 'canvas' ? (
+                  <Canvas filePath={selectedPath} initialContent={selectedContent} onSave={handleSaveFile} isSaving={isSaving} />
+                ) : (
+                  <Editor
+                    filePath={selectedPath}
+                    initialContent={selectedContent}
+                    onSave={handleSaveFile}
+                    isSaving={isSaving}
+                    frontMatter={activeFile?.frontMatter}
+                    onUpdateFrontMatter={(updates) => handleUpdateFrontMatter(selectedPath, updates)}
+                    onTitleChange={(newTitle) => handleRenameFile(selectedPath, newTitle)}
+                    boardColumns={defaultColumns}
+                    onCreateSubPage={(parentPath, onCreated) => handleCreateFile('document', parentPath, onCreated, ['document'], 'Sub Page')}
+                    onSelectFile={fetchFileContent}
+                    files={files}
+                    globalLayoutOverride={globalLayoutOverride}
+                    globalColumnWidthOverride={globalColumnWidthOverride}
+                    highlightSearchTerm={activeSearchHighlight}
+                    onClearSearchHighlight={() => setActiveSearchHighlight(null)}
+                  />
+                )}
+              </div>
+            </motion.div>
+          ) : (
+            <motion.div
+              key="welcome"
+              className="flex-1 flex flex-col justify-center items-center text-slate-400 p-12"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 8 }}
+              transition={{ duration: 0.18 }}
+            >
+              <div className="max-w-md w-full bg-[#161b22]/40 border border-slate-800/80 rounded-2xl p-8 backdrop-blur-md shadow-2xl flex flex-col items-center text-center">
+                <div className="h-16 w-16 bg-violet-600/10 border border-violet-500/25 rounded-2xl flex items-center justify-center text-violet-400 shadow-xl shadow-violet-500/5 mb-6">
+                  <Layers size={32} />
+                </div>
+                <h2 className="text-xl font-bold text-slate-100 mb-2">Welcome to BlockForgeMD</h2>
+                <p className="text-sm text-slate-400 mb-6">A high-performance, local-first alternative to Notion. All files saved as Markdown on disk.</p>
+                <div className="w-full space-y-3">
+                  <button
+                    onClick={() => handleCreateFile('board', 'Boards', undefined, ['board'])}
+                    className="w-full flex items-center justify-between px-4 py-3 bg-[#161b22] hover:bg-slate-800 border border-slate-800 rounded-xl transition text-left cursor-pointer text-xs"
+                  >
+                    <div className="flex items-center gap-3">
+                      <LayoutGrid size={16} className="text-violet-400" />
+                      <div>
+                        <div className="font-semibold text-slate-200">Create Kanban Board</div>
+                        <div className="text-[10px] text-slate-500">Boards are independent — pick one from the sidebar</div>
+                      </div>
+                    </div>
+                    <ArrowRight size={14} className="text-slate-500" />
                   </button>
-                  <button onClick={() => handleCreateFile('canvas', 'Canvas', undefined, ['canvas', 'diagram'])} className="flex flex-col items-center justify-center p-4 bg-[#161b22]/50 hover:bg-slate-800 border border-slate-800 rounded-xl transition cursor-pointer">
-                    <Brush size={20} className="text-emerald-400 mb-2" />
-                    <span className="font-semibold text-slate-300">Create Canvas</span>
-                  </button>
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <button onClick={() => handleCreateFile('document', 'Documents', undefined, ['document'])} className="flex flex-col items-center justify-center p-4 bg-[#161b22]/50 hover:bg-slate-800 border border-slate-800 rounded-xl transition cursor-pointer">
+                      <FileText size={20} className="text-blue-400 mb-2" />
+                      <span className="font-semibold text-slate-300">Create Document</span>
+                    </button>
+                    <button onClick={() => handleCreateFile('canvas', 'Canvas', undefined, ['canvas', 'diagram'])} className="flex flex-col items-center justify-center p-4 bg-[#161b22]/50 hover:bg-slate-800 border border-slate-800 rounded-xl transition cursor-pointer">
+                      <Brush size={20} className="text-emerald-400 mb-2" />
+                      <span className="font-semibold text-slate-300">Create Canvas</span>
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          </div>
-        )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* ── Creation Modal ────────────────────────────────────────────────── */}
+      <AnimatePresence>
       {createModal.isOpen && (() => {
         const TYPE_LABEL_MAP: Record<string, string> = {
           document: 'Document',
@@ -1397,8 +1434,20 @@ export const App: React.FC = () => {
           : 'Create New Item'
 
         return (
-          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-[#161b22] border border-slate-800 rounded-2xl max-w-md w-full shadow-2xl p-6 overflow-hidden animate-in zoom-in-95 duration-150">
+          <motion.div
+            className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
+          >
+            <motion.div
+              className="bg-[#161b22] border border-slate-800 rounded-2xl max-w-md w-full shadow-2xl p-6 overflow-hidden"
+              initial={{ scale: 0.95, y: 10 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 10 }}
+              transition={{ duration: 0.15, ease: 'easeOut' }}
+            >
               <div className="flex justify-between items-center mb-4">
                 <h3 className="font-bold text-base text-slate-100">{modalTitle}</h3>
                 <button onClick={() => setCreateModal({ isOpen: false, type: null })} className="text-slate-500 hover:text-slate-300 transition cursor-pointer">
@@ -1453,15 +1502,29 @@ export const App: React.FC = () => {
                   <button type="button" disabled={!createModal.type || !createNameInput.trim()} onClick={handleCreateConfirm} className="px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white rounded-lg text-xs font-semibold shadow transition cursor-pointer">Create</button>
                 </div>
               </div>
-            </div>
-          </div>
+            </motion.div>
+          </motion.div>
         )
       })()}
+      </AnimatePresence>
 
       {/* ── Rename Modal ────────────────────────────────────────────────── */}
+      <AnimatePresence>
       {renameModal.isOpen && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-[#161b22] border border-slate-800 rounded-2xl max-w-sm w-full shadow-2xl p-6 animate-in zoom-in-95 duration-150">
+        <motion.div
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.15 }}
+        >
+          <motion.div
+            className="bg-[#161b22] border border-slate-800 rounded-2xl max-w-sm w-full shadow-2xl p-6"
+            initial={{ scale: 0.95, y: 10 }}
+            animate={{ scale: 1, y: 0 }}
+            exit={{ scale: 0.95, y: 10 }}
+            transition={{ duration: 0.15, ease: 'easeOut' }}
+          >
             <div className="flex justify-between items-center mb-4">
               <h3 className="font-bold text-base text-slate-100">Rename</h3>
               <button onClick={() => setRenameModal({ isOpen: false, path: '', currentName: '' })} className="text-slate-500 hover:text-slate-300 transition cursor-pointer">
@@ -1501,14 +1564,28 @@ export const App: React.FC = () => {
                 className="px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white rounded-lg text-xs font-semibold shadow transition cursor-pointer"
               >Rename</button>
             </div>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       )}
+      </AnimatePresence>
 
       {/* ── Settings Menu Modal ─────────────────────────────────────────── */}
+      <AnimatePresence>
       {adminModalOpen && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 select-none animate-in fade-in duration-150">
-          <div className="bg-[#161b22] border border-slate-800 rounded-2xl max-w-2xl w-full shadow-2xl p-6 overflow-hidden animate-in zoom-in-95 duration-150 text-slate-200 flex flex-col h-[480px]">
+        <motion.div
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 select-none"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.15 }}
+        >
+          <motion.div
+            className="bg-[#161b22] border border-slate-800 rounded-2xl max-w-2xl w-full shadow-2xl p-6 overflow-hidden text-slate-200 flex flex-col h-[480px]"
+            initial={{ scale: 0.95, y: 10 }}
+            animate={{ scale: 1, y: 0 }}
+            exit={{ scale: 0.95, y: 10 }}
+            transition={{ duration: 0.15, ease: 'easeOut' }}
+          >
             {/* Modal Header */}
             <div className="flex justify-between items-center mb-6 pb-4 border-b border-slate-800 shrink-0">
               <div className="flex items-center gap-2">
@@ -1722,11 +1799,13 @@ export const App: React.FC = () => {
                 </div>
               </div>
             </div>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       )}
+      </AnimatePresence>
 
       {/* ── Context Menu ─────────────────────────────────────────────────── */}
+      <AnimatePresence>
       {contextMenu.isOpen && (() => {
         const ctxParent = getContextParentPath(contextMenu.path)
         const closeMenu = () => setContextMenu(p => ({ ...p, isOpen: false }))
@@ -1741,9 +1820,13 @@ export const App: React.FC = () => {
         )
 
         return (
-          <div
+          <motion.div
+            initial={{ opacity: 0, scale: 0.94, y: -4 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.94, y: -4 }}
+            transition={{ duration: 0.1, ease: 'easeOut' }}
             style={{ position: 'fixed', top: `${contextMenu.y}px`, left: `${contextMenu.x}px`, zIndex: 99999 }}
-            className="w-52 bg-[#161b22] border border-slate-800 rounded-xl shadow-2xl p-1.5 flex flex-col space-y-0.5 no-scrollbar select-none animate-in fade-in zoom-in-95 duration-100"
+            className="w-52 bg-[#161b22] border border-slate-800 rounded-xl shadow-2xl p-1.5 flex flex-col space-y-0.5 no-scrollbar select-none"
           >
             <div className="px-2.5 py-1 text-[9px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-850/60 mb-1 truncate">
               {contextMenu.path?.split('/').pop()?.replace(/\.(board|excalidraw|drawio)\.md$/, '').replace(/\.md$/, '') || contextMenu.path}
@@ -1802,18 +1885,28 @@ export const App: React.FC = () => {
             >
               <Trash2 size={13} className="text-red-500" /> Delete Item
             </button>
-          </div>
+          </motion.div>
         )
       })()}
+      </AnimatePresence>
 
       {/* ── Search & Command Palette Modal ─────────────────────────────── */}
+      <AnimatePresence>
       {searchOpen && (
-        <div 
+        <motion.div
           className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm z-50 flex items-start justify-center p-4 pt-[12vh]"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.12 }}
           onMouseDown={() => setSearchOpen(false)}
         >
-          <div 
-            className="bg-[#161b22] border border-slate-800 rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden animate-in zoom-in-95 duration-100 flex flex-col max-h-[500px]"
+          <motion.div
+            className="bg-[#161b22] border border-slate-800 rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden flex flex-col max-h-[500px]"
+            initial={{ scale: 0.96, y: -12 }}
+            animate={{ scale: 1, y: 0 }}
+            exit={{ scale: 0.96, y: -12 }}
+            transition={{ duration: 0.15, ease: 'easeOut' }}
             onMouseDown={(e) => e.stopPropagation()}
           >
             {/* Search Input Header */}
@@ -1957,9 +2050,10 @@ export const App: React.FC = () => {
               </div>
               <span>Esc to close</span>
             </div>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       )}
+      </AnimatePresence>
     </div>
   )
 }
