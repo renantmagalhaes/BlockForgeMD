@@ -20,6 +20,9 @@ import {
   History as HistoryIcon,
   GripVertical,
   Pencil,
+  Folder,
+  FolderOpen,
+  FolderPlus,
 } from 'lucide-react'
 import Editor from './components/Editor'
 import Kanban from './components/Kanban'
@@ -170,7 +173,7 @@ const getCategoryChildren = (filesList: FileRecord[], category: string, allowedT
 const getBoardChildren = (filesList: FileRecord[]): TreeNode[] => {
   const filtered = filesList.filter(f =>
     (f.path.startsWith('Boards/') || f.path.startsWith('Tasks/')) &&
-    (f.type === 'board' || f.type === 'task')
+    (f.type === 'board' || f.type === 'task' || f.type === 'folder')
   )
   const tree = buildTree(filtered)
 
@@ -264,9 +267,9 @@ const TreeNodeComponent: React.FC<{
   const [isDragOver, setIsDragOver] = React.useState(false)
 
   const SECTION_ALLOWED_TYPES: Record<string, string[]> = {
-    documents: ['document'],
-    boards: ['board', 'task'],
-    canvas: ['canvas'],
+    documents: ['document', 'folder'],
+    boards: ['board', 'task', 'folder'],
+    canvas: ['canvas', 'folder'],
   }
 
   const handleDragStart = (e: React.DragEvent) => {
@@ -322,13 +325,17 @@ const TreeNodeComponent: React.FC<{
 
   const handleRowClick = (e: React.MouseEvent) => {
     e.stopPropagation()
+    const actAsFolder = node.isFolder || node.type === 'folder'
     if (node.hasPage && node.filePath) {
-      onSelectFile(node.filePath)
-      // If this page also has children, expand it so the tree is visible
-      if (node.isFolder) {
+      // Folder-type pages: toggle collapse on click instead of opening editor,
+      // since their purpose is organization rather than content authoring.
+      if (node.type === 'folder') {
         onToggleCollapse(node.path)
+      } else {
+        onSelectFile(node.filePath)
+        if (actAsFolder) onToggleCollapse(node.path)
       }
-    } else if (node.isFolder) {
+    } else if (actAsFolder) {
       onToggleCollapse(node.path)
     }
   }
@@ -355,6 +362,11 @@ const TreeNodeComponent: React.FC<{
   }
 
   const getIcon = () => {
+    if (node.type === 'folder') {
+      return isCollapsed
+        ? <Folder size={13} className="text-slate-400 shrink-0" />
+        : <FolderOpen size={13} className="text-slate-300 shrink-0" />
+    }
     switch (node.type) {
       case 'task':   return <CheckSquare size={13} className="text-amber-500 shrink-0" />
       case 'canvas': return <Brush size={13} className="text-emerald-400 shrink-0" />
@@ -397,7 +409,7 @@ const TreeNodeComponent: React.FC<{
           >
             {node.filePath && <GripVertical size={10} />}
           </span>
-          {node.isFolder ? (
+          {(node.isFolder || node.type === 'folder') ? (
             <span
               onClick={handleChevronClick}
               className="text-slate-500 hover:text-slate-200 p-0.5 hover:bg-slate-700/50 rounded transition shrink-0"
@@ -429,7 +441,7 @@ const TreeNodeComponent: React.FC<{
         </div>
       </div>
 
-      {node.isFolder && !isCollapsed && node.children && (
+      {(node.isFolder || node.type === 'folder') && !isCollapsed && node.children && (
         <div className="flex flex-col mt-0.5 border-l border-slate-800/60 ml-2.5 space-y-0.5">
           {node.children.map((child) => (
             <TreeNodeComponent
@@ -513,9 +525,9 @@ export const App: React.FC = () => {
 
   const [createModal, setCreateModal] = useState<{
     isOpen: boolean
-    type: 'document' | 'task' | 'canvas' | 'board' | 'diagram' | null
+    type: 'document' | 'task' | 'canvas' | 'board' | 'diagram' | 'folder' | null
     parentPath?: string
-    allowedTypes?: ('document' | 'task' | 'canvas' | 'board' | 'diagram')[]
+    allowedTypes?: ('document' | 'task' | 'canvas' | 'board' | 'diagram' | 'folder')[]
     modeLabel?: string
   }>({ isOpen: false, type: null })
   const [createNameInput, setCreateNameInput] = useState('')
@@ -783,10 +795,10 @@ export const App: React.FC = () => {
   }
 
   const handleCreateFile = (
-    type: 'document' | 'task' | 'canvas' | 'board' | 'diagram' | null,
+    type: 'document' | 'task' | 'canvas' | 'board' | 'diagram' | 'folder' | null,
     parentPath?: string,
     onCreated?: (newPath: string, title: string) => string,
-    allowedTypes?: ('document' | 'task' | 'canvas' | 'board' | 'diagram')[],
+    allowedTypes?: ('document' | 'task' | 'canvas' | 'board' | 'diagram' | 'folder')[],
     modeLabel?: string
   ) => {
     subpageCallbackRef.current = onCreated || null
@@ -817,6 +829,9 @@ export const App: React.FC = () => {
     } else if (type === 'canvas') {
       path = parentPath ? `${parentPath}/${name}.excalidraw.md` : `Canvas/${name}.excalidraw.md`
       content = `---\ntitle: ${title}\ntype: canvas\neditor: excalidraw\n---\n\n# Drawing Canvas\nBelow is the embedded drawing data.\n\n\`\`\`json\n{\n  "type": "excalidraw",\n  "version": 2,\n  "elements": [],\n  "appState": {"viewBackgroundColor": "#121212","theme": "dark"}\n}\n\`\`\`\n`
+    } else if (type === 'folder') {
+      path = parentPath ? `${parentPath}/${name}.md` : `Documents/${name}.md`
+      content = `---\ntitle: ${title}\ntype: folder\n---\n\n# ${title}\n`
     } else {
       path = parentPath ? `${parentPath}/${name}.md` : `Documents/${name}.md`
       content = `---\ntitle: ${title}\ntype: document\n---\n\n# ${title}\n\nStart writing note content here.\n`
@@ -997,19 +1012,28 @@ export const App: React.FC = () => {
                   <FileText size={12} className="text-blue-400" />
                   Documents
                 </span>
-                <button
-                  onClick={() => handleCreateFile('document', 'Documents', undefined, ['document'])}
-                  className="hover:text-white text-slate-500 transition cursor-pointer"
-                  title="New Document"
-                >
-                  <Plus size={12} />
-                </button>
+                <span className="flex items-center gap-1">
+                  <button
+                    onClick={() => handleCreateFile('folder', 'Documents', undefined, ['folder'])}
+                    className="hover:text-white text-slate-500 transition cursor-pointer"
+                    title="New Folder"
+                  >
+                    <FolderPlus size={12} />
+                  </button>
+                  <button
+                    onClick={() => handleCreateFile('document', 'Documents', undefined, ['document'])}
+                    className="hover:text-white text-slate-500 transition cursor-pointer"
+                    title="New Document"
+                  >
+                    <Plus size={12} />
+                  </button>
+                </span>
               </div>
               <div className="space-y-0.5 pl-1.5">
-                {getCategoryChildren(files, 'Documents', ['document']).length === 0 ? (
+                {getCategoryChildren(files, 'Documents', ['document', 'folder']).length === 0 ? (
                   <div className="px-3 py-1 text-[11px] text-slate-600 italic select-none">No documents</div>
                 ) : (
-                  getCategoryChildren(files, 'Documents', ['document']).map((node) => (
+                  getCategoryChildren(files, 'Documents', ['document', 'folder']).map((node) => (
                     <TreeNodeComponent
                       key={node.path}
                       node={node}
@@ -1051,13 +1075,22 @@ export const App: React.FC = () => {
                   <LayoutGrid size={12} className="text-amber-400" />
                   Kanban Boards
                 </span>
-                <button
-                  onClick={() => handleCreateFile('board', 'Boards', undefined, ['board'])}
-                  className="hover:text-white text-slate-500 transition cursor-pointer"
-                  title="New Kanban Board"
-                >
-                  <Plus size={12} />
-                </button>
+                <span className="flex items-center gap-1">
+                  <button
+                    onClick={() => handleCreateFile('folder', 'Boards', undefined, ['folder'])}
+                    className="hover:text-white text-slate-500 transition cursor-pointer"
+                    title="New Folder"
+                  >
+                    <FolderPlus size={12} />
+                  </button>
+                  <button
+                    onClick={() => handleCreateFile('board', 'Boards', undefined, ['board'])}
+                    className="hover:text-white text-slate-500 transition cursor-pointer"
+                    title="New Kanban Board"
+                  >
+                    <Plus size={12} />
+                  </button>
+                </span>
               </div>
               <div className="space-y-0.5 pl-1.5">
                 {getBoardChildren(files).length === 0 ? (
@@ -1105,19 +1138,28 @@ export const App: React.FC = () => {
                   <Brush size={12} className="text-emerald-400" />
                   Canvas
                 </span>
-                <button
-                  onClick={() => handleCreateFile('canvas', 'Canvas', undefined, ['canvas', 'diagram'])}
-                  className="hover:text-white text-slate-500 transition cursor-pointer"
-                  title="New Canvas"
-                >
-                  <Plus size={12} />
-                </button>
+                <span className="flex items-center gap-1">
+                  <button
+                    onClick={() => handleCreateFile('folder', 'Canvas', undefined, ['folder'])}
+                    className="hover:text-white text-slate-500 transition cursor-pointer"
+                    title="New Folder"
+                  >
+                    <FolderPlus size={12} />
+                  </button>
+                  <button
+                    onClick={() => handleCreateFile('canvas', 'Canvas', undefined, ['canvas', 'diagram'])}
+                    className="hover:text-white text-slate-500 transition cursor-pointer"
+                    title="New Canvas"
+                  >
+                    <Plus size={12} />
+                  </button>
+                </span>
               </div>
               <div className="space-y-0.5 pl-1.5">
-                {getCategoryChildren(files, 'Canvas', ['canvas']).length === 0 ? (
+                {getCategoryChildren(files, 'Canvas', ['canvas', 'folder']).length === 0 ? (
                   <div className="px-3 py-1 text-[11px] text-slate-600 italic select-none">No canvases</div>
                 ) : (
-                  getCategoryChildren(files, 'Canvas', ['canvas']).map((node) => (
+                  getCategoryChildren(files, 'Canvas', ['canvas', 'folder']).map((node) => (
                     <TreeNodeComponent
                       key={node.path}
                       node={node}
@@ -1308,6 +1350,7 @@ export const App: React.FC = () => {
           canvas: 'Excalidraw Canvas',
           diagram: 'Draw.io Diagram',
           board: 'Kanban Board',
+          folder: 'Folder',
         }
         const ALL_TYPE_ITEMS = [
           { id: 'document', label: 'Document',   icon: <FileText    size={16} className="text-blue-400"    /> },
@@ -1315,6 +1358,7 @@ export const App: React.FC = () => {
           { id: 'canvas',   label: 'Excalidraw',  icon: <Brush       size={16} className="text-emerald-400" /> },
           { id: 'diagram',  label: 'Draw.io',     icon: <Grid        size={16} className="text-violet-400"  /> },
           { id: 'board',    label: 'Board',        icon: <LayoutGrid  size={16} className="text-rose-400"    /> },
+          { id: 'folder',   label: 'Folder',      icon: <Folder      size={16} className="text-slate-400"   /> },
         ]
         const visibleTypes = createModal.allowedTypes
           ? ALL_TYPE_ITEMS.filter(item => createModal.allowedTypes!.includes(item.id as any))
@@ -1684,29 +1728,35 @@ export const App: React.FC = () => {
               {contextMenu.path?.split('/').pop()?.replace(/\.(board|excalidraw|drawio)\.md$/, '').replace(/\.md$/, '') || contextMenu.path}
             </div>
 
-            {/* Documents section: only document sub-pages */}
+            {/* Documents section */}
             {contextMenu.sectionType === 'documents' && (
-              ctxBtn('New Sub Page', <FileText size={13} className="text-blue-400" />,
-                () => handleCreateFile('document', ctxParent, undefined, ['document'], 'Sub Page'))
+              <>
+                {ctxBtn('New Sub Page', <FileText size={13} className="text-blue-400" />,
+                  () => handleCreateFile('document', ctxParent, undefined, ['document'], 'Sub Page'))}
+                {ctxBtn('New Folder', <FolderPlus size={13} className="text-slate-400" />,
+                  () => handleCreateFile('folder', ctxParent, undefined, ['folder']))}
+              </>
             )}
 
-            {/* Boards section: boards can spawn tasks; tasks show nothing here */}
-            {contextMenu.sectionType === 'boards' && contextMenu.nodeType === 'board' && (
-              ctxBtn('New Task', <CheckSquare size={13} className="text-amber-500" />,
-                () => handleCreateFile('task', ctxParent, undefined, ['task']))
-            )}
-            {contextMenu.sectionType === 'boards' && !contextMenu.nodeType && (
-              ctxBtn('New Task', <CheckSquare size={13} className="text-amber-500" />,
-                () => handleCreateFile('task', ctxParent, undefined, ['task']))
+            {/* Boards section */}
+            {contextMenu.sectionType === 'boards' && (contextMenu.nodeType === 'board' || !contextMenu.nodeType) && (
+              <>
+                {ctxBtn('New Task', <CheckSquare size={13} className="text-amber-500" />,
+                  () => handleCreateFile('task', ctxParent, undefined, ['task']))}
+                {ctxBtn('New Folder', <FolderPlus size={13} className="text-slate-400" />,
+                  () => handleCreateFile('folder', ctxParent, undefined, ['folder']))}
+              </>
             )}
 
-            {/* Canvas section: Excalidraw or Draw.io only */}
+            {/* Canvas section */}
             {contextMenu.sectionType === 'canvas' && (
               <>
                 {ctxBtn('New Excalidraw', <Brush size={13} className="text-emerald-400" />,
                   () => handleCreateFile('canvas', ctxParent, undefined, ['canvas']))}
                 {ctxBtn('New Draw.io', <Grid size={13} className="text-violet-400" />,
                   () => handleCreateFile('diagram', ctxParent, undefined, ['diagram']))}
+                {ctxBtn('New Folder', <FolderPlus size={13} className="text-slate-400" />,
+                  () => handleCreateFile('folder', ctxParent, undefined, ['folder']))}
               </>
             )}
 
