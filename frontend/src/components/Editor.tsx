@@ -44,6 +44,7 @@ import {
   Hash,
   Activity,
   Plus,
+  Minus,
   FileText,
   LayoutGrid,
   Brush,
@@ -1986,6 +1987,10 @@ export const Editor: React.FC<EditorProps> = ({
     left: number
     width: number
     height: number
+    cellTop: number
+    cellLeft: number
+    cellWidth: number
+    cellHeight: number
   } | null>(null)
 
   const updateTableRect = () => {
@@ -2007,13 +2012,18 @@ export const Editor: React.FC<EditorProps> = ({
         : (range.startContainer as HTMLElement)?.closest?.('td, th')
 
       const table = cell?.closest('table')
-      if (table) {
+      if (table && cell) {
         const rect = table.getBoundingClientRect()
+        const cellRect = (cell as HTMLElement).getBoundingClientRect()
         setActiveTableRect({
           top: rect.top,
           left: rect.left,
           width: rect.width,
-          height: rect.height
+          height: rect.height,
+          cellTop: cellRect.top,
+          cellLeft: cellRect.left,
+          cellWidth: cellRect.width,
+          cellHeight: cellRect.height,
         })
       } else {
         setActiveTableRect(null)
@@ -3660,13 +3670,12 @@ export const Editor: React.FC<EditorProps> = ({
           </div>
         </div>
       )}
-      {/* Floating Table Add Row/Col Hover Overlays */}
+      {/* Floating Table Add/Delete Row/Col Overlays */}
       {activeTableRect && (
         <>
-          {/* Row "+" button below the table */}
+          {/* Add Row "+" button below the table */}
           <button
             onMouseDown={(e) => {
-              // preventDefault keeps editor focus + selection intact before command runs
               e.preventDefault()
               e.stopPropagation()
               editor.chain().addRowAfter().run()
@@ -3683,10 +3692,28 @@ export const Editor: React.FC<EditorProps> = ({
             <Plus size={12} />
           </button>
 
-          {/* Column "+" button to the right of the table */}
+          {/* Delete Row "−" button to the left of the current row */}
           <button
             onMouseDown={(e) => {
-              // preventDefault keeps editor focus + selection intact before command runs
+              e.preventDefault()
+              e.stopPropagation()
+              editor.chain().focus().deleteRow().run()
+            }}
+            title="Delete Row"
+            style={{
+              position: 'fixed',
+              top: `${activeTableRect.cellTop + activeTableRect.cellHeight / 2 - 12}px`,
+              left: `${activeTableRect.left - 30}px`,
+              zIndex: 9999,
+            }}
+            className="bg-[#1e2330] hover:bg-red-700 border border-slate-700 hover:border-red-500 text-slate-400 hover:text-white rounded-full w-6 h-6 shadow-2xl transition cursor-pointer flex items-center justify-center"
+          >
+            <Minus size={12} />
+          </button>
+
+          {/* Add Column "+" button to the right of the table */}
+          <button
+            onMouseDown={(e) => {
               e.preventDefault()
               e.stopPropagation()
               editor.chain().addColumnAfter().run()
@@ -3701,6 +3728,25 @@ export const Editor: React.FC<EditorProps> = ({
             className="bg-[#1e2330] hover:bg-violet-600 border border-slate-700 hover:border-violet-500 text-slate-400 hover:text-white rounded-full w-6 h-6 shadow-2xl transition cursor-pointer flex items-center justify-center"
           >
             <Plus size={12} />
+          </button>
+
+          {/* Delete Column "−" button above the current column */}
+          <button
+            onMouseDown={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              editor.chain().focus().deleteColumn().run()
+            }}
+            title="Delete Column"
+            style={{
+              position: 'fixed',
+              top: `${activeTableRect.top - 30}px`,
+              left: `${activeTableRect.cellLeft + activeTableRect.cellWidth / 2 - 12}px`,
+              zIndex: 9999,
+            }}
+            className="bg-[#1e2330] hover:bg-red-700 border border-slate-700 hover:border-red-500 text-slate-400 hover:text-white rounded-full w-6 h-6 shadow-2xl transition cursor-pointer flex items-center justify-center"
+          >
+            <Minus size={12} />
           </button>
         </>
       )}
