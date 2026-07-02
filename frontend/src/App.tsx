@@ -163,33 +163,45 @@ const buildTree = (files: FileRecord[]): TreeNode[] => {
 }
 
 // Returns children of a specific category section, filtering strictly by folder path AND allowed types.
-// This ensures no cross-contamination: tasks created under Documents/ won't appear there, etc.
+// Handles workspace-prefixed paths (e.g. "Default/Documents") by navigating down the tree segments.
 const getCategoryChildren = (filesList: FileRecord[], category: string, allowedTypes: string[]): TreeNode[] => {
   const filtered = filesList.filter(f =>
     f.path.startsWith(category + '/') && allowedTypes.includes(f.type)
   )
   const tree = buildTree(filtered)
-  const catNode = tree.find(n => n.name === category)
-  return catNode ? catNode.children : tree
+  // Navigate down each path segment to reach the correct subtree node
+  const parts = category.split('/')
+  let nodes = tree
+  for (const part of parts) {
+    const found = nodes.find(n => n.name === part)
+    if (!found) return []
+    nodes = found.children
+  }
+  return nodes
 }
 
 // Returns boards (with their tasks as children) plus any standalone tasks in Tasks/.
-// Filtering strictly by path and type prevents documents/canvas from leaking in.
-const getBoardChildren = (filesList: FileRecord[]): TreeNode[] => {
+// workspace param is the active workspace name (e.g. "Default"), used to scope paths.
+const getBoardChildren = (filesList: FileRecord[], workspace: string): TreeNode[] => {
+  const prefix = workspace ? `${workspace}/` : ''
   const filtered = filesList.filter(f =>
-    (f.path.startsWith('Boards/') || f.path.startsWith('Tasks/')) &&
+    (f.path.startsWith(`${prefix}Boards/`) || f.path.startsWith(`${prefix}Tasks/`)) &&
     (f.type === 'board' || f.type === 'task' || f.type === 'folder')
   )
   const tree = buildTree(filtered)
 
-  let boardChildren: TreeNode[] = []
-  const boardsNode = tree.find(n => n.name === 'Boards')
-  if (boardsNode) boardChildren = [...boardChildren, ...boardsNode.children]
+  const getSection = (sectionName: string): TreeNode[] => {
+    const parts = workspace ? [workspace, sectionName] : [sectionName]
+    let nodes = tree
+    for (const p of parts) {
+      const found = nodes.find(n => n.name === p)
+      if (!found) return []
+      nodes = found.children
+    }
+    return nodes
+  }
 
-  const tasksNode = tree.find(n => n.name === 'Tasks')
-  if (tasksNode) boardChildren = [...boardChildren, ...tasksNode.children]
-
-  return boardChildren
+  return [...getSection('Boards'), ...getSection('Tasks')]
 }
 
 // Given a node, return the directory where new sub-items should be placed.
@@ -268,7 +280,7 @@ const TreeNodeComponent: React.FC<{
 }) => {
   const getIsCollapsed = () => {
     if (collapsedPaths[node.path] !== undefined) return collapsedPaths[node.path]
-    if (node.path === 'Documents') return false
+    if (node.path === 'Documents' || node.name === 'Documents') return false
     return true
   }
 
@@ -536,6 +548,18 @@ export const App: React.FC = () => {
   const [syncError, setSyncError] = useState(false)
   const [collapsedPaths, setCollapsedPaths] = useState<Record<string, boolean>>({})
 
+  // ── Workspace state ────────────────────────────────────────────────────────
+  const [workspaces, setWorkspaces] = useState<string[]>([])
+  const [activeWorkspace, setActiveWorkspace] = useState<string>(
+    () => localStorage.getItem('blockforge_workspace') || ''
+  )
+  const [workspaceDropdownOpen, setWorkspaceDropdownOpen] = useState(false)
+  const [newWorkspaceModal, setNewWorkspaceModal] = useState(false)
+  const [newWorkspaceName, setNewWorkspaceName] = useState('')
+
+  // W(section) → workspace-qualified section root path
+  const W = (section: string) => activeWorkspace ? `${activeWorkspace}/${section}` : section
+
   const revealInSidebar = (filePath: string) => {
     const stem = filePath.endsWith('.board.md') ? filePath.slice(0, -'.board.md'.length)
       : filePath.endsWith('.excalidraw.md') ? filePath.slice(0, -'.excalidraw.md'.length)
@@ -641,6 +665,91 @@ export const App: React.FC = () => {
     }
   }
 
+  const SECTION_NAMES = new Set(['Documents', 'Boards', 'Canvas', 'MindMaps', 'Tasks'])
+
+  const fetchWorkspaces = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/workspaces`)
+      if (!res.ok) return
+      const data = await res.json()
+      const list: string[] = data.workspaces || []
+
+      // Detect legacy flat structure (section dirs at vault root)
+      if (list.some(w => SECTION_NAMES.has(w))) {
+        const migrateRes = await fetch(`${API_BASE}/api/workspaces/migrate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'Default' }),
+        })
+        if (migrateRes.ok) {
+          const migrateData = await migrateRes.json()
+          const ws = migrateData.name as string
+          setWorkspaces([ws])
+          setActiveWorkspace(ws)
+          localStorage.setItem('blockforge_workspace', ws)
+          fetchFiles()
+        }
+        return
+      }
+
+      if (list.length === 0) {
+        // Fresh install — create Default workspace
+        const createRes = await fetch(`${API_BASE}/api/workspaces`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'Default' }),
+        })
+        if (createRes.ok) {
+          const createData = await createRes.json()
+          const ws = createData.name as string
+          setWorkspaces([ws])
+          setActiveWorkspace(ws)
+          localStorage.setItem('blockforge_workspace', ws)
+        }
+        return
+      }
+
+      setWorkspaces(list)
+      const saved = localStorage.getItem('blockforge_workspace')
+      const ws = (saved && list.includes(saved)) ? saved : list[0]
+      setActiveWorkspace(ws)
+      localStorage.setItem('blockforge_workspace', ws)
+    } catch (e) {
+      console.error('Error fetching workspaces', e)
+    }
+  }
+
+  const handleCreateWorkspace = async () => {
+    const name = newWorkspaceName.trim()
+    if (!name) return
+    try {
+      const res = await fetch(`${API_BASE}/api/workspaces`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      })
+      if (!res.ok) { alert('Failed to create workspace'); return }
+      const data = await res.json()
+      const ws = data.name as string
+      setWorkspaces(prev => [...prev, ws])
+      setActiveWorkspace(ws)
+      localStorage.setItem('blockforge_workspace', ws)
+      setNewWorkspaceModal(false)
+      setNewWorkspaceName('')
+      setSelectedPath(null)
+    } catch (e) {
+      console.error('Error creating workspace', e)
+    }
+  }
+
+  const handleSwitchWorkspace = (ws: string) => {
+    setActiveWorkspace(ws)
+    localStorage.setItem('blockforge_workspace', ws)
+    setWorkspaceDropdownOpen(false)
+    setSelectedPath(null)
+    setCollapsedPaths({})
+  }
+
   const fetchSettings = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/settings`)
@@ -692,6 +801,7 @@ export const App: React.FC = () => {
   }
 
   useEffect(() => {
+    fetchWorkspaces()
     fetchFiles()
     fetchSettings()
     const es = new EventSource(`${API_BASE}/api/sync/events`)
@@ -791,7 +901,10 @@ export const App: React.FC = () => {
   }, [searchQuery, searchOpen])
 
   useEffect(() => {
-    const close = () => setContextMenu(p => p.isOpen ? { ...p, isOpen: false } : p)
+    const close = () => {
+      setContextMenu(p => p.isOpen ? { ...p, isOpen: false } : p)
+      setWorkspaceDropdownOpen(false)
+    }
     window.addEventListener('click', close)
     return () => window.removeEventListener('click', close)
   }, [])
@@ -844,7 +957,7 @@ export const App: React.FC = () => {
     if (!sanitizedName) return
 
     // Resolve target parent folder from selectedPath (the parent board page)
-    let parentFolder = 'Tasks/'
+    let parentFolder = W('Tasks') + '/'
     if (selectedPath) {
       let stem = selectedPath
       if (stem.endsWith('.board.md')) {
@@ -898,25 +1011,25 @@ export const App: React.FC = () => {
     let content = ''
 
     if (type === 'diagram') {
-      path = parentPath ? `${parentPath}/${name}.drawio.md` : `Canvas/${name}.drawio.md`
+      path = parentPath ? `${parentPath}/${name}.drawio.md` : `${W('Canvas')}/${name}.drawio.md`
       content = `---\ntitle: ${title}\ntype: canvas\neditor: drawio\n---\n\n# Draw.io Diagram\nBelow is the embedded diagram layout in XML.\n\n\`\`\`xml\n<mxfile host="app.diagrams.net"><diagram id="1" name="Page-1"><mxGraphModel dx="1000" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0"><root><mxCell id="0" /><mxCell id="1" parent="0" /></root></mxGraphModel></diagram></mxfile>\n\`\`\`\n`
     } else if (type === 'board') {
-      path = parentPath ? `${parentPath}/${name}.board.md` : `Boards/${name}.board.md`
+      path = parentPath ? `${parentPath}/${name}.board.md` : `${W('Boards')}/${name}.board.md`
       content = `---\ntitle: ${title}\ntype: board\ncolumns: ["Todo", "In Progress", "Done"]\n---\n\n# ${title}\n\nCustomizable Kanban layout.\n`
     } else if (type === 'task') {
-      path = parentPath ? `${parentPath}/${name}.md` : `Tasks/${name}.md`
+      path = parentPath ? `${parentPath}/${name}.md` : `${W('Tasks')}/${name}.md`
       content = `---\ntitle: ${title}\ntype: task\nstatus: Todo\npriority: Medium\ndueDate: ${new Date().toISOString().split('T')[0]}\nassignee: Unassigned\ntags: []\n---\n\n# ${title}\n\nDescribe the task details here.\n`
     } else if (type === 'canvas') {
-      path = parentPath ? `${parentPath}/${name}.excalidraw.md` : `Canvas/${name}.excalidraw.md`
+      path = parentPath ? `${parentPath}/${name}.excalidraw.md` : `${W('Canvas')}/${name}.excalidraw.md`
       content = `---\ntitle: ${title}\ntype: canvas\neditor: excalidraw\n---\n\n# Drawing Canvas\nBelow is the embedded drawing data.\n\n\`\`\`json\n{\n  "type": "excalidraw",\n  "version": 2,\n  "elements": [],\n  "appState": {"viewBackgroundColor": "#121212","theme": "dark"}\n}\n\`\`\`\n`
     } else if (type === 'mindmap') {
-      path = parentPath ? `${parentPath}/${name}.mindmap.md` : `MindMaps/${name}.mindmap.md`
+      path = parentPath ? `${parentPath}/${name}.mindmap.md` : `${W('MindMaps')}/${name}.mindmap.md`
       content = `---\ntitle: ${title}\ntype: mindmap\n---\n\n\`\`\`json\n{"nodeData":{"id":"root","topic":"${title}","root":true,"children":[]},"arrows":[],"summaries":[],"direction":2}\n\`\`\`\n`
     } else if (type === 'folder') {
-      path = parentPath ? `${parentPath}/${name}.md` : `Documents/${name}.md`
+      path = parentPath ? `${parentPath}/${name}.md` : `${W('Documents')}/${name}.md`
       content = `---\ntitle: ${title}\ntype: folder\n---\n\n# ${title}\n`
     } else {
-      path = parentPath ? `${parentPath}/${name}.md` : `Documents/${name}.md`
+      path = parentPath ? `${parentPath}/${name}.md` : `${W('Documents')}/${name}.md`
       content = `---\ntitle: ${title}\ntype: document\n---\n\n# ${title}\n\nStart writing note content here.\n`
     }
 
@@ -1097,10 +1210,10 @@ export const App: React.FC = () => {
   }
 
   const COMMAND_ITEMS = [
-    { id: 'create-doc',     label: 'Create New Document',          icon: <FilePlus size={14} className="text-blue-400" />,    action: () => handleCreateFile('document', 'Documents', undefined, ['document']) },
-    { id: 'create-board',   label: 'Create New Kanban Board',      icon: <LayoutGrid size={14} className="text-rose-400" />,  action: () => handleCreateFile('board', 'Boards', undefined, ['board']) },
-    { id: 'create-canvas',  label: 'Create New Canvas',            icon: <Brush size={14} className="text-emerald-400" />,    action: () => handleCreateFile('canvas', 'Canvas', undefined, ['canvas', 'diagram']) },
-    { id: 'create-mindmap', label: 'Create New Mind Map',          icon: <Brain size={14} className="text-violet-400" />,     action: () => handleCreateFile('mindmap', 'MindMaps', undefined, ['mindmap']) },
+    { id: 'create-doc',     label: 'Create New Document',          icon: <FilePlus size={14} className="text-blue-400" />,    action: () => handleCreateFile('document', W('Documents'), undefined, ['document']) },
+    { id: 'create-board',   label: 'Create New Kanban Board',      icon: <LayoutGrid size={14} className="text-rose-400" />,  action: () => handleCreateFile('board', W('Boards'), undefined, ['board']) },
+    { id: 'create-canvas',  label: 'Create New Canvas',            icon: <Brush size={14} className="text-emerald-400" />,    action: () => handleCreateFile('canvas', W('Canvas'), undefined, ['canvas', 'diagram']) },
+    { id: 'create-mindmap', label: 'Create New Mind Map',          icon: <Brain size={14} className="text-violet-400" />,     action: () => handleCreateFile('mindmap', W('MindMaps'), undefined, ['mindmap']) },
     { id: 'open-settings',  label: 'Open Settings',                icon: <Settings size={14} className="text-slate-400" />,   action: () => setAdminModalOpen(true) },
   ]
 
@@ -1116,6 +1229,43 @@ export const App: React.FC = () => {
                 <h1 className="font-bold text-sm tracking-tight">BlockForgeMD</h1>
                 <span className="text-[10px] text-slate-500 font-mono">Local-First Vault</span>
               </div>
+            </div>
+            {/* Workspace switcher */}
+            <div className="mt-3 relative">
+              <button
+                onClick={e => { e.stopPropagation(); setWorkspaceDropdownOpen(o => !o) }}
+                className="w-full flex items-center justify-between px-2.5 py-1.5 bg-[#0d1117] border border-slate-800 hover:border-violet-500/50 rounded-lg text-xs transition cursor-pointer group"
+              >
+                <span className="flex items-center gap-1.5 text-slate-300 font-medium truncate">
+                  <Layers size={11} className="text-violet-400 shrink-0" />
+                  <span className="truncate">{activeWorkspace || 'No Workspace'}</span>
+                </span>
+                <ChevronDown size={11} className="text-slate-500 group-hover:text-slate-300 transition shrink-0" />
+              </button>
+              {workspaceDropdownOpen && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-[#1c2433] border border-slate-700 rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                  {workspaces.map(ws => (
+                    <button
+                      key={ws}
+                      onClick={e => { e.stopPropagation(); handleSwitchWorkspace(ws) }}
+                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-slate-700/50 transition cursor-pointer flex items-center gap-2 ${ws === activeWorkspace ? 'text-violet-400 font-semibold' : 'text-slate-300'}`}
+                    >
+                      <Layers size={10} className={ws === activeWorkspace ? 'text-violet-400' : 'text-slate-500'} />
+                      <span className="truncate">{ws}</span>
+                      {ws === activeWorkspace && <span className="ml-auto text-[9px] text-violet-500">active</span>}
+                    </button>
+                  ))}
+                  <div className="border-t border-slate-700/60 mt-1 pt-1">
+                    <button
+                      onClick={e => { e.stopPropagation(); setWorkspaceDropdownOpen(false); setNewWorkspaceModal(true) }}
+                      className="w-full text-left px-3 py-1.5 text-xs text-slate-400 hover:text-violet-400 hover:bg-slate-700/30 transition cursor-pointer flex items-center gap-2"
+                    >
+                      <Plus size={10} />
+                      New Workspace
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -1153,7 +1303,7 @@ export const App: React.FC = () => {
                 onDrop={(e) => {
                   e.preventDefault()
                   setDragOverSection(null)
-                  if (draggingPath) handleMoveToSectionRoot(draggingPath, 'Documents')
+                  if (draggingPath) handleMoveToSectionRoot(draggingPath, W('Documents'))
                 }}
               >
                 <span className="flex items-center gap-1.5">
@@ -1162,21 +1312,21 @@ export const App: React.FC = () => {
                 </span>
                 <span className="flex items-center gap-1">
                   <button
-                    onClick={() => toggleSectionCollapse(['Documents'])}
+                    onClick={() => toggleSectionCollapse([W('Documents')])}
                     className="hover:text-white text-slate-500 transition cursor-pointer"
-                    title={isSectionExpanded(['Documents']) ? 'Collapse all' : 'Expand all'}
+                    title={isSectionExpanded([W('Documents')]) ? 'Collapse all' : 'Expand all'}
                   >
-                    {isSectionExpanded(['Documents']) ? <ChevronsUp size={12} /> : <ChevronsDown size={12} />}
+                    {isSectionExpanded([W('Documents')]) ? <ChevronsUp size={12} /> : <ChevronsDown size={12} />}
                   </button>
                   <button
-                    onClick={() => handleCreateFile('folder', 'Documents', undefined, ['folder'])}
+                    onClick={() => handleCreateFile('folder', W('Documents'), undefined, ['folder'])}
                     className="hover:text-white text-slate-500 transition cursor-pointer"
                     title="New Folder"
                   >
                     <FolderPlus size={12} />
                   </button>
                   <button
-                    onClick={() => handleCreateFile('document', 'Documents', undefined, ['document'])}
+                    onClick={() => handleCreateFile('document', W('Documents'), undefined, ['document'])}
                     className="hover:text-white text-slate-500 transition cursor-pointer"
                     title="New Document"
                   >
@@ -1185,10 +1335,10 @@ export const App: React.FC = () => {
                 </span>
               </div>
               <div className="space-y-0.5 pl-1.5">
-                {getCategoryChildren(files, 'Documents', ['document', 'folder']).length === 0 ? (
+                {getCategoryChildren(files, W('Documents'), ['document', 'folder']).length === 0 ? (
                   <div className="px-3 py-1 text-[11px] text-slate-600 italic select-none">No documents</div>
                 ) : (
-                  getCategoryChildren(files, 'Documents', ['document', 'folder']).map((node) => (
+                  getCategoryChildren(files, W('Documents'), ['document', 'folder']).map((node) => (
                     <TreeNodeComponent
                       key={node.path}
                       node={node}
@@ -1243,7 +1393,7 @@ export const App: React.FC = () => {
                 onDrop={(e) => {
                   e.preventDefault()
                   setDragOverSection(null)
-                  if (draggingPath) handleMoveToSectionRoot(draggingPath, 'Boards')
+                  if (draggingPath) handleMoveToSectionRoot(draggingPath, W('Boards'))
                 }}
               >
                 <span className="flex items-center gap-1.5">
@@ -1252,21 +1402,21 @@ export const App: React.FC = () => {
                 </span>
                 <span className="flex items-center gap-1">
                   <button
-                    onClick={() => toggleSectionCollapse(['Boards', 'Tasks'])}
+                    onClick={() => toggleSectionCollapse([W('Boards'), W('Tasks')])}
                     className="hover:text-white text-slate-500 transition cursor-pointer"
-                    title={isSectionExpanded(['Boards', 'Tasks']) ? 'Collapse all' : 'Expand all'}
+                    title={isSectionExpanded([W('Boards'), W('Tasks')]) ? 'Collapse all' : 'Expand all'}
                   >
-                    {isSectionExpanded(['Boards', 'Tasks']) ? <ChevronsUp size={12} /> : <ChevronsDown size={12} />}
+                    {isSectionExpanded([W('Boards'), W('Tasks')]) ? <ChevronsUp size={12} /> : <ChevronsDown size={12} />}
                   </button>
                   <button
-                    onClick={() => handleCreateFile('folder', 'Boards', undefined, ['folder'])}
+                    onClick={() => handleCreateFile('folder', W('Boards'), undefined, ['folder'])}
                     className="hover:text-white text-slate-500 transition cursor-pointer"
                     title="New Folder"
                   >
                     <FolderPlus size={12} />
                   </button>
                   <button
-                    onClick={() => handleCreateFile('board', 'Boards', undefined, ['board'])}
+                    onClick={() => handleCreateFile('board', W('Boards'), undefined, ['board'])}
                     className="hover:text-white text-slate-500 transition cursor-pointer"
                     title="New Kanban Board"
                   >
@@ -1275,10 +1425,10 @@ export const App: React.FC = () => {
                 </span>
               </div>
               <div className="space-y-0.5 pl-1.5">
-                {getBoardChildren(files).length === 0 ? (
+                {getBoardChildren(files, activeWorkspace).length === 0 ? (
                   <div className="px-3 py-1 text-[11px] text-slate-600 italic select-none">No boards</div>
                 ) : (
-                  getBoardChildren(files).map((node) => (
+                  getBoardChildren(files, activeWorkspace).map((node) => (
                     <TreeNodeComponent
                       key={node.path}
                       node={node}
@@ -1333,7 +1483,7 @@ export const App: React.FC = () => {
                 onDrop={(e) => {
                   e.preventDefault()
                   setDragOverSection(null)
-                  if (draggingPath) handleMoveToSectionRoot(draggingPath, 'Canvas')
+                  if (draggingPath) handleMoveToSectionRoot(draggingPath, W('Canvas'))
                 }}
               >
                 <span className="flex items-center gap-1.5">
@@ -1342,21 +1492,21 @@ export const App: React.FC = () => {
                 </span>
                 <span className="flex items-center gap-1">
                   <button
-                    onClick={() => toggleSectionCollapse(['Canvas'])}
+                    onClick={() => toggleSectionCollapse([W('Canvas')])}
                     className="hover:text-white text-slate-500 transition cursor-pointer"
-                    title={isSectionExpanded(['Canvas']) ? 'Collapse all' : 'Expand all'}
+                    title={isSectionExpanded([W('Canvas')]) ? 'Collapse all' : 'Expand all'}
                   >
-                    {isSectionExpanded(['Canvas']) ? <ChevronsUp size={12} /> : <ChevronsDown size={12} />}
+                    {isSectionExpanded([W('Canvas')]) ? <ChevronsUp size={12} /> : <ChevronsDown size={12} />}
                   </button>
                   <button
-                    onClick={() => handleCreateFile('folder', 'Canvas', undefined, ['folder'])}
+                    onClick={() => handleCreateFile('folder', W('Canvas'), undefined, ['folder'])}
                     className="hover:text-white text-slate-500 transition cursor-pointer"
                     title="New Folder"
                   >
                     <FolderPlus size={12} />
                   </button>
                   <button
-                    onClick={() => handleCreateFile('canvas', 'Canvas', undefined, ['canvas', 'diagram'])}
+                    onClick={() => handleCreateFile('canvas', W('Canvas'), undefined, ['canvas', 'diagram'])}
                     className="hover:text-white text-slate-500 transition cursor-pointer"
                     title="New Canvas"
                   >
@@ -1365,10 +1515,10 @@ export const App: React.FC = () => {
                 </span>
               </div>
               <div className="space-y-0.5 pl-1.5">
-                {getCategoryChildren(files, 'Canvas', ['canvas', 'folder']).length === 0 ? (
+                {getCategoryChildren(files, W('Canvas'), ['canvas', 'folder']).length === 0 ? (
                   <div className="px-3 py-1 text-[11px] text-slate-600 italic select-none">No canvases</div>
                 ) : (
-                  getCategoryChildren(files, 'Canvas', ['canvas', 'folder']).map((node) => (
+                  getCategoryChildren(files, W('Canvas'), ['canvas', 'folder']).map((node) => (
                     <TreeNodeComponent
                       key={node.path}
                       node={node}
@@ -1423,7 +1573,7 @@ export const App: React.FC = () => {
                 onDrop={(e) => {
                   e.preventDefault()
                   setDragOverSection(null)
-                  if (draggingPath) handleMoveToSectionRoot(draggingPath, 'MindMaps')
+                  if (draggingPath) handleMoveToSectionRoot(draggingPath, W('MindMaps'))
                 }}
               >
                 <span className="flex items-center gap-1.5">
@@ -1432,21 +1582,21 @@ export const App: React.FC = () => {
                 </span>
                 <span className="flex items-center gap-1">
                   <button
-                    onClick={() => toggleSectionCollapse(['MindMaps'])}
+                    onClick={() => toggleSectionCollapse([W('MindMaps')])}
                     className="hover:text-white text-slate-500 transition cursor-pointer"
-                    title={isSectionExpanded(['MindMaps']) ? 'Collapse all' : 'Expand all'}
+                    title={isSectionExpanded([W('MindMaps')]) ? 'Collapse all' : 'Expand all'}
                   >
-                    {isSectionExpanded(['MindMaps']) ? <ChevronsUp size={12} /> : <ChevronsDown size={12} />}
+                    {isSectionExpanded([W('MindMaps')]) ? <ChevronsUp size={12} /> : <ChevronsDown size={12} />}
                   </button>
                   <button
-                    onClick={() => handleCreateFile('folder', 'MindMaps', undefined, ['folder'])}
+                    onClick={() => handleCreateFile('folder', W('MindMaps'), undefined, ['folder'])}
                     className="hover:text-white text-slate-500 transition cursor-pointer"
                     title="New Folder"
                   >
                     <FolderPlus size={12} />
                   </button>
                   <button
-                    onClick={() => handleCreateFile('mindmap', 'MindMaps', undefined, ['mindmap'])}
+                    onClick={() => handleCreateFile('mindmap', W('MindMaps'), undefined, ['mindmap'])}
                     className="hover:text-white text-slate-500 transition cursor-pointer"
                     title="New Mind Map"
                   >
@@ -1455,10 +1605,10 @@ export const App: React.FC = () => {
                 </span>
               </div>
               <div className="space-y-0.5 pl-1.5">
-                {getCategoryChildren(files, 'MindMaps', ['mindmap', 'folder']).length === 0 ? (
+                {getCategoryChildren(files, W('MindMaps'), ['mindmap', 'folder']).length === 0 ? (
                   <div className="px-3 py-1 text-[11px] text-slate-600 italic select-none">No mind maps</div>
                 ) : (
-                  getCategoryChildren(files, 'MindMaps', ['mindmap', 'folder']).map((node) => (
+                  getCategoryChildren(files, W('MindMaps'), ['mindmap', 'folder']).map((node) => (
                     <TreeNodeComponent
                       key={node.path}
                       node={node}
@@ -1498,28 +1648,28 @@ export const App: React.FC = () => {
         <div className="p-4 border-t border-slate-800 bg-[#161b22]/50 space-y-3">
           <div className="grid grid-cols-4 gap-2">
             <button
-              onClick={() => handleCreateFile('document', 'Documents', undefined, ['document'])}
+              onClick={() => handleCreateFile('document', W('Documents'), undefined, ['document'])}
               className="flex flex-col items-center justify-center py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg transition text-[10px] font-semibold cursor-pointer"
             >
               <FilePlus size={16} className="text-blue-400 mb-1" />
               Doc
             </button>
             <button
-              onClick={() => handleCreateFile('board', 'Boards', undefined, ['board'])}
+              onClick={() => handleCreateFile('board', W('Boards'), undefined, ['board'])}
               className="flex flex-col items-center justify-center py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg transition text-[10px] font-semibold cursor-pointer"
             >
               <LayoutGrid size={16} className="text-amber-500 mb-1" />
               Board
             </button>
             <button
-              onClick={() => handleCreateFile('canvas', 'Canvas', undefined, ['canvas', 'diagram'])}
+              onClick={() => handleCreateFile('canvas', W('Canvas'), undefined, ['canvas', 'diagram'])}
               className="flex flex-col items-center justify-center py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg transition text-[10px] font-semibold cursor-pointer"
             >
               <Brush size={16} className="text-emerald-400 mb-1" />
               Canvas
             </button>
             <button
-              onClick={() => handleCreateFile('mindmap', 'MindMaps', undefined, ['mindmap'])}
+              onClick={() => handleCreateFile('mindmap', W('MindMaps'), undefined, ['mindmap'])}
               className="flex flex-col items-center justify-center py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg transition text-[10px] font-semibold cursor-pointer"
             >
               <Brain size={16} className="text-violet-400 mb-1" />
@@ -1644,7 +1794,7 @@ export const App: React.FC = () => {
                 <p className="text-sm text-slate-400 mb-6">A high-performance, local-first alternative to Notion. All files saved as Markdown on disk.</p>
                 <div className="w-full space-y-3">
                   <button
-                    onClick={() => handleCreateFile('board', 'Boards', undefined, ['board'])}
+                    onClick={() => handleCreateFile('board', W('Boards'), undefined, ['board'])}
                     className="w-full flex items-center justify-between px-4 py-3 bg-[#161b22] hover:bg-slate-800 border border-slate-800 rounded-xl transition text-left cursor-pointer text-xs"
                   >
                     <div className="flex items-center gap-3">
@@ -1657,15 +1807,15 @@ export const App: React.FC = () => {
                     <ArrowRight size={14} className="text-slate-500" />
                   </button>
                   <div className="grid grid-cols-3 gap-3 text-xs">
-                    <button onClick={() => handleCreateFile('document', 'Documents', undefined, ['document'])} className="flex flex-col items-center justify-center p-4 bg-[#161b22]/50 hover:bg-slate-800 border border-slate-800 rounded-xl transition cursor-pointer">
+                    <button onClick={() => handleCreateFile('document', W('Documents'), undefined, ['document'])} className="flex flex-col items-center justify-center p-4 bg-[#161b22]/50 hover:bg-slate-800 border border-slate-800 rounded-xl transition cursor-pointer">
                       <FileText size={20} className="text-blue-400 mb-2" />
                       <span className="font-semibold text-slate-300">Document</span>
                     </button>
-                    <button onClick={() => handleCreateFile('canvas', 'Canvas', undefined, ['canvas', 'diagram'])} className="flex flex-col items-center justify-center p-4 bg-[#161b22]/50 hover:bg-slate-800 border border-slate-800 rounded-xl transition cursor-pointer">
+                    <button onClick={() => handleCreateFile('canvas', W('Canvas'), undefined, ['canvas', 'diagram'])} className="flex flex-col items-center justify-center p-4 bg-[#161b22]/50 hover:bg-slate-800 border border-slate-800 rounded-xl transition cursor-pointer">
                       <Brush size={20} className="text-emerald-400 mb-2" />
                       <span className="font-semibold text-slate-300">Canvas</span>
                     </button>
-                    <button onClick={() => handleCreateFile('mindmap', 'MindMaps', undefined, ['mindmap'])} className="flex flex-col items-center justify-center p-4 bg-[#161b22]/50 hover:bg-slate-800 border border-slate-800 rounded-xl transition cursor-pointer">
+                    <button onClick={() => handleCreateFile('mindmap', W('MindMaps'), undefined, ['mindmap'])} className="flex flex-col items-center justify-center p-4 bg-[#161b22]/50 hover:bg-slate-800 border border-slate-800 rounded-xl transition cursor-pointer">
                       <Brain size={20} className="text-violet-400 mb-2" />
                       <span className="font-semibold text-slate-300">Mind Map</span>
                     </button>
@@ -2339,6 +2489,47 @@ export const App: React.FC = () => {
                 <span>⏎ select</span>
               </div>
               <span>Esc to close</span>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+      </AnimatePresence>
+
+      {/* ── New Workspace Modal ───────────────────────────────────────────── */}
+      <AnimatePresence>
+      {newWorkspaceModal && (
+        <motion.div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50"
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          onClick={() => setNewWorkspaceModal(false)}
+        >
+          <motion.div
+            className="bg-[#1c2433] border border-slate-700 rounded-2xl shadow-2xl p-6 w-80"
+            initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2 mb-4">
+              <Layers size={16} className="text-violet-400" />
+              <h2 className="text-sm font-bold text-slate-100">New Workspace</h2>
+            </div>
+            <input
+              autoFocus
+              type="text"
+              value={newWorkspaceName}
+              onChange={e => setNewWorkspaceName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleCreateWorkspace(); if (e.key === 'Escape') setNewWorkspaceModal(false) }}
+              placeholder="Workspace name..."
+              className="w-full bg-[#0d1117] border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-violet-500 mb-4"
+            />
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setNewWorkspaceModal(false)} className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 transition cursor-pointer">Cancel</button>
+              <button
+                onClick={handleCreateWorkspace}
+                disabled={!newWorkspaceName.trim()}
+                className="px-4 py-1.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg transition cursor-pointer"
+              >
+                Create
+              </button>
             </div>
           </motion.div>
         </motion.div>

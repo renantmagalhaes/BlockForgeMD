@@ -85,6 +85,9 @@ func (s *Server) setupRoutes() {
 		r.Get("/search", s.handleSearch)
 		r.Get("/settings", s.handleGetSettings)
 		r.Post("/settings", s.handleSaveSettings)
+		r.Get("/workspaces", s.handleListWorkspaces)
+		r.Post("/workspaces", s.handleCreateWorkspace)
+		r.Post("/workspaces/migrate", s.handleMigrateWorkspace)
 	})
 
 	// Serve assets directly from the vault's assets directory
@@ -1051,4 +1054,93 @@ func (s *Server) handleMoveFile(w http.ResponseWriter, r *http.Request) {
 
 	s.broadcastEvent(req.To)
 	respondJSON(w, map[string]string{"status": "moved", "to": req.To})
+}
+
+// ─── Workspace Handlers ───────────────────────────────────────────────────────
+
+var validWorkspaceNameRe = regexp.MustCompile(`^[\w][\w\s\-]*$`)
+
+// handleListWorkspaces returns all top-level non-hidden directories in the vault.
+func (s *Server) handleListWorkspaces(w http.ResponseWriter, r *http.Request) {
+	entries, err := os.ReadDir(s.rootPath)
+	if err != nil {
+		http.Error(w, "failed to read vault", http.StatusInternalServerError)
+		return
+	}
+	workspaces := []string{}
+	for _, e := range entries {
+		if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+			workspaces = append(workspaces, e.Name())
+		}
+	}
+	respondJSON(w, map[string]interface{}{"workspaces": workspaces})
+}
+
+// handleCreateWorkspace creates a new workspace directory with standard section subdirs.
+func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" || !validWorkspaceNameRe.MatchString(name) {
+		http.Error(w, "invalid workspace name", http.StatusBadRequest)
+		return
+	}
+
+	sections := []string{"Documents", "Boards", "Canvas", "MindMaps"}
+	for _, section := range sections {
+		if err := os.MkdirAll(filepath.Join(s.rootPath, name, section), 0755); err != nil {
+			http.Error(w, fmt.Sprintf("failed to create %s: %v", section, err), http.StatusInternalServerError)
+			return
+		}
+	}
+	s.watcher.WatchPath(filepath.Join(s.rootPath, name))
+	respondJSON(w, map[string]string{"name": name})
+}
+
+// handleMigrateWorkspace moves existing flat section dirs (Documents/, Boards/, etc.)
+// into a named workspace subdirectory, and updates all DB path records.
+func (s *Server) handleMigrateWorkspace(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = "Default"
+	}
+
+	workspaceDir := filepath.Join(s.rootPath, name)
+	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+		http.Error(w, fmt.Sprintf("failed to create workspace dir: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	sections := []string{"Documents", "Boards", "Canvas", "MindMaps", "Tasks"}
+	for _, section := range sections {
+		src := filepath.Join(s.rootPath, section)
+		dst := filepath.Join(workspaceDir, section)
+		if _, err := os.Stat(src); err == nil {
+			if err := os.Rename(src, dst); err != nil {
+				http.Error(w, fmt.Sprintf("failed to move %s: %v", section, err), http.StatusInternalServerError)
+				return
+			}
+		}
+	}
+
+	if err := s.db.AddWorkspacePrefix(name); err != nil {
+		http.Error(w, fmt.Sprintf("failed to update DB: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	s.watcher.WatchPath(workspaceDir)
+	s.broadcastEvent("__workspace_migrated__")
+	respondJSON(w, map[string]string{"name": name})
 }

@@ -341,6 +341,28 @@ func (db *DB) SetSetting(key string, value string) error {
 	return err
 }
 
+// AddWorkspacePrefix prepends workspace/name to all path columns.
+// Called once during migration from the flat-directory structure.
+func (db *DB) AddWorkspacePrefix(workspace string) error {
+	tx, err := db.Conn.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	prefix := workspace + "/"
+	if _, err := tx.Exec("UPDATE files SET path = ? || path", prefix); err != nil {
+		return fmt.Errorf("failed to update files: %w", err)
+	}
+	if _, err := tx.Exec("UPDATE front_matter SET file_path = ? || file_path", prefix); err != nil {
+		return fmt.Errorf("failed to update front_matter: %w", err)
+	}
+	if _, err := tx.Exec("UPDATE tasks SET file_path = ? || file_path", prefix); err != nil {
+		return fmt.Errorf("failed to update tasks: %w", err)
+	}
+	return tx.Commit()
+}
+
 func (db *DB) Close() error {
 	return db.Conn.Close()
 }
