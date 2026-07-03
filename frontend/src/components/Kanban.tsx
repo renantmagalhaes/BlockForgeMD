@@ -702,10 +702,19 @@ export const Kanban: React.FC<KanbanProps> = ({
   }
 
   const toggleColCollapse = (col: string) =>
-    setCollapsedCols(prev => { const s = new Set(prev); s.has(col) ? s.delete(col) : s.add(col); return s })
+    setCollapsedCols(prev => {
+      const s = new Set(prev)
+      s.has(col) ? s.delete(col) : s.add(col)
+      onUpdateBoardFrontMatter?.({ collapsedColumns: Array.from(s) })
+      return s
+    })
 
-  // Reset filters when board changes
-  useEffect(() => { setFilterTags([]); setFilterPriorities([]); setSearchText(''); setCollapsedCols(new Set()) }, [boardPath])
+  // Reset filters when board changes; restore collapsed state from frontmatter
+  useEffect(() => {
+    setFilterTags([]); setFilterPriorities([]); setSearchText('')
+    const stored = parseJSON<string[] | null>(boardFrontMatter?.collapsedColumns, null)
+    setCollapsedCols(new Set(Array.isArray(stored) ? stored : []))
+  }, [boardPath])
 
   // Close floating popovers on outside click
   useEffect(() => {
@@ -763,42 +772,38 @@ export const Kanban: React.FC<KanbanProps> = ({
       />
 
       {/* ── Board grid ── */}
-      <div className="flex gap-3 flex-1 overflow-hidden">
-        {/* Collapsed column strips (outside scroll area) */}
-        {boardColumns.filter(c => collapsedCols.has(c)).map(col => {
+      <div className="flex gap-4 flex-1 overflow-x-auto overflow-y-hidden pb-4 no-scrollbar items-start">
+        {boardColumns.map(col => {
           const colIdx  = boardColumns.indexOf(col)
           const accent  = getColumnColor(col, colIdx)
-          const count   = getTasksByColumn(col).length
-          return (
-            <div
-              key={col}
-              onClick={() => toggleColCollapse(col)}
-              title={`${col} (${count} cards) — click to expand`}
-              className="flex flex-col items-center justify-start w-12 shrink-0 min-h-[500px] rounded-xl bf-kanban-col cursor-pointer hover:opacity-80 transition pt-3 pb-3 gap-3"
-              style={{ borderTop: `3px solid ${accent}` }}
-            >
-              {/* Card count badge */}
-              <span
-                className="text-[10px] font-black rounded-full w-5 h-5 flex items-center justify-center shrink-0"
-                style={{ background: accent + '22', color: accent, border: `1px solid ${accent}44` }}
-              >
-                {count}
-              </span>
-              {/* Column name vertical */}
-              <span
-                className="text-[11px] font-black uppercase tracking-widest flex-1"
-                style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', color: accent }}
-              >
-                {col}
-              </span>
-            </div>
-          )
-        })}
+          const isCollapsed = collapsedCols.has(col)
 
-        {/* Expanded columns (scrollable area) */}
-        <div className="flex gap-4 flex-1 overflow-x-auto overflow-y-hidden pb-4 no-scrollbar items-start">
-        {boardColumns.filter(c => !collapsedCols.has(c)).map(col => {
-          const colIdx  = boardColumns.indexOf(col)
+          if (isCollapsed) {
+            const count = getTasksByColumn(col).length
+            return (
+              <div
+                key={col}
+                onClick={() => toggleColCollapse(col)}
+                title={`${col} (${count} cards) — click to expand`}
+                className="flex flex-col items-center justify-start w-12 shrink-0 min-h-[500px] rounded-xl bf-kanban-col cursor-pointer hover:opacity-80 transition pt-3 pb-3 gap-3"
+                style={{ borderTop: `3px solid ${accent}` }}
+              >
+                <span
+                  className="text-[10px] font-black rounded-full w-5 h-5 flex items-center justify-center shrink-0"
+                  style={{ background: accent + '22', color: accent, border: `1px solid ${accent}44` }}
+                >
+                  {count}
+                </span>
+                <span
+                  className="text-[11px] font-black uppercase tracking-widest flex-1"
+                  style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', color: accent }}
+                >
+                  {col}
+                </span>
+              </div>
+            )
+          }
+
           const colTasks    = getTasksByColumn(col)
           const isOver      = dragOverColumn === col
           const isEditing   = editingColumn === col
@@ -892,23 +897,21 @@ export const Kanban: React.FC<KanbanProps> = ({
                   const isDragging  = draggingPath === task.path
                   const showTagEd   = tagEditorCard === task.path
 
-                  // ── Filter logic ─────────────────────────────────────────
+                  // ── Filter + search logic ────────────────────────────────
                   const isFilterActive  = filterTags.length > 0 || filterPriorities.length > 0
                   const matchesTags     = filterTags.length === 0 || filterTags.every(t => tags.includes(t))
                   const matchesPriority = filterPriorities.length === 0 || filterPriorities.includes(priority || '')
-                  const matchesAll      = matchesTags && matchesPriority
+                  const matchesFilter   = matchesTags && matchesPriority
 
-                  if (isFilterActive && filterMode === 'hide' && !matchesAll) return null
+                  const q = searchText.trim().toLowerCase()
+                  const matchesSearch   = !q || task.title.toLowerCase().includes(q) ||
+                    (task.frontMatter?.description || '').toLowerCase().includes(q)
 
-                  // ── Search filter ─────────────────────────────────────────
-                  if (searchText.trim()) {
-                    const q = searchText.toLowerCase()
-                    const matchesSearch = task.title.toLowerCase().includes(q) ||
-                      (task.frontMatter?.description || '').toLowerCase().includes(q)
-                    if (!matchesSearch) return null
-                  }
+                  const matchesAll = matchesFilter && matchesSearch
 
-                  const filterAttr = (isFilterActive && filterMode === 'highlight')
+                  if (filterMode === 'hide' && !matchesAll) return null
+
+                  const filterAttr = filterMode === 'highlight'
                     ? (matchesAll ? 'match' : 'dim')
                     : undefined
 
@@ -1078,7 +1081,6 @@ export const Kanban: React.FC<KanbanProps> = ({
             </div>
           )
         })}
-        </div>
       </div>
 
       {/* ── Fixed-position popovers ── */}
