@@ -1192,17 +1192,30 @@ export const App: React.FC = () => {
 
   const handleDeleteFile = async (path: string) => {
     const fileRecord = files.find(f => f.path === path)
-    const isFolder = fileRecord?.type === 'folder'
-    const label = isFolder ? 'folder and all its contents' : 'file'
+    const fileType = fileRecord?.type
+    const isFolder = fileType === 'folder'
+    const isBoard = fileType === 'board'
+    const label = isFolder ? 'folder and all its contents'
+      : isBoard ? 'board and all its tasks'
+      : 'file'
     const action = trashRetentionDays > 0 ? 'Move to Trash' : 'Permanently Delete'
     if (!confirm(`${action}: ${label}?\n\n${path}`)) return
     try {
+      // Always use the file endpoint — the backend now auto-collects children
+      // for boards, canvases, and any other type with a same-stem directory.
       const endpoint = isFolder ? 'folder' : 'file'
       const res = await fetch(`${API_BASE}/api/${endpoint}?path=${encodeURIComponent(path)}`, { method: 'DELETE' })
       if (!res.ok) throw new Error(`Failed to delete ${label}`)
       if (favorites.includes(path)) handleToggleFavorite(path)
       fetchFiles()
-      if (selectedPath === path || (isFolder && selectedPath?.startsWith(path.replace(/\.md$/, '/')))) {
+      // Navigate away if the open file is the deleted item or a child of it
+      const stem = path.endsWith('.board.md') ? path.slice(0, -'.board.md'.length)
+        : path.endsWith('.excalidraw.md') ? path.slice(0, -'.excalidraw.md'.length)
+        : path.endsWith('.drawio.md') ? path.slice(0, -'.drawio.md'.length)
+        : path.endsWith('.mindmap.md') ? path.slice(0, -'.mindmap.md'.length)
+        : path.endsWith('.md') ? path.slice(0, -'.md'.length)
+        : path
+      if (selectedPath === path || selectedPath?.startsWith(stem + '/')) {
         setSelectedPath(null)
         setSelectedContent('')
         setCurrentFrontMatterStr('')

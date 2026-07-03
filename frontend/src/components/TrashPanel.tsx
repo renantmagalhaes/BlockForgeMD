@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Trash2, RotateCcw, X, FileText, Folder, Clock,
-  AlertTriangle, CheckSquare, Brain, Brush, LayoutGrid,
+  AlertTriangle, CheckSquare, Brain, Brush, LayoutGrid, Search,
 } from 'lucide-react'
 
 const API_BASE = import.meta.env.DEV ? 'http://localhost:8080' : ''
@@ -66,6 +66,10 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
 export default function TrashPanel({ onClose, trashRetentionDays, workspace }: TrashPanelProps) {
   const [items, setItems] = useState<TrashItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<TrashItem[] | null>(null)
+  const [searchLoading, setSearchLoading] = useState(false)
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
   const [preview, setPreview] = useState<{ content: string; filePath: string } | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
@@ -99,6 +103,28 @@ export default function TrashPanel({ onClose, trashRetentionDays, workspace }: T
     es.addEventListener('file_update', () => { fetchItems() })
     return () => es.close()
   }, [fetchItems])
+
+  // Debounced search — fires 350 ms after the user stops typing
+  useEffect(() => {
+    if (searchTimer.current) clearTimeout(searchTimer.current)
+    if (!searchQuery.trim()) {
+      setSearchResults(null)
+      setSearchLoading(false)
+      return
+    }
+    setSearchLoading(true)
+    searchTimer.current = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/trash/search?workspace=${encodeURIComponent(workspace)}&q=${encodeURIComponent(searchQuery.trim())}`
+        )
+        if (res.ok) setSearchResults(await res.json())
+      } finally {
+        setSearchLoading(false)
+      }
+    }, 350)
+    return () => { if (searchTimer.current) clearTimeout(searchTimer.current) }
+  }, [searchQuery, workspace])
 
   // Clear folder file selection whenever the selected trash item changes
   useEffect(() => {
@@ -254,59 +280,95 @@ export default function TrashPanel({ onClose, trashRetentionDays, workspace }: T
         <div className="flex flex-1 overflow-hidden min-h-0">
           {/* Item list */}
           <div className="w-72 border-r border-slate-800 flex flex-col overflow-hidden shrink-0">
-            <div className="flex-1 overflow-y-auto no-scrollbar px-3 py-2">
-              {loading ? (
-                <div className="text-xs text-slate-500 text-center py-8">Loading…</div>
-              ) : items.length === 0 ? (
-                <div className="text-center py-16 space-y-2">
-                  <Trash2 size={28} className="text-slate-700 mx-auto" />
-                  <p className="text-xs text-slate-500">Trash is empty</p>
-                </div>
-              ) : (
-                <>
-                  {trashRetentionDays > 0 && (
-                    <SectionHeader>
-                      Auto-delete after {trashRetentionDays} day{trashRetentionDays !== 1 ? 's' : ''}
-                    </SectionHeader>
-                  )}
-                  {items.map(item => {
-                    const days = daysUntil(item.expiresAt)
-                    const urgent = days !== null && days <= 3
-                    return (
-                      <button
-                        key={item.id}
-                        onClick={() => selectItem(item)}
-                        className={`w-full text-left flex items-start gap-2.5 px-2.5 py-2 rounded-xl mb-1 transition cursor-pointer ${
-                          selected === item.id
-                            ? 'bg-slate-800 text-slate-100'
-                            : 'hover:bg-slate-800/50 text-slate-300'
-                        }`}
-                      >
-                        <div className="mt-0.5">{getTypeIcon(item)}</div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-xs font-semibold truncate">{cleanName(item.name)}</div>
-                          <div className="text-[10px] text-slate-500 truncate mt-0.5">
-                            {item.originalPath.split('/').slice(0, -1).join('/')}
+            {/* Search input */}
+            <div className="px-3 pt-2.5 pb-1.5 shrink-0">
+              <div className="flex items-center gap-2 bg-slate-800/70 rounded-lg px-2.5 py-1.5 border border-slate-700/40">
+                <Search size={12} className="text-slate-500 shrink-0" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  placeholder="Search titles & content…"
+                  className="flex-1 bg-transparent text-xs text-slate-200 placeholder-slate-600 outline-none min-w-0"
+                />
+                {searchQuery && (
+                  <button onClick={() => setSearchQuery('')} className="text-slate-600 hover:text-slate-400 cursor-pointer shrink-0">
+                    <X size={11} />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto no-scrollbar px-3 py-1">
+              {(() => {
+                const isSearching = searchQuery.trim().length > 0
+                const displayItems = isSearching ? (searchResults ?? []) : items
+                const isLoading = isSearching ? searchLoading : loading
+
+                if (isLoading) {
+                  return <div className="text-xs text-slate-500 text-center py-8">{isSearching ? 'Searching…' : 'Loading…'}</div>
+                }
+                if (displayItems.length === 0) {
+                  return (
+                    <div className="text-center py-12 space-y-2">
+                      {isSearching
+                        ? <><Search size={24} className="text-slate-700 mx-auto" /><p className="text-xs text-slate-500">No results for "{searchQuery}"</p></>
+                        : <><Trash2 size={28} className="text-slate-700 mx-auto" /><p className="text-xs text-slate-500">Trash is empty</p></>
+                      }
+                    </div>
+                  )
+                }
+                return (
+                  <>
+                    {!isSearching && trashRetentionDays > 0 && (
+                      <SectionHeader>
+                        Auto-delete after {trashRetentionDays} day{trashRetentionDays !== 1 ? 's' : ''}
+                      </SectionHeader>
+                    )}
+                    {isSearching && (
+                      <div className="text-[10px] text-slate-600 px-1 py-1.5">
+                        {displayItems.length} result{displayItems.length !== 1 ? 's' : ''}
+                      </div>
+                    )}
+                    {displayItems.map(item => {
+                      const days = daysUntil(item.expiresAt)
+                      const urgent = days !== null && days <= 3
+                      return (
+                        <button
+                          key={item.id}
+                          onClick={() => selectItem(item)}
+                          className={`w-full text-left flex items-start gap-2.5 px-2.5 py-2 rounded-xl mb-1 transition cursor-pointer ${
+                            selected === item.id
+                              ? 'bg-slate-800 text-slate-100'
+                              : 'hover:bg-slate-800/50 text-slate-300'
+                          }`}
+                        >
+                          <div className="mt-0.5">{getTypeIcon(item)}</div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs font-semibold truncate">{cleanName(item.name)}</div>
+                            <div className="text-[10px] text-slate-500 truncate mt-0.5">
+                              {item.originalPath.split('/').slice(0, -1).join('/')}
+                            </div>
+                            <div className={`text-[10px] mt-0.5 flex items-center gap-1 ${urgent ? 'text-red-400' : 'text-slate-600'}`}>
+                              <Clock size={9} />
+                              {days === null
+                                ? formatDate(item.trashedAt)
+                                : days === 0
+                                ? 'Expires today'
+                                : `${days}d remaining`}
+                            </div>
                           </div>
-                          <div className={`text-[10px] mt-0.5 flex items-center gap-1 ${urgent ? 'text-red-400' : 'text-slate-600'}`}>
-                            <Clock size={9} />
-                            {days === null
-                              ? formatDate(item.trashedAt)
-                              : days === 0
-                              ? 'Expires today'
-                              : `${days}d remaining`}
-                          </div>
-                        </div>
-                        {item.type === 'folder' && (
-                          <span className="text-[9px] text-slate-600 font-mono shrink-0 mt-0.5">
-                            {item.fileCount}f
-                          </span>
-                        )}
-                      </button>
-                    )
-                  })}
-                </>
-              )}
+                          {(item.type === 'folder' || item.fileCount > 1) && (
+                            <span className="text-[9px] text-slate-600 font-mono shrink-0 mt-0.5">
+                              {item.fileCount}f
+                            </span>
+                          )}
+                        </button>
+                      )
+                    })}
+                  </>
+                )
+              })()}
             </div>
           </div>
 

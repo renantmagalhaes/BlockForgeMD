@@ -77,6 +77,7 @@ func (s *Server) setupRoutes() {
 		r.Delete("/file", s.handleDeleteFile)
 		r.Delete("/folder", s.handleDeleteFolder)
 		r.Get("/trash", s.handleListTrash)
+		r.Get("/trash/search", s.handleSearchTrash)
 		r.Post("/trash/restore", s.handleRestoreTrashItem)
 		r.Delete("/trash", s.handlePurgeTrashItem)
 		r.Delete("/trash/all", s.handleEmptyTrash)
@@ -1460,15 +1461,37 @@ func (s *Server) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 	s.watcher.LockPath(relPath)
 	defer s.watcher.UnlockPath(relPath)
 
+	// Collect the target file plus any children that live in its stem directory
+	// (e.g. task files inside a Kanban board's directory).
+	files, err := s.collectFolderFiles(relPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to collect files: %v", err), http.StatusInternalServerError)
+		return
+	}
+	childrenAbsDir := filepath.Join(s.rootPath, filepath.FromSlash(mdStem(relPath)))
+	childrenInfo, _ := os.Stat(childrenAbsDir)
+	hasChildren := childrenInfo != nil && childrenInfo.IsDir()
+
 	workspace := workspaceFromRelPath(relPath)
 	retention := s.trashRetentionDays()
 	if retention == 0 {
-		s.permanentlyDeleteFiles([]string{relPath}, "")
+		childDir := ""
+		if hasChildren {
+			childDir = childrenAbsDir
+		}
+		s.permanentlyDeleteFiles(files, childDir)
 	} else {
+		itemType := "file"
+		if hasChildren {
+			itemType = "folder"
+		}
 		id := fmt.Sprintf("%d", time.Now().UnixNano())
-		if err := s.trashFiles([]string{relPath}, relPath, "file", workspace, id); err != nil {
+		if err := s.trashFiles(files, relPath, itemType, workspace, id); err != nil {
 			http.Error(w, fmt.Sprintf("failed to move to trash: %v", err), http.StatusInternalServerError)
 			return
+		}
+		if hasChildren {
+			_ = os.RemoveAll(childrenAbsDir)
 		}
 	}
 
@@ -1653,6 +1676,90 @@ func (s *Server) handleGetTrashContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, map[string]string{"content": string(raw)})
+}
+
+// handleSearchTrash performs a case-insensitive search over trash item names and
+// the text content of their files, returning matching TrashListItems.
+func (s *Server) handleSearchTrash(w http.ResponseWriter, r *http.Request) {
+	workspace := r.URL.Query().Get("workspace")
+	query := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+	if query == "" {
+		respondJSON(w, []TrashListItem{})
+		return
+	}
+
+	trashDir := s.trashDirForWorkspace(workspace)
+	entries, err := os.ReadDir(trashDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			respondJSON(w, []TrashListItem{})
+			return
+		}
+		http.Error(w, "failed to read trash", http.StatusInternalServerError)
+		return
+	}
+
+	retention := s.trashRetentionDays()
+	var items []TrashListItem
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(trashDir, entry.Name(), "_meta.json"))
+		if err != nil {
+			continue
+		}
+		var meta TrashMeta
+		if err := json.Unmarshal(raw, &meta); err != nil {
+			continue
+		}
+
+		// Name / path match (fast path)
+		matched := strings.Contains(strings.ToLower(filepath.Base(meta.OriginalPath)), query) ||
+			strings.Contains(strings.ToLower(meta.OriginalPath), query)
+
+		// Content match: walk the bundle's content directory
+		if !matched {
+			contentDir := filepath.Join(trashDir, entry.Name(), "content")
+			_ = filepath.Walk(contentDir, func(path string, info os.FileInfo, err error) error {
+				if err != nil || info.IsDir() || matched {
+					return nil
+				}
+				data, readErr := os.ReadFile(path)
+				if readErr == nil && strings.Contains(strings.ToLower(string(data)), query) {
+					matched = true
+				}
+				return nil
+			})
+		}
+
+		if !matched {
+			continue
+		}
+
+		item := TrashListItem{
+			ID:           meta.ID,
+			OriginalPath: meta.OriginalPath,
+			Name:         filepath.Base(meta.OriginalPath),
+			Type:         meta.Type,
+			TrashedAt:    meta.TrashedAt,
+			FileCount:    len(meta.Files),
+			Files:        meta.Files,
+		}
+		if retention > 0 {
+			item.ExpiresAt = meta.TrashedAt.AddDate(0, 0, retention)
+		}
+		items = append(items, item)
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].TrashedAt.After(items[j].TrashedAt)
+	})
+	if items == nil {
+		items = []TrashListItem{}
+	}
+	respondJSON(w, items)
 }
 
 // handleMoveFile moves a vault file (and its sub-page directory) to a new path,
