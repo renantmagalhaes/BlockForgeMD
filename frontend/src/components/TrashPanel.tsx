@@ -69,6 +69,9 @@ export default function TrashPanel({ onClose, trashRetentionDays, workspace }: T
   const [selected, setSelected] = useState<string | null>(null)
   const [preview, setPreview] = useState<{ content: string; filePath: string } | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
+  const [folderFile, setFolderFile] = useState<string | null>(null)
+  const [folderPreview, setFolderPreview] = useState<string | null>(null)
+  const [folderFileLoading, setFolderFileLoading] = useState(false)
   const [toastMsg, setToastMsg] = useState<string | null>(null)
   const [confirmEmpty, setConfirmEmpty] = useState(false)
 
@@ -96,6 +99,29 @@ export default function TrashPanel({ onClose, trashRetentionDays, workspace }: T
     es.addEventListener('file_update', () => { fetchItems() })
     return () => es.close()
   }, [fetchItems])
+
+  // Clear folder file selection whenever the selected trash item changes
+  useEffect(() => {
+    setFolderFile(null)
+    setFolderPreview(null)
+  }, [selected])
+
+  const selectFolderFile = async (trashId: string, filePath: string) => {
+    setFolderFile(filePath)
+    setFolderPreview(null)
+    setFolderFileLoading(true)
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/trash/content?workspace=${encodeURIComponent(workspace)}&id=${encodeURIComponent(trashId)}&path=${encodeURIComponent(filePath)}`
+      )
+      if (res.ok) {
+        const data = await res.json()
+        setFolderPreview(data.content)
+      }
+    } finally {
+      setFolderFileLoading(false)
+    }
+  }
 
   const selectItem = async (item: TrashItem) => {
     setSelected(item.id)
@@ -333,37 +359,60 @@ export default function TrashPanel({ onClose, trashRetentionDays, workspace }: T
                 </div>
 
                 {/* Content preview */}
-                <div className="flex-1 overflow-y-auto no-scrollbar p-5">
-                  {selectedItem.type === 'folder' ? (
-                    <div className="space-y-2">
-                      <p className="text-xs font-semibold text-slate-400 mb-2">
-                        Contents ({selectedItem.fileCount} file{selectedItem.fileCount !== 1 ? 's' : ''})
+                {selectedItem.type === 'folder' ? (
+                  <div className="flex flex-1 overflow-hidden min-h-0">
+                    {/* File list column */}
+                    <div className="w-48 shrink-0 border-r border-slate-800 overflow-y-auto no-scrollbar p-3">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2 px-1">
+                        {selectedItem.fileCount} file{selectedItem.fileCount !== 1 ? 's' : ''}
                       </p>
-                      <div className="space-y-0.5">
-                        {(selectedItem.files || []).map(f => {
-                          const parts = f.split('/')
-                          const name = parts[parts.length - 1]
-                            .replace(/\.(board|excalidraw|drawio|mindmap)\.md$/, '')
-                            .replace(/\.md$/, '')
-                          const dir = parts.slice(0, -1).join('/')
-                          return (
-                            <div key={f} className="flex items-center gap-2 py-1 px-2 rounded-lg hover:bg-slate-800/40 group">
-                              <FileText size={11} className="text-slate-500 shrink-0" />
-                              <span className="text-xs text-slate-300 truncate">{name}</span>
-                              <span className="text-[10px] text-slate-600 truncate ml-auto">{dir}</span>
+                      {(selectedItem.files || []).map(f => {
+                        const parts = f.split('/')
+                        const name = parts[parts.length - 1]
+                          .replace(/\.(board|excalidraw|drawio|mindmap)\.md$/, '')
+                          .replace(/\.md$/, '')
+                        const dir = parts.slice(0, -1).join('/')
+                        return (
+                          <button
+                            key={f}
+                            onClick={() => selectFolderFile(selectedItem.id, f)}
+                            className={`w-full text-left flex items-start gap-1.5 py-1.5 px-2 rounded-lg mb-0.5 cursor-pointer transition ${
+                              folderFile === f
+                                ? 'bg-slate-700 text-slate-100'
+                                : 'hover:bg-slate-800/50 text-slate-300'
+                            }`}
+                          >
+                            <FileText size={10} className="text-slate-500 shrink-0 mt-0.5" />
+                            <div className="min-w-0">
+                              <div className="text-[11px] truncate">{name}</div>
+                              {dir && <div className="text-[9px] text-slate-600 truncate">{dir}</div>}
                             </div>
-                          )
-                        })}
-                      </div>
+                          </button>
+                        )
+                      })}
                     </div>
-                  ) : previewLoading ? (
-                    <div className="text-xs text-slate-500">Loading preview…</div>
-                  ) : preview ? (
-                    <TrashContentPreview content={preview.content} />
-                  ) : (
-                    <div className="text-xs text-slate-600 italic">No preview available</div>
-                  )}
-                </div>
+                    {/* Content preview column */}
+                    <div className="flex-1 overflow-y-auto no-scrollbar p-5">
+                      {folderFileLoading ? (
+                        <div className="text-xs text-slate-500">Loading…</div>
+                      ) : folderPreview ? (
+                        <TrashContentPreview content={folderPreview} />
+                      ) : (
+                        <div className="text-xs text-slate-600 italic">Select a file to preview its contents</div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex-1 overflow-y-auto no-scrollbar p-5">
+                    {previewLoading ? (
+                      <div className="text-xs text-slate-500">Loading preview…</div>
+                    ) : preview ? (
+                      <TrashContentPreview content={preview.content} />
+                    ) : (
+                      <div className="text-xs text-slate-600 italic">No preview available</div>
+                    )}
+                  </div>
+                )}
               </>
             )}
           </div>
