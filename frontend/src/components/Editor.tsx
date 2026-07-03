@@ -65,6 +65,7 @@ import {
   Paperclip,
   ExternalLink,
   Trash2,
+  ImageIcon,
 } from 'lucide-react'
 
 // Configure Turndown for clean Markdown serialization
@@ -1561,6 +1562,8 @@ export const Editor: React.FC<EditorProps> = ({
   const [attachmentDragOver, setAttachmentDragOver] = useState(false)
   const [attachmentUploading, setAttachmentUploading] = useState(false)
   const attachmentInputRef = useRef<HTMLInputElement>(null)
+  // Stable ref so the paste handler always calls the latest uploadAttachment
+  const uploadAttachmentRef = useRef<(file: File) => Promise<void>>(async () => {})
 
   // Image Viewer & Editor state
   const [editingImageSrc, setEditingImageSrc] = useState<string | null>(null)
@@ -2533,6 +2536,33 @@ export const Editor: React.FC<EditorProps> = ({
     await onUpdateFrontMatter({ attachments: JSON.stringify(updated) })
   }
 
+  // Keep ref current on every render so paste handler is never stale
+  uploadAttachmentRef.current = uploadAttachment
+
+  const isImageAttachment = (url: string) =>
+    /\.(png|jpe?g|gif|webp|avif|svg)(\?.*)?$/i.test(url)
+
+  const setCover = (url: string) => onUpdateFrontMatter?.({ cover: url })
+  const removeCover = () => onUpdateFrontMatter?.({ cover: '' })
+
+  // Document-level paste → upload image as attachment when outside the editor body
+  useEffect(() => {
+    if (!onUpdateFrontMatter) return
+    const handler = (e: ClipboardEvent) => {
+      if ((e.target as Element)?.closest?.('.ProseMirror')) return
+      const imgItem = Array.from(e.clipboardData?.items ?? []).find(i => i.type.startsWith('image/'))
+      if (!imgItem) return
+      e.preventDefault()
+      const blob = imgItem.getAsFile()
+      if (!blob) return
+      const ext = imgItem.type.split('/')[1]?.split('+')[0] || 'png'
+      const ts = new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14)
+      uploadAttachmentRef.current(new File([blob], `clipboard_${ts}.${ext}`, { type: imgItem.type }))
+    }
+    document.addEventListener('paste', handler)
+    return () => document.removeEventListener('paste', handler)
+  }, [filePath, onUpdateFrontMatter])
+
   const uploadImageAndInsert = async (file: File) => {
     const formData = new FormData()
     formData.append('file', file)
@@ -3433,36 +3463,74 @@ export const Editor: React.FC<EditorProps> = ({
                   />
                 </div>
 
-                {/* File list */}
-                {parseAttachments().length > 0 && (
-                  <div className="space-y-1 mb-2">
-                    {parseAttachments().map(att => (
-                      <div key={att.url} className="flex items-center gap-2 px-2 py-1.5 bg-slate-900/60 border border-slate-800 rounded-lg group">
-                        <FileText size={12} className="text-slate-500 shrink-0" />
-                        <span className="flex-1 text-slate-300 truncate text-[11px]" title={att.name}>{att.name}</span>
-                        <span className="text-slate-600 text-[10px] shrink-0">{formatBytes(att.size)}</span>
-                        <a
-                          href={att.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-slate-500 hover:text-violet-400 transition shrink-0"
-                          title="Open"
-                        >
-                          <ExternalLink size={11} />
-                        </a>
-                        <button
-                          onClick={() => removeAttachment(att.url)}
-                          className="text-slate-600 hover:text-red-400 transition shrink-0 opacity-0 group-hover:opacity-100 cursor-pointer"
-                          title="Remove attachment"
-                        >
-                          <Trash2 size={11} />
-                        </button>
-                      </div>
-                    ))}
+                {/* Active cover preview */}
+                {frontMatter?.cover && (
+                  <div className="relative mb-2 rounded-lg overflow-hidden group/cover border border-slate-800">
+                    <img src={frontMatter.cover} alt="Cover" className="w-full h-24 object-cover block" />
+                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover/cover:opacity-100 transition-opacity flex items-center justify-center">
+                      <button
+                        onClick={removeCover}
+                        className="flex items-center gap-1 px-2 py-1 text-[10px] font-semibold bg-black/60 hover:bg-red-500/80 text-white border border-white/20 rounded-lg transition cursor-pointer backdrop-blur-sm"
+                      >
+                        <X size={9} /> Remove Cover
+                      </button>
+                    </div>
+                    <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 bg-black/50 rounded text-[9px] text-slate-300 backdrop-blur-sm font-medium select-none pointer-events-none">
+                      Card Cover
+                    </div>
                   </div>
                 )}
 
-                {/* Drag-and-drop zone */}
+                {/* File list */}
+                {parseAttachments().length > 0 && (
+                  <div className="space-y-1 mb-2">
+                    {parseAttachments().map(att => {
+                      const isImg   = isImageAttachment(att.url)
+                      const isCover = frontMatter?.cover === att.url
+                      return (
+                        <div key={att.url} className="flex items-center gap-2 px-2 py-1.5 bg-slate-900/60 border border-slate-800 rounded-lg group">
+                          {isImg
+                            ? <ImageIcon size={12} className="text-slate-400 shrink-0" />
+                            : <FileText  size={12} className="text-slate-500 shrink-0" />
+                          }
+                          <span className="flex-1 text-slate-300 truncate text-[11px]" title={att.name}>{att.name}</span>
+                          <span className="text-slate-600 text-[10px] shrink-0">{formatBytes(att.size)}</span>
+                          {isImg && (
+                            <button
+                              onClick={() => isCover ? removeCover() : setCover(att.url)}
+                              className={`text-[9px] font-semibold px-1.5 py-0.5 rounded shrink-0 border transition-all cursor-pointer opacity-0 group-hover:opacity-100 ${
+                                isCover
+                                  ? 'text-violet-300 border-violet-500/40 hover:text-red-400 hover:border-red-500/40'
+                                  : 'text-slate-500 border-slate-700 hover:text-violet-300 hover:border-violet-500/40'
+                              }`}
+                              title={isCover ? 'Remove cover' : 'Set as cover'}
+                            >
+                              {isCover ? '✕ Cover' : '⊞ Cover'}
+                            </button>
+                          )}
+                          <a
+                            href={att.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-slate-500 hover:text-violet-400 transition shrink-0"
+                            title="Open"
+                          >
+                            <ExternalLink size={11} />
+                          </a>
+                          <button
+                            onClick={() => removeAttachment(att.url)}
+                            className="text-slate-600 hover:text-red-400 transition shrink-0 opacity-0 group-hover:opacity-100 cursor-pointer"
+                            title="Remove attachment"
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+
+                {/* Drag-and-drop / paste zone */}
                 <div
                   onDragOver={e => { e.preventDefault(); setAttachmentDragOver(true) }}
                   onDragLeave={() => setAttachmentDragOver(false)}
@@ -3479,7 +3547,7 @@ export const Editor: React.FC<EditorProps> = ({
                   }`}
                 >
                   <Paperclip size={11} />
-                  <span className="text-[11px]">Drop files here or click to upload</span>
+                  <span className="text-[11px]">Drop files · click · or Ctrl+V to paste image</span>
                 </div>
               </div>
             </div>

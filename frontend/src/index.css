@@ -1001,3 +1001,22 @@ body {
   vertical-align: middle;
   animation: bf-urgent-dot 0.85s step-end infinite;
 }
+
+/* ══════════════════════════════════════════════════════
+   KANBAN — CARD COVER IMAGE
+══════════════════════════════════════════════════════ */
+
+.bf-kanban-card-cover {
+  overflow: hidden;
+  border-top: 1px solid var(--border-0);
+  border-bottom: 1px solid var(--border-0);
+}
+.bf-kanban-card-cover img {
+  display: block;
+  width: 100%;
+  object-fit: cover;
+}
+[data-theme="cyber"] .bf-kanban-card-cover {
+  border-color: var(--border-1);
+  box-shadow: inset 0 0 20px rgba(6,182,212,0.04);
+}

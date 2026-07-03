@@ -750,6 +750,7 @@ export const Kanban: React.FC<KanbanProps> = ({
                   const assignee    = task.frontMatter?.assignee
                   const dueDate     = task.frontMatter?.dueDate?.split('T')[0]
                   const tags        = parseTags(task.frontMatter?.tags)
+                  const cover       = task.frontMatter?.cover
                   const isDragging  = draggingPath === task.path
                   const showTagEd   = tagEditorCard === task.path
 
@@ -781,6 +782,13 @@ export const Kanban: React.FC<KanbanProps> = ({
                       <div className="font-medium bf-kanban-card-title transition mb-2.5 text-[13px] leading-snug break-words min-w-0">
                         {task.title}
                       </div>
+
+                      {/* Cover image */}
+                      {cover && (
+                        <div className="bf-kanban-card-cover mb-2.5 -mx-3">
+                          <img src={cover} alt="" className="w-full h-36 object-cover block" draggable={false} />
+                        </div>
+                      )}
 
                       {/* Meta */}
                       <div className="space-y-1.5">
