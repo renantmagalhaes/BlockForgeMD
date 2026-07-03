@@ -1796,6 +1796,23 @@ export const Editor: React.FC<EditorProps> = ({
         const color = (attrs.match(/color="([^"]*)"/) || [])[1] || '#6366f1'
         return `<div data-callout="true" data-callout-emoji="${emoji}" data-callout-label="${label}" data-callout-color="${color}">${content}</div>`
       })
+      // Convert marked's GFM task list output → TipTap taskList format.
+      // marked produces: <li><input checked="" disabled="" type="checkbox"> text</li>
+      // TipTap expects:  <li data-type="taskItem" data-checked="true"><label>...</label><div><p>text</p></div></li>
+      .replace(
+        /<li><input\s+checked=""\s+disabled=""\s+type="checkbox"\s*\/?>\s*([\s\S]*?)\s*<\/li>/gi,
+        '<li data-type="taskItem" data-checked="true"><label><input type="checkbox" checked></label><div><p>$1</p></div></li>'
+      )
+      .replace(
+        /<li><input\s+disabled=""\s+type="checkbox"\s*\/?>\s*([\s\S]*?)\s*<\/li>/gi,
+        '<li data-type="taskItem" data-checked="false"><label><input type="checkbox"></label><div><p>$1</p></div></li>'
+      )
+      // Mark any <ul> that contains task items as a taskList
+      .replace(/<ul>([\s\S]*?)<\/ul>/g, (match, inner) =>
+        inner.includes('data-type="taskItem"')
+          ? `<ul data-type="taskList">${inner}</ul>`
+          : match
+      )
     return rawHtml
   }
 

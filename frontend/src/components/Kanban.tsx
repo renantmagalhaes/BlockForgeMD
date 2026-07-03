@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react'
 import {
   Calendar, User, Plus, Trash2, Edit3, X, Check,
   ChevronLeft, ChevronRight, Settings, Palette,
-  Tag, ChevronDown, Search, ChevronsLeft, Copy, ArrowRight,
+  Tag, ChevronDown, Search, ChevronsLeft, Copy, ArrowRight, GripVertical, ListChecks,
 } from 'lucide-react'
 
 interface FileRecord {
@@ -11,9 +11,16 @@ interface FileRecord {
   type: string
   contentHash: string
   updatedAt: string
+  content?: string
   frontMatter?: Record<string, string>
   position?: number
 }
+
+const parseChecklist = (content: string) =>
+  content.split('\n').flatMap(line => {
+    const m = line.match(/^[\s>-]*\[([x ])\]\s+(.+)/i)
+    return m ? [{ done: m[1].toLowerCase() === 'x', text: m[2].trim() }] : []
+  })
 
 interface PriorityDef {
   name: string
@@ -658,6 +665,7 @@ export const Kanban: React.FC<KanbanProps> = ({
   const [filterMode, setFilterMode]             = useState<'hide' | 'highlight'>('highlight')
   const [searchText, setSearchText]             = useState('')
   const [collapsedCols, setCollapsedCols]       = useState<Set<string>>(new Set())
+  const [expandedChecklists, setExpandedChecklists] = useState<Set<string>>(new Set())
 
   // Card context menu
   const [cardCtxMenu, setCardCtxMenu] = useState<{ x: number; y: number; task: FileRecord; col: string } | null>(null)
@@ -966,12 +974,16 @@ export const Kanban: React.FC<KanbanProps> = ({
           return (
             <div
               key={col}
-              onDragOver={e => { e.preventDefault(); setDragOverColumn(col) }}
+              onDragOver={e => { e.preventDefault(); setDragOverColumn(col); setDragOverCard(null) }}
               onDragEnter={() => setDragOverColumn(col)}
               onDrop={e => handleDrop(e, col)}
-              className={`flex flex-col rounded-xl min-h-[500px] max-h-full w-[272px] shrink-0 transition-all duration-200 bf-kanban-col ${isOver ? 'scale-[1.01]' : ''}`}
+              className="flex flex-col rounded-xl min-h-[500px] max-h-full w-[272px] shrink-0 transition-all duration-200 bf-kanban-col"
               data-over={isOver}
-              style={{ borderTop: `3px solid ${accent}`, background: `color-mix(in srgb, ${accent} 7%, var(--bg-surface))` }}
+              style={{
+                borderTop: `3px solid ${accent}`,
+                background: `color-mix(in srgb, ${accent} ${isOver ? 11 : 7}%, var(--bg-surface))`,
+                boxShadow: isOver ? `0 0 0 2px ${accent}55, 0 8px 24px ${accent}18` : undefined,
+              }}
             >
               {/* Column header */}
               <div className="flex justify-between items-center px-3 py-3 bf-kanban-col-header shrink-0 select-none">
@@ -1038,7 +1050,7 @@ export const Kanban: React.FC<KanbanProps> = ({
               </div>
 
               {/* Cards */}
-              <div className="flex-1 p-2 space-y-2 overflow-y-auto no-scrollbar">
+              <div className={`flex-1 p-2 space-y-2 overflow-y-auto no-scrollbar ${draggingPath ? 'min-h-[80px]' : ''}`}>
                 {colTasks.map(task => {
                   const priority    = task.frontMatter?.priority
                   const pDef        = getPriorityDef(priority)
@@ -1067,21 +1079,34 @@ export const Kanban: React.FC<KanbanProps> = ({
                     ? (matchesAll ? 'match' : 'dim')
                     : undefined
 
-                  const isOverBefore = dragOverCard?.path === task.path && dragOverCard.zone === 'before'
-                  const isOverAfter  = dragOverCard?.path === task.path && dragOverCard.zone === 'after'
+                  const isOverBefore = !isDragging && dragOverCard?.path === task.path && dragOverCard.zone === 'before'
+                  const isOverAfter  = !isDragging && dragOverCard?.path === task.path && dragOverCard.zone === 'after'
 
                   return (
-                    <div
-                      key={task.path}
-                      className="relative"
-                    >
-                      {isOverBefore && <div className="absolute top-0 left-0 right-0 h-0.5 rounded-full z-10 pointer-events-none" style={{ background: accent }} />}
+                    <React.Fragment key={task.path}>
+                      {/* Drop placeholder — above this card */}
+                      {isOverBefore && (
+                        <div
+                          className="rounded-lg border-2 border-dashed transition-all duration-150"
+                          style={{ height: 56, borderColor: accent, background: `${accent}0d` }}
+                          onDragOver={e => { e.preventDefault(); e.stopPropagation() }}
+                          onDrop={e => {
+                            const fromPath = e.dataTransfer.getData('text/plain')
+                            if (fromPath && fromPath !== task.path) {
+                              e.preventDefault(); e.stopPropagation()
+                              handleCardReorder(fromPath, task.path, 'before', col)
+                              setDragOverCard(null); setDraggingPath(null); setDragOverColumn(null)
+                            }
+                          }}
+                        />
+                      )}
+
                     <div
                       draggable
                       onDragStart={e => handleDragStart(e, task.path)}
                       onDragEnd={handleDragEnd}
                       onDragOver={e => {
-                        // Only intercept for same-column cards
+                        if (isDragging) return  // skip self
                         const fromTask = tasks.find(t => t.path === draggingPath)
                         const fromStatus = (fromTask?.frontMatter?.status || '').toLowerCase()
                         const toStatus = (task.frontMatter?.status || '').toLowerCase()
@@ -1092,11 +1117,6 @@ export const Kanban: React.FC<KanbanProps> = ({
                         const zone = (e.clientY - rect.top) / rect.height < 0.5 ? 'before' : 'after'
                         if (dragOverCard?.path !== task.path || dragOverCard?.zone !== zone) {
                           setDragOverCard({ path: task.path, zone })
-                        }
-                      }}
-                      onDragLeave={e => {
-                        if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                          if (dragOverCard?.path === task.path) setDragOverCard(null)
                         }
                       }}
                       onDrop={e => {
@@ -1115,7 +1135,7 @@ export const Kanban: React.FC<KanbanProps> = ({
                       }}
                       onClick={() => onSelectFile(task.path)}
                       onContextMenu={e => { e.preventDefault(); e.stopPropagation(); setCardCtxMenu({ x: e.clientX, y: e.clientY, task, col }) }}
-                      className={`p-3 rounded-lg cursor-pointer transition-all duration-200 select-none group relative bf-kanban-card ${isDragging ? 'opacity-40 scale-95' : isCompleted ? 'opacity-60' : ''}`}
+                      className={`p-3 rounded-lg cursor-grab active:cursor-grabbing transition-all duration-150 select-none group relative bf-kanban-card ${isDragging ? 'opacity-25 scale-95 shadow-none' : isCompleted ? 'opacity-60' : ''}`}
                       data-dragging={isDragging}
                       data-filter={filterAttr}
                       style={{
@@ -1124,8 +1144,13 @@ export const Kanban: React.FC<KanbanProps> = ({
                         ['--card-accent']: accent,
                       } as React.CSSProperties}
                     >
+                      {/* Drag handle hint */}
+                      <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-30 transition-opacity pointer-events-none">
+                        <GripVertical size={13} />
+                      </div>
+
                       {/* Title */}
-                      <div className={`font-medium bf-kanban-card-title transition mb-2.5 text-[13px] leading-snug break-words min-w-0 ${isCompleted ? 'line-through' : ''}`}>
+                      <div className={`font-medium bf-kanban-card-title transition mb-2.5 text-[13px] leading-snug break-words min-w-0 pr-4 ${isCompleted ? 'line-through' : ''}`}>
                         {task.title}
                       </div>
 
@@ -1209,11 +1234,98 @@ export const Kanban: React.FC<KanbanProps> = ({
                           )}
                         </div>
                       </div>
+
+                      {/* Checklist progress */}
+                      {(() => {
+                        const items = parseChecklist(task.content || '')
+                        if (items.length === 0) return null
+                        const done  = items.filter(i => i.done).length
+                        const total = items.length
+                        const pct   = total ? (done / total) * 100 : 0
+                        const allDone = done === total
+                        const isExpanded = expandedChecklists.has(task.path)
+                        return (
+                          <div className="mt-2.5 pt-2 border-t border-[var(--border-0)]">
+                            <button
+                              className="flex items-center gap-2 w-full cursor-pointer"
+                              onClick={e => {
+                                e.stopPropagation()
+                                setExpandedChecklists(prev => {
+                                  const s = new Set(prev); s.has(task.path) ? s.delete(task.path) : s.add(task.path); return s
+                                })
+                              }}
+                            >
+                              <ListChecks size={11} className="shrink-0 bf-kanban-hint" />
+                              <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: `${accent}25` }}>
+                                <div
+                                  className="h-full rounded-full transition-all duration-300"
+                                  style={{ width: `${pct}%`, background: allDone ? '#10b981' : accent }}
+                                />
+                              </div>
+                              <span className="text-[10px] bf-kanban-hint font-medium tabular-nums shrink-0">{done}/{total}</span>
+                              <ChevronDown size={10} className={`bf-kanban-hint shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                            </button>
+                            {isExpanded && (
+                              <div className="mt-2 space-y-1.5">
+                                {items.map((item, idx) => (
+                                  <div key={idx} className={`flex items-start gap-2 text-[11px] ${item.done ? 'opacity-50' : ''}`}>
+                                    <div className={`mt-0.5 w-3 h-3 rounded border shrink-0 flex items-center justify-center transition-colors ${item.done ? 'bg-emerald-500 border-emerald-500' : 'border-current opacity-40'}`}>
+                                      {item.done && <Check size={8} className="text-white" />}
+                                    </div>
+                                    <span className={`leading-snug break-words min-w-0 ${item.done ? 'line-through' : 'bf-kanban-modal-text'}`}>{item.text}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })()}
                     </div>
-                      {isOverAfter && <div className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full z-10 pointer-events-none" style={{ background: accent }} />}
-                    </div>
+
+                      {/* Drop placeholder — below this card */}
+                      {isOverAfter && (
+                        <div
+                          className="rounded-lg border-2 border-dashed transition-all duration-150"
+                          style={{ height: 56, borderColor: accent, background: `${accent}0d` }}
+                          onDragOver={e => { e.preventDefault(); e.stopPropagation() }}
+                          onDrop={e => {
+                            const fromPath = e.dataTransfer.getData('text/plain')
+                            if (fromPath && fromPath !== task.path) {
+                              e.preventDefault(); e.stopPropagation()
+                              handleCardReorder(fromPath, task.path, 'after', col)
+                              setDragOverCard(null); setDraggingPath(null); setDragOverColumn(null)
+                            }
+                          }}
+                        />
+                      )}
+                    </React.Fragment>
                   )
                 })}
+
+                {/* Bottom placeholder — shown when dragging over empty space in column */}
+                {draggingPath && isOver && !dragOverCard && (
+                  <div
+                    className="rounded-lg border-2 border-dashed transition-all duration-150"
+                    style={{ height: 56, borderColor: accent, background: `${accent}0d` }}
+                    onDragOver={e => { e.preventDefault(); e.stopPropagation() }}
+                    onDrop={e => {
+                      const fromPath = e.dataTransfer.getData('text/plain')
+                      if (!fromPath) return
+                      e.preventDefault(); e.stopPropagation()
+                      const fromTask = tasks.find(t => t.path === fromPath)
+                      const fromStatus = (fromTask?.frontMatter?.status || '').toLowerCase()
+                      if (fromStatus === col.toLowerCase()) {
+                        // Same column: move to end
+                        const remaining = getTasksByColumn(col).filter(t => t.path !== fromPath)
+                        const last = remaining[remaining.length - 1]
+                        if (last) handleCardReorder(fromPath, last.path, 'after', col)
+                      } else {
+                        onMoveCard(fromPath, col)
+                      }
+                      setDragOverCard(null); setDraggingPath(null); setDragOverColumn(null)
+                    }}
+                  />
+                )}
               </div>
 
               {/* Quick create */}
