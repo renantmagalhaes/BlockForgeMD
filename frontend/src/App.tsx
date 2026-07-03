@@ -572,14 +572,24 @@ const getSearchSnippet = (content: string, query: string) => {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 export const App: React.FC = () => {
+  // Seed from localStorage to avoid flash on initial paint; backend is authoritative
   const [theme, setTheme] = useState<'dark' | 'cyber'>(() => {
     const s = localStorage.getItem('bf-theme')
     return s === 'cyber' ? 'cyber' : 'dark'
   })
   useEffect(() => {
     document.documentElement.dataset.theme = theme
-    localStorage.setItem('bf-theme', theme)
   }, [theme])
+
+  const handleSetTheme = (t: 'dark' | 'cyber') => {
+    setTheme(t)
+    localStorage.setItem('bf-theme', t)
+    fetch(`${API_BASE}/api/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ theme: t }),
+    }).catch(e => console.error('Failed to save theme', e))
+  }
 
   const [files, setFiles] = useState<FileRecord[]>([])
   const [activeView, setActiveView] = useState<'board' | 'editor'>('editor')
@@ -853,6 +863,10 @@ export const App: React.FC = () => {
         const data = await res.json()
         if (data && typeof data.history_limit === 'number') {
           setHistoryLimitInput(data.history_limit.toString())
+        }
+        if (data?.theme === 'dark' || data?.theme === 'cyber') {
+          setTheme(data.theme)
+          localStorage.setItem('bf-theme', data.theme)
         }
       }
     } catch (e) {
@@ -1989,7 +2003,7 @@ export const App: React.FC = () => {
               {(['dark', 'cyber'] as const).map(t => (
                 <button
                   key={t}
-                  onClick={() => setTheme(t)}
+                  onClick={() => handleSetTheme(t)}
                   className={`bf-theme-btn ${theme === t ? 'active' : ''}`}
                   title={t === 'dark' ? 'Dark mode' : 'Cyber mode'}
                 >

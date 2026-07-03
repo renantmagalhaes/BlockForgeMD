@@ -84,9 +84,6 @@ function extractData(content: string): MindElixirData | null {
   try { return JSON.parse(m[1]) } catch { return null }
 }
 
-function buildContent(frontMatter: string, data: MindElixirData): string {
-  return `${frontMatter}\n\`\`\`json\n${JSON.stringify(data)}\n\`\`\`\n`
-}
 
 function getTitleFromFrontMatter(fm: string): string {
   const m = fm.match(/title:\s*(.+)/)
@@ -215,15 +212,18 @@ const MindMapComponent: React.FC<MindMapProps> = ({ filePath, onSave, isSaving, 
         meRef.current = me
         setLoading(false)
 
-        const onOperation = () => {
+        const schedulesSave = () => {
           if (saveTimer.current) clearTimeout(saveTimer.current)
           saveTimer.current = setTimeout(() => {
             const d = me.getData()
-            onSave(buildContent(frontMatterRef.current, d))
+            // Pass only the json block — App.tsx handleSaveFile prepends the frontmatter
+            onSave(`\`\`\`json\n${JSON.stringify(d)}\n\`\`\`\n`)
           }, 800)
         }
 
-        me.bus.addListener('operation', onOperation)
+        // 'operation' fires for structural edits; 'expandNode' fires for collapse/expand clicks
+        me.bus.addListener('operation', schedulesSave)
+        me.bus.addListener('expandNode', schedulesSave)
 
         const handlePaste = (e: ClipboardEvent) => {
           if (!containerRef.current?.contains(document.activeElement)) return
@@ -284,6 +284,10 @@ const MindMapComponent: React.FC<MindMapProps> = ({ filePath, onSave, isSaving, 
     node.children?.forEach((c: any) => walkNodes(c, fn))
   }
 
+  const saveData = (data: any) => {
+    onSave(`\`\`\`json\n${JSON.stringify(data)}\n\`\`\`\n`)
+  }
+
   const handleExpandAll = () => {
     const me = meRef.current
     if (!me) return
@@ -292,6 +296,7 @@ const MindMapComponent: React.FC<MindMapProps> = ({ filePath, onSave, isSaving, 
       if (n.children && n.children.length > 0) n.expanded = true
     })
     me.refresh(data)
+    saveData(data)
   }
 
   const handleCollapseAll = () => {
@@ -304,6 +309,7 @@ const MindMapComponent: React.FC<MindMapProps> = ({ filePath, onSave, isSaving, 
       })
     })
     me.refresh(data)
+    saveData(data)
   }
 
   return (

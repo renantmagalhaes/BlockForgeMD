@@ -992,27 +992,36 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	if err != nil || limit <= 0 {
 		limit = 50
 	}
-	respondJSON(w, map[string]interface{}{"history_limit": limit})
+	theme, _ := s.db.GetSetting("theme", "dark")
+	respondJSON(w, map[string]interface{}{"history_limit": limit, "theme": theme})
 }
 
 func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		HistoryLimit int `json:"history_limit"`
+		HistoryLimit *int   `json:"history_limit"`
+		Theme        string `json:"theme"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	if req.HistoryLimit <= 0 {
-		http.Error(w, "invalid history_limit value", http.StatusBadRequest)
-		return
+	if req.HistoryLimit != nil {
+		if *req.HistoryLimit <= 0 {
+			http.Error(w, "invalid history_limit value", http.StatusBadRequest)
+			return
+		}
+		if err := s.db.SetSetting("history_limit", strconv.Itoa(*req.HistoryLimit)); err != nil {
+			http.Error(w, fmt.Sprintf("failed to save settings: %v", err), http.StatusInternalServerError)
+			return
+		}
 	}
 
-	err := s.db.SetSetting("history_limit", strconv.Itoa(req.HistoryLimit))
-	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to save settings: %v", err), http.StatusInternalServerError)
-		return
+	if req.Theme == "dark" || req.Theme == "cyber" {
+		if err := s.db.SetSetting("theme", req.Theme); err != nil {
+			http.Error(w, fmt.Sprintf("failed to save theme: %v", err), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	respondJSON(w, map[string]string{"status": "success"})
