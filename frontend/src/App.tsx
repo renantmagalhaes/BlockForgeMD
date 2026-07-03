@@ -2361,6 +2361,7 @@ export const App: React.FC = () => {
           <TrashPanel
             onClose={() => setShowTrash(false)}
             trashRetentionDays={trashRetentionDays}
+            workspace={activeWorkspace}
           />
         )}
       </AnimatePresence>

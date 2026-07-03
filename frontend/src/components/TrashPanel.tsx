@@ -15,11 +15,13 @@ interface TrashItem {
   trashedAt: string
   expiresAt: string
   fileCount: number
+  files: string[]
 }
 
 interface TrashPanelProps {
   onClose: () => void
   trashRetentionDays: number
+  workspace: string
 }
 
 function getTypeIcon(item: TrashItem) {
@@ -61,7 +63,7 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
   )
 }
 
-export default function TrashPanel({ onClose, trashRetentionDays }: TrashPanelProps) {
+export default function TrashPanel({ onClose, trashRetentionDays, workspace }: TrashPanelProps) {
   const [items, setItems] = useState<TrashItem[]>([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<string | null>(null)
@@ -78,12 +80,12 @@ export default function TrashPanel({ onClose, trashRetentionDays }: TrashPanelPr
   const fetchItems = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch(`${API_BASE}/api/trash`)
+      const res = await fetch(`${API_BASE}/api/trash?workspace=${encodeURIComponent(workspace)}`)
       if (res.ok) setItems(await res.json())
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [workspace])
 
   useEffect(() => { fetchItems() }, [fetchItems])
 
@@ -94,7 +96,7 @@ export default function TrashPanel({ onClose, trashRetentionDays }: TrashPanelPr
       setPreviewLoading(true)
       try {
         const res = await fetch(
-          `${API_BASE}/api/trash/content?id=${encodeURIComponent(item.id)}&path=${encodeURIComponent(item.originalPath)}`
+          `${API_BASE}/api/trash/content?workspace=${encodeURIComponent(workspace)}&id=${encodeURIComponent(item.id)}&path=${encodeURIComponent(item.originalPath)}`
         )
         if (res.ok) {
           const data = await res.json()
@@ -111,7 +113,7 @@ export default function TrashPanel({ onClose, trashRetentionDays }: TrashPanelPr
       const res = await fetch(`${API_BASE}/api/trash/restore`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id }),
+        body: JSON.stringify({ id, workspace }),
       })
       if (!res.ok) {
         const msg = await res.text()
@@ -128,7 +130,7 @@ export default function TrashPanel({ onClose, trashRetentionDays }: TrashPanelPr
 
   const handlePurge = async (id: string) => {
     try {
-      const res = await fetch(`${API_BASE}/api/trash?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
+      const res = await fetch(`${API_BASE}/api/trash?workspace=${encodeURIComponent(workspace)}&id=${encodeURIComponent(id)}`, { method: 'DELETE' })
       if (!res.ok) { showToast('Delete failed'); return }
       if (selected === id) { setSelected(null); setPreview(null) }
       showToast('Permanently deleted')
@@ -140,7 +142,7 @@ export default function TrashPanel({ onClose, trashRetentionDays }: TrashPanelPr
 
   const handleEmptyTrash = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/trash/all`, { method: 'DELETE' })
+      const res = await fetch(`${API_BASE}/api/trash/all?workspace=${encodeURIComponent(workspace)}`, { method: 'DELETE' })
       if (!res.ok) { showToast('Failed to empty trash'); return }
       setSelected(null)
       setPreview(null)
@@ -325,13 +327,25 @@ export default function TrashPanel({ onClose, trashRetentionDays }: TrashPanelPr
                 {/* Content preview */}
                 <div className="flex-1 overflow-y-auto no-scrollbar p-5">
                   {selectedItem.type === 'folder' ? (
-                    <div className="space-y-1">
-                      <p className="text-xs text-slate-500 mb-3">Files in this folder:</p>
-                      <div className="space-y-1">
-                        {/* We don't have the file list in the list item, show a note */}
-                        <div className="text-xs text-slate-600 italic">
-                          {selectedItem.fileCount} file{selectedItem.fileCount !== 1 ? 's' : ''} will be restored to their original locations.
-                        </div>
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold text-slate-400 mb-2">
+                        Contents ({selectedItem.fileCount} file{selectedItem.fileCount !== 1 ? 's' : ''})
+                      </p>
+                      <div className="space-y-0.5">
+                        {(selectedItem.files || []).map(f => {
+                          const parts = f.split('/')
+                          const name = parts[parts.length - 1]
+                            .replace(/\.(board|excalidraw|drawio|mindmap)\.md$/, '')
+                            .replace(/\.md$/, '')
+                          const dir = parts.slice(0, -1).join('/')
+                          return (
+                            <div key={f} className="flex items-center gap-2 py-1 px-2 rounded-lg hover:bg-slate-800/40 group">
+                              <FileText size={11} className="text-slate-500 shrink-0" />
+                              <span className="text-xs text-slate-300 truncate">{name}</span>
+                              <span className="text-[10px] text-slate-600 truncate ml-auto">{dir}</span>
+                            </div>
+                          )
+                        })}
                       </div>
                     </div>
                   ) : previewLoading ? (
