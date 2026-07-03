@@ -7,37 +7,92 @@ interface MindMapProps {
   filePath: string
   onSave: (content: string) => Promise<void>
   isSaving: boolean
+  theme?: 'dark' | 'light' | 'cyber'
 }
 
 const API_BASE = import.meta.env.DEV ? 'http://localhost:8080' : ''
+
+const SHARED_VARS = {
+  '--node-gap-x': '32px',
+  '--node-gap-y': '8px',
+  '--main-gap-x': '44px',
+  '--main-gap-y': '12px',
+  '--root-radius': '12px',
+  '--main-radius': '8px',
+  '--topic-padding': '5px 14px',
+  '--map-padding': '60px',
+}
 
 const DARK_THEME = {
   name: 'blockforge-dark',
   type: 'dark' as const,
   palette: ['#8b5cf6', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#06b6d4'],
   cssVar: {
-    '--node-gap-x': '32px',
-    '--node-gap-y': '8px',
-    '--main-gap-x': '44px',
-    '--main-gap-y': '12px',
+    ...SHARED_VARS,
     '--main-color': '#f1f5f9',
     '--main-bgcolor': '#6d28d9',
     '--main-bgcolor-transparent': 'rgba(109,40,217,0.15)',
-    '--color': '#cbd5e1',
-    '--bgcolor': '#1e293b',
+    '--color': '#94a3b8',
+    '--bgcolor': '#111111',
     '--selected': '#8b5cf6',
     '--accent-color': '#8b5cf6',
     '--root-color': '#ffffff',
     '--root-bgcolor': '#7c3aed',
     '--root-border-color': '#a78bfa',
-    '--root-radius': '12px',
-    '--main-radius': '8px',
-    '--topic-padding': '5px 14px',
     '--panel-color': '#94a3b8',
-    '--panel-bgcolor': '#1e293b',
-    '--panel-border-color': '#334155',
-    '--map-padding': '60px',
+    '--panel-bgcolor': '#0a0a0a',
+    '--panel-border-color': 'rgba(255,255,255,0.08)',
   },
+}
+
+const LIGHT_THEME = {
+  name: 'blockforge-light',
+  type: 'light' as const,
+  palette: ['#4f46e5', '#0284c7', '#059669', '#d97706', '#dc2626', '#db2777', '#0891b2'],
+  cssVar: {
+    ...SHARED_VARS,
+    '--main-color': '#ffffff',
+    '--main-bgcolor': '#4f46e5',
+    '--main-bgcolor-transparent': 'rgba(79,70,229,0.1)',
+    '--color': '#374151',
+    '--bgcolor': '#f8fafc',
+    '--selected': '#4f46e5',
+    '--accent-color': '#4f46e5',
+    '--root-color': '#ffffff',
+    '--root-bgcolor': '#4f46e5',
+    '--root-border-color': '#818cf8',
+    '--panel-color': '#374151',
+    '--panel-bgcolor': '#f1f5f9',
+    '--panel-border-color': '#e2e8f0',
+  },
+}
+
+const CYBER_THEME = {
+  name: 'blockforge-cyber',
+  type: 'dark' as const,
+  palette: ['#06b6d4', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#a855f7'],
+  cssVar: {
+    ...SHARED_VARS,
+    '--main-color': '#22d3ee',
+    '--main-bgcolor': '#0e4f5a',
+    '--main-bgcolor-transparent': 'rgba(6,182,212,0.12)',
+    '--color': '#9ca3af',
+    '--bgcolor': '#1a2235',
+    '--selected': '#06b6d4',
+    '--accent-color': '#06b6d4',
+    '--root-color': '#0b0f19',
+    '--root-bgcolor': '#06b6d4',
+    '--root-border-color': '#22d3ee',
+    '--panel-color': '#9ca3af',
+    '--panel-bgcolor': '#111827',
+    '--panel-border-color': 'rgba(6,182,212,0.2)',
+  },
+}
+
+function getMindElixirTheme(theme: string) {
+  if (theme === 'light') return LIGHT_THEME
+  if (theme === 'cyber') return CYBER_THEME
+  return DARK_THEME
 }
 
 function extractFrontMatter(content: string): string {
@@ -60,7 +115,7 @@ function getTitleFromFrontMatter(fm: string): string {
   return m ? m[1].trim() : 'Mind Map'
 }
 
-const MindMapComponent: React.FC<MindMapProps> = ({ filePath, onSave, isSaving }) => {
+const MindMapComponent: React.FC<MindMapProps> = ({ filePath, onSave, isSaving, theme = 'dark' }) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const meRef = useRef<MindElixirInstance | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -175,7 +230,7 @@ const MindMapComponent: React.FC<MindMapProps> = ({ filePath, onSave, isSaving }
           keypress: true,
           newTopicName: 'New Topic',
           allowUndo: true,
-          theme: DARK_THEME,
+          theme: getMindElixirTheme(theme),
         })
 
         me.init(initialData)
@@ -244,33 +299,33 @@ const MindMapComponent: React.FC<MindMapProps> = ({ filePath, onSave, isSaving }
         meRef.current = null
       }
     }
-  }, [filePath])
+  }, [filePath, theme])
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
       <div className="flex items-center justify-between mb-3 shrink-0">
-        <span className="text-xs font-mono text-slate-600">
-          {isSaving ? <span className="text-slate-400">Saving…</span> : <span className="text-slate-600">Saved</span>}
+        <span className="text-xs font-mono bf-kanban-hint">
+          {isSaving ? <span className="bf-kanban-modal-text">Saving…</span> : <span className="bf-kanban-hint">Saved</span>}
           <span className="ml-3">Tab = child · Enter = sibling · F2 = rename · Ctrl+V = paste image · Right-click = more</span>
         </span>
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => meRef.current?.scale(1.25)}
-            className="p-1.5 bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white rounded-lg border border-slate-700/50 transition cursor-pointer"
+            className="p-1.5 bf-kanban-btn rounded-lg transition cursor-pointer"
             title="Zoom in"
           >
             <ZoomIn size={13} />
           </button>
           <button
             onClick={() => meRef.current?.scale(0.8)}
-            className="p-1.5 bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white rounded-lg border border-slate-700/50 transition cursor-pointer"
+            className="p-1.5 bf-kanban-btn rounded-lg transition cursor-pointer"
             title="Zoom out"
           >
             <ZoomOut size={13} />
           </button>
           <button
             onClick={() => meRef.current?.scaleFit()}
-            className="p-1.5 bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white rounded-lg border border-slate-700/50 transition cursor-pointer"
+            className="p-1.5 bf-kanban-btn rounded-lg transition cursor-pointer"
             title="Fit to view"
           >
             <Maximize2 size={13} />
@@ -279,9 +334,9 @@ const MindMapComponent: React.FC<MindMapProps> = ({ filePath, onSave, isSaving }
       </div>
       {/* Wrapper keeps container always in the DOM with real dimensions so mind-elixir
           can measure nodes during init. Loading overlay sits on top instead. */}
-      <div className="flex-1 relative rounded-xl overflow-hidden border border-slate-800" style={{ background: '#0d1117' }}>
+      <div className="flex-1 relative rounded-xl overflow-hidden bf-mindmap-canvas">
         {loading && (
-          <div className="absolute inset-0 flex items-center justify-center text-slate-500 text-sm select-none z-10" style={{ background: '#0d1117' }}>
+          <div className="absolute inset-0 flex items-center justify-center bf-kanban-hint text-sm select-none z-10 bf-mindmap-canvas">
             Loading…
           </div>
         )}

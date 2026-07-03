@@ -88,15 +88,15 @@ const TagInput: React.FC<{
           if (e.key === 'Escape') { e.preventDefault(); onCancel() }
         }}
         placeholder="tag…"
-        className="w-20 bg-slate-900 border border-violet-500/50 rounded px-1.5 py-0.5 text-[10px] text-slate-200 outline-none"
+        className="w-20 bf-kanban-input rounded px-1.5 py-0.5 text-[10px] outline-none"
       />
       {filtered.length > 0 && (
-        <div className="absolute top-full left-0 mt-0.5 bg-[#1a2236] border border-slate-700 rounded-lg shadow-xl py-1 z-50 min-w-[110px] max-h-28 overflow-y-auto no-scrollbar">
+        <div className="absolute top-full left-0 mt-0.5 bf-kanban-popover rounded-lg py-1 z-50 min-w-[110px] max-h-28 overflow-y-auto no-scrollbar">
           {filtered.map(s => (
             <button
               key={s}
               onMouseDown={e => { e.preventDefault(); onSubmit(s) }}
-              className="flex w-full px-2 py-1 text-[10px] text-slate-300 hover:bg-slate-800 text-left cursor-pointer"
+              className="flex w-full px-2 py-1 text-[10px] bf-kanban-popover-item text-left cursor-pointer"
             >
               {s}
             </button>
@@ -114,7 +114,7 @@ const ColorPalette: React.FC<{
   style?: React.CSSProperties
 }> = ({ selected, onSelect, style }) => (
   <div
-    className="p-2 bg-[#1a2236] border border-slate-700 rounded-xl shadow-2xl grid grid-cols-4 gap-1.5"
+    className="p-2 bf-kanban-popover rounded-xl grid grid-cols-4 gap-1.5"
     style={{ position: 'fixed', zIndex: 9999, ...style }}
     onClick={e => e.stopPropagation()}
   >
@@ -174,26 +174,26 @@ const BoardSettingsModal: React.FC<{
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="bg-[#111722] border border-slate-700 rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden"
+        className="bf-kanban-modal rounded-2xl w-full max-w-md mx-4 overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex justify-between items-center px-5 py-4 border-b border-slate-800">
-          <h2 className="text-slate-100 font-semibold text-sm">Board Settings</h2>
-          <button onClick={onClose} className="text-slate-500 hover:text-slate-300 transition cursor-pointer"><X size={16} /></button>
+        <div className="flex justify-between items-center px-5 py-4 bf-kanban-modal-header">
+          <h2 className="bf-kanban-modal-title font-semibold text-sm">Board Settings</h2>
+          <button onClick={onClose} className="bf-kanban-icon-btn rounded transition cursor-pointer"><X size={16} /></button>
         </div>
 
         <div className="p-5 space-y-7 max-h-[70vh] overflow-y-auto no-scrollbar">
           {/* Priorities */}
           <div>
-            <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3">Priorities</h3>
-            <p className="text-[11px] text-slate-600 mb-3">Renaming a priority will update all cards on this board.</p>
+            <h3 className="text-[10px] font-bold bf-kanban-section-label uppercase tracking-widest mb-3">Priorities</h3>
+            <p className="text-[11px] bf-kanban-hint mb-3">Renaming a priority will update all cards on this board.</p>
             <div className="space-y-1.5">
               {priorities.map((p, idx) => (
                 <div key={idx} className="flex items-center gap-2 group">
                   {editingIdx === idx ? (
                     <>
                       <button
-                        className="w-5 h-5 rounded-full shrink-0 border-2 border-slate-600 cursor-pointer hover:opacity-80 transition"
+                        className="w-5 h-5 rounded-full shrink-0 border-2 bf-kanban-color-swatch cursor-pointer hover:opacity-80 transition"
                         style={{ background: editColor }}
                         onClick={e => openPicker('edit', e)}
                         title="Change color"
@@ -202,19 +202,19 @@ const BoardSettingsModal: React.FC<{
                         value={editName}
                         onChange={e => setEditName(e.target.value)}
                         onKeyDown={e => { if (e.key === 'Enter' && editName.trim()) { onSavePriority(idx, editName.trim(), editColor); setEditingIdx(null) } if (e.key === 'Escape') setEditingIdx(null) }}
-                        className="flex-1 bg-slate-900 border border-slate-700 focus:border-violet-500 rounded px-2 py-1 text-xs text-slate-200 outline-none"
+                        className="flex-1 bf-kanban-input rounded px-2 py-1 text-xs outline-none"
                         autoFocus
                       />
-                      <button onClick={() => { if (editName.trim()) { onSavePriority(idx, editName.trim(), editColor); setEditingIdx(null) } }} className="p-1 text-emerald-400 hover:bg-slate-800 rounded cursor-pointer"><Check size={12} /></button>
-                      <button onClick={() => setEditingIdx(null)} className="p-1 text-slate-500 hover:bg-slate-800 rounded cursor-pointer"><X size={12} /></button>
+                      <button onClick={() => { if (editName.trim()) { onSavePriority(idx, editName.trim(), editColor); setEditingIdx(null) } }} className="p-1 text-emerald-400 bf-kanban-icon-btn rounded cursor-pointer"><Check size={12} /></button>
+                      <button onClick={() => setEditingIdx(null)} className="p-1 bf-kanban-icon-btn rounded cursor-pointer"><X size={12} /></button>
                     </>
                   ) : (
                     <>
                       <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: p.color }} />
-                      <span className="flex-1 text-sm text-slate-300">{p.name}</span>
+                      <span className="flex-1 text-sm bf-kanban-modal-text">{p.name}</span>
                       <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition">
-                        <button onClick={() => startEdit(idx)} className="p-1 text-slate-500 hover:text-slate-300 hover:bg-slate-800 rounded cursor-pointer"><Edit3 size={11} /></button>
-                        <button onClick={() => onDeletePriority(idx)} className="p-1 text-slate-500 hover:text-red-400 hover:bg-slate-800 rounded cursor-pointer"><Trash2 size={11} /></button>
+                        <button onClick={() => startEdit(idx)} className="p-1 bf-kanban-icon-btn rounded cursor-pointer"><Edit3 size={11} /></button>
+                        <button onClick={() => onDeletePriority(idx)} className="p-1 bf-kanban-icon-btn bf-kanban-icon-btn--danger rounded cursor-pointer"><Trash2 size={11} /></button>
                       </div>
                     </>
                   )}
@@ -223,9 +223,9 @@ const BoardSettingsModal: React.FC<{
             </div>
 
             {/* Add new priority */}
-            <div className="flex items-center gap-2 mt-3 pt-3 border-t border-slate-800">
+            <div className="flex items-center gap-2 mt-3 pt-3 bf-kanban-divider">
               <button
-                className="w-5 h-5 rounded-full shrink-0 border-2 border-slate-600 cursor-pointer hover:opacity-80 transition"
+                className="w-5 h-5 rounded-full shrink-0 border-2 bf-kanban-color-swatch cursor-pointer hover:opacity-80 transition"
                 style={{ background: newColor }}
                 onClick={e => openPicker('new', e)}
                 title="Pick color"
@@ -235,12 +235,12 @@ const BoardSettingsModal: React.FC<{
                 onChange={e => setNewName(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && newName.trim()) { onAddPriority(newName.trim(), newColor); setNewName(''); setNewColor('#8b5cf6') } }}
                 placeholder="New priority name…"
-                className="flex-1 bg-slate-900 border border-slate-700 focus:border-violet-500 rounded px-2 py-1 text-xs text-slate-500 placeholder:text-slate-700 outline-none focus:text-slate-200"
+                className="flex-1 bf-kanban-input rounded px-2 py-1 text-xs outline-none"
               />
               <button
                 onClick={() => { if (newName.trim()) { onAddPriority(newName.trim(), newColor); setNewName(''); setNewColor('#8b5cf6') } }}
                 disabled={!newName.trim()}
-                className="p-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition"
+                className="p-1.5 bf-kanban-accent-btn rounded disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition"
               >
                 <Plus size={12} />
               </button>
@@ -250,8 +250,8 @@ const BoardSettingsModal: React.FC<{
           {/* Tag colors */}
           {allBoardTags.length > 0 && (
             <div>
-              <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3">Tag Colors</h3>
-              <p className="text-[11px] text-slate-600 mb-3">Click a tag to change its color.</p>
+              <h3 className="text-[10px] font-bold bf-kanban-section-label uppercase tracking-widest mb-3">Tag Colors</h3>
+              <p className="text-[11px] bf-kanban-hint mb-3">Click a tag to change its color.</p>
               <div className="flex flex-wrap gap-2">
                 {allBoardTags.map(tag => {
                   const tc = tagColors[tag] || '#8b5cf6'
@@ -467,26 +467,26 @@ export const Kanban: React.FC<KanbanProps> = ({
     : 'Workspace Board'
 
   return (
-    <div className="flex flex-col h-full bg-[#0d1117] rounded-xl border border-slate-800 overflow-hidden shadow-2xl p-6">
+    <div className="flex flex-col h-full bf-kanban rounded-xl overflow-hidden p-6">
       {/* ── Header ── */}
       <div className="mb-6 flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold text-slate-100">{boardName}</h1>
-          <p className="text-slate-500 text-xs mt-0.5">
+          <h1 className="text-2xl font-bold bf-kanban-title">{boardName}</h1>
+          <p className="bf-kanban-hint text-xs mt-0.5">
             Drag to move · Double-click column to rename · Click priority badge to change
           </p>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={e => { e.stopPropagation(); setSettingsOpen(true) }}
-            className="flex items-center gap-1.5 px-3 py-2 bg-slate-800/80 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs rounded-lg transition cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-2 bf-kanban-btn text-xs rounded-lg transition cursor-pointer"
           >
             <Settings size={12} /> Settings
           </button>
           {onUpdateColumns && (
             <button
               onClick={handleAddColumn}
-              className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white font-medium text-xs rounded-lg shadow-lg hover:shadow-violet-500/20 active:scale-95 transition cursor-pointer"
+              className="flex items-center gap-1.5 px-4 py-2 bf-kanban-accent-btn font-medium text-xs rounded-lg active:scale-95 transition cursor-pointer"
             >
               <Plus size={14} /> Add Group
             </button>
@@ -508,24 +508,23 @@ export const Kanban: React.FC<KanbanProps> = ({
               onDragOver={e => { e.preventDefault(); setDragOverColumn(col) }}
               onDragEnter={() => setDragOverColumn(col)}
               onDrop={e => handleDrop(e, col)}
-              className={`flex flex-col rounded-xl min-h-[500px] max-h-full w-[272px] shrink-0 transition-all duration-200 border bg-[#0f1218] ${
-                isOver ? 'border-violet-500/40 shadow-2xl shadow-violet-900/20 scale-[1.01]' : 'border-slate-800'
-              }`}
+              className={`flex flex-col rounded-xl min-h-[500px] max-h-full w-[272px] shrink-0 transition-all duration-200 bf-kanban-col ${isOver ? 'scale-[1.01]' : ''}`}
+              data-over={isOver}
               style={{ borderTop: `3px solid ${accent}` }}
             >
               {/* Column header */}
-              <div className="flex justify-between items-center px-3 py-3 bg-[#111622] border-b border-slate-800/60 shrink-0 select-none">
+              <div className="flex justify-between items-center px-3 py-3 bf-kanban-col-header shrink-0 select-none">
                 {isEditing ? (
                   <div className="flex items-center gap-1 flex-1 mr-1">
                     <input
                       value={editColVal}
                       onChange={e => setEditColVal(e.target.value)}
                       onKeyDown={e => { if (e.key === 'Enter') saveRenameColumn(col); if (e.key === 'Escape') setEditingColumn(null) }}
-                      className="bg-slate-950 border border-slate-800 rounded px-2 py-0.5 text-xs text-slate-200 outline-none w-full"
+                      className="bf-kanban-input rounded px-2 py-0.5 text-xs outline-none w-full"
                       autoFocus
                     />
-                    <button onClick={() => saveRenameColumn(col)} className="p-1 text-emerald-400 hover:bg-slate-800 rounded cursor-pointer"><Check size={11} /></button>
-                    <button onClick={() => setEditingColumn(null)} className="p-1 text-slate-500 hover:bg-slate-800 rounded cursor-pointer"><X size={11} /></button>
+                    <button onClick={() => saveRenameColumn(col)} className="p-1 text-emerald-400 bf-kanban-icon-btn rounded cursor-pointer"><Check size={11} /></button>
+                    <button onClick={() => setEditingColumn(null)} className="p-1 bf-kanban-icon-btn rounded cursor-pointer"><X size={11} /></button>
                   </div>
                 ) : (
                   <div
@@ -551,16 +550,16 @@ export const Kanban: React.FC<KanbanProps> = ({
                     >
                       {col}
                     </span>
-                    <span className="text-xs font-bold text-slate-500">{colTasks.length}</span>
-                    {onUpdateColumns && <Edit3 size={9} className="text-slate-600 opacity-0 group-hover:opacity-100 transition ml-auto" />}
+                    <span className="text-xs font-bold bf-kanban-col-count">{colTasks.length}</span>
+                    {onUpdateColumns && <Edit3 size={9} className="bf-kanban-col-edit-icon opacity-0 group-hover:opacity-100 transition ml-auto" />}
                   </div>
                 )}
 
                 {onUpdateColumns && !isEditing && (
                   <div className="flex items-center shrink-0 ml-1">
-                    <button onClick={() => moveColumn(col, 'left')} disabled={colIdx === 0} className="p-1 hover:bg-slate-800 text-slate-600 hover:text-slate-300 disabled:opacity-10 rounded transition cursor-pointer"><ChevronLeft size={11} /></button>
-                    <button onClick={() => moveColumn(col, 'right')} disabled={colIdx === boardColumns.length - 1} className="p-1 hover:bg-slate-800 text-slate-600 hover:text-slate-300 disabled:opacity-10 rounded transition cursor-pointer"><ChevronRight size={11} /></button>
-                    <button onClick={() => handleDeleteColumn(col)} className="p-1 hover:bg-slate-800 text-slate-600 hover:text-red-400 rounded transition cursor-pointer"><Trash2 size={11} /></button>
+                    <button onClick={() => moveColumn(col, 'left')} disabled={colIdx === 0} className="p-1 bf-kanban-icon-btn disabled:opacity-10 rounded transition cursor-pointer"><ChevronLeft size={11} /></button>
+                    <button onClick={() => moveColumn(col, 'right')} disabled={colIdx === boardColumns.length - 1} className="p-1 bf-kanban-icon-btn disabled:opacity-10 rounded transition cursor-pointer"><ChevronRight size={11} /></button>
+                    <button onClick={() => handleDeleteColumn(col)} className="p-1 bf-kanban-icon-btn bf-kanban-icon-btn--danger rounded transition cursor-pointer"><Trash2 size={11} /></button>
                   </div>
                 )}
               </div>
@@ -584,15 +583,12 @@ export const Kanban: React.FC<KanbanProps> = ({
                       onDragStart={e => handleDragStart(e, task.path)}
                       onDragEnd={handleDragEnd}
                       onClick={() => onSelectFile(task.path)}
-                      className={`p-3 rounded-lg cursor-pointer transition shadow-sm hover:shadow-md select-none group relative border ${
-                        isDragging
-                          ? 'opacity-40 border-violet-500/50 border-dashed scale-95 bg-[#161c24]'
-                          : 'border-slate-700/40 hover:border-slate-600/60 bg-[#161c24] hover:bg-[#1a2130]'
-                      }`}
+                      className={`p-3 rounded-lg cursor-pointer transition select-none group relative bf-kanban-card ${isDragging ? 'opacity-40 scale-95' : ''}`}
+                      data-dragging={isDragging}
                       style={{ borderLeft: `3px solid ${accent}55` }}
                     >
                       {/* Title */}
-                      <div className="font-medium text-slate-200 group-hover:text-white transition mb-2.5 text-[13px] leading-snug break-words min-w-0">
+                      <div className="font-medium bf-kanban-card-title transition mb-2.5 text-[13px] leading-snug break-words min-w-0">
                         {task.title}
                       </div>
 
@@ -617,12 +613,12 @@ export const Kanban: React.FC<KanbanProps> = ({
                           </button>
 
                           {dueDate && (
-                            <div className="flex items-center gap-1 px-2 py-0.5 rounded-md border border-slate-700/50 bg-slate-800/40 text-[10px] text-slate-400">
+                            <div className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] bf-kanban-meta-badge">
                               <Calendar size={9} /><span>{dueDate}</span>
                             </div>
                           )}
                           {assignee && assignee !== 'Unassigned' && (
-                            <div className="flex items-center gap-1 px-2 py-0.5 rounded-md border border-slate-700/50 bg-slate-800/40 text-[10px] text-slate-400">
+                            <div className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] bf-kanban-meta-badge">
                               <User size={9} /><span>{assignee}</span>
                             </div>
                           )}
@@ -660,10 +656,8 @@ export const Kanban: React.FC<KanbanProps> = ({
                           ) : (
                             <button
                               onClick={() => setTagEditorCard(task.path)}
-                              className={`px-1.5 py-0.5 text-[10px] rounded-md border border-dashed transition cursor-pointer ${
-                                tags.length === 0
-                                  ? 'text-slate-600 border-slate-700/40 opacity-0 group-hover:opacity-100'
-                                  : 'text-slate-500 border-slate-700 hover:text-violet-400 hover:border-violet-600/40'
+                              className={`px-1.5 py-0.5 text-[10px] rounded-md border border-dashed transition cursor-pointer bf-kanban-tag-btn ${
+                                tags.length === 0 ? 'opacity-0 group-hover:opacity-100' : ''
                               }`}
                             >
                               + tag
@@ -677,7 +671,7 @@ export const Kanban: React.FC<KanbanProps> = ({
               </div>
 
               {/* Quick create */}
-              <div className="p-2.5 border-t border-slate-800/60 shrink-0">
+              <div className="p-2.5 bf-kanban-col-footer shrink-0">
                 <form onSubmit={e => handleQuickCreate(e, col)} className="flex gap-1.5">
                   <input
                     type="text"
@@ -685,11 +679,11 @@ export const Kanban: React.FC<KanbanProps> = ({
                     placeholder="Add task…"
                     value={newCardTitles[col] || ''}
                     onChange={e => setNewCardTitles(prev => ({ ...prev, [col]: e.target.value }))}
-                    className="flex-1 bg-slate-950/80 border border-slate-800 focus:border-violet-500/40 rounded-lg px-3 py-1.5 text-xs text-slate-300 outline-none transition placeholder:text-slate-600"
+                    className="flex-1 bf-kanban-input rounded-lg px-3 py-1.5 text-xs outline-none transition"
                   />
                   <button
                     type="submit"
-                    className="flex items-center justify-center w-7 h-7 bg-slate-800/80 hover:bg-violet-600 hover:text-white text-slate-500 rounded-lg transition cursor-pointer"
+                    className="flex items-center justify-center w-7 h-7 bf-kanban-add-btn rounded-lg transition cursor-pointer"
                   >
                     <Plus size={13} />
                   </button>
@@ -703,21 +697,21 @@ export const Kanban: React.FC<KanbanProps> = ({
       {/* ── Fixed-position popovers ── */}
       {priorityPicker && (
         <div
-          className="fixed z-[9999] bg-[#1a2236] border border-slate-700 rounded-xl shadow-2xl py-1.5 min-w-[160px]"
+          className="fixed z-[9999] bf-kanban-popover rounded-xl py-1.5 min-w-[160px]"
           style={{ top: priorityPicker.y, left: priorityPicker.x }}
           onClick={e => e.stopPropagation()}
         >
-          <div className="px-3 pb-1 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Priority</div>
+          <div className="px-3 pb-1 text-[10px] font-semibold bf-kanban-section-label uppercase tracking-wider">Priority</div>
           {priorities.map(p => {
             const isCurrent = tasks.find(t => t.path === priorityPicker.path)?.frontMatter?.priority?.toLowerCase() === p.name.toLowerCase()
             return (
               <button
                 key={p.name}
                 onClick={() => handleSetCardPriority(priorityPicker.path, p.name)}
-                className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-slate-800 text-left text-xs transition cursor-pointer"
+                className="flex items-center gap-2 w-full px-3 py-1.5 bf-kanban-popover-item text-left text-xs transition cursor-pointer"
               >
                 <span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />
-                <span className="text-slate-300">{p.name}</span>
+                <span className="bf-kanban-modal-text">{p.name}</span>
                 {isCurrent && <Check size={10} className="text-emerald-400 ml-auto" />}
               </button>
             )

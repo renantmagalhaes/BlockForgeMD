@@ -603,3 +603,203 @@ body {
 
   .ProseMirror table, .code-block-container, .callout-box { page-break-inside: avoid; }
 }
+
+/* ══════════════════════════════════════════════════════
+   MIND MAP CANVAS
+══════════════════════════════════════════════════════ */
+.bf-mindmap-canvas {
+  background-color: var(--bg-app);
+  border: 1px solid var(--border-1);
+}
+[data-theme="light"] .bf-mindmap-canvas { background-color: var(--bg-surface); }
+
+/* ══════════════════════════════════════════════════════
+   KANBAN BOARD — THEME-AWARE OVERRIDES
+══════════════════════════════════════════════════════ */
+
+/* Board wrapper */
+.bf-kanban {
+  background-color: var(--bg-app);
+  border: 1px solid var(--border-1);
+  box-shadow: var(--shadow-lg);
+  color: var(--txt-1);
+}
+[data-theme="cyber"] .bf-kanban {
+  box-shadow: var(--shadow-lg), var(--glow-card);
+}
+
+/* Board heading and hints */
+.bf-kanban-title { color: var(--txt-1); }
+.bf-kanban-hint  { color: var(--txt-3); }
+
+/* ── Column ─────────────────────────────────────────── */
+.bf-kanban-col {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-1);
+  box-shadow: var(--shadow-sm);
+}
+.bf-kanban-col[data-over="true"] {
+  border-color: var(--accent-border);
+  box-shadow: var(--shadow-md), 0 0 0 1px var(--accent-border);
+}
+[data-theme="cyber"] .bf-kanban-col[data-over="true"] {
+  box-shadow: var(--shadow-md), var(--glow-active);
+}
+
+.bf-kanban-col-header {
+  background-color: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-0);
+}
+.bf-kanban-col-footer {
+  border-top: 1px solid var(--border-0);
+}
+
+.bf-kanban-col-count     { color: var(--txt-3); }
+.bf-kanban-col-edit-icon { color: var(--txt-4); }
+
+/* ── Card ───────────────────────────────────────────── */
+.bf-kanban-card {
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border-1);
+  box-shadow: var(--shadow-sm);
+}
+.bf-kanban-card:hover {
+  border-color: var(--border-2);
+  box-shadow: var(--shadow-md);
+}
+[data-theme="cyber"] .bf-kanban-card {
+  box-shadow: var(--shadow-sm), 0 0 12px rgba(6,182,212,0.05);
+}
+[data-theme="cyber"] .bf-kanban-card:hover {
+  box-shadow: var(--shadow-md), var(--glow-active);
+}
+.bf-kanban-card[data-dragging="true"] {
+  border-color: var(--accent-border);
+  border-style: dashed;
+}
+
+.bf-kanban-card-title {
+  color: var(--txt-1);
+}
+.bf-kanban-card:hover .bf-kanban-card-title {
+  color: var(--txt-1);
+}
+
+/* Date / assignee badges */
+.bf-kanban-meta-badge {
+  background-color: var(--bg-hover);
+  border: 1px solid var(--border-1);
+  color: var(--txt-3);
+}
+
+/* Add-tag button */
+.bf-kanban-tag-btn {
+  color: var(--txt-4);
+  border-color: var(--border-1);
+}
+.bf-kanban-tag-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent-border);
+}
+
+/* ── Buttons ────────────────────────────────────────── */
+.bf-kanban-btn {
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border-1);
+  color: var(--txt-2);
+}
+.bf-kanban-btn:hover {
+  background-color: var(--bg-hover);
+  border-color: var(--border-2);
+  color: var(--txt-1);
+}
+
+.bf-kanban-accent-btn {
+  background-color: var(--accent);
+  color: #ffffff;
+  box-shadow: var(--shadow-sm);
+}
+.bf-kanban-accent-btn:hover { opacity: 0.88; }
+[data-theme="cyber"] .bf-kanban-accent-btn {
+  box-shadow: 0 0 14px rgba(6,182,212,0.35), var(--shadow-sm);
+}
+
+/* Icon buttons (col move/delete, modal close, etc.) */
+.bf-kanban-icon-btn {
+  color: var(--txt-3);
+  transition: background-color 0.12s, color 0.12s;
+}
+.bf-kanban-icon-btn:hover {
+  background-color: var(--bg-hover);
+  color: var(--txt-1);
+}
+.bf-kanban-icon-btn--danger:hover {
+  color: #f87171;
+}
+
+/* Quick-create add button */
+.bf-kanban-add-btn {
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border-0);
+  color: var(--txt-3);
+}
+.bf-kanban-add-btn:hover {
+  background-color: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+/* ── Inputs ─────────────────────────────────────────── */
+.bf-kanban-input {
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-1);
+  color: var(--txt-1);
+}
+.bf-kanban-input::placeholder { color: var(--txt-4); }
+.bf-kanban-input:focus {
+  border-color: var(--accent-border);
+  outline: none;
+}
+
+/* ── Popovers (priority picker, color palette, tag autocomplete) ── */
+.bf-kanban-popover {
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border-2);
+  box-shadow: var(--shadow-md);
+}
+[data-theme="cyber"] .bf-kanban-popover {
+  box-shadow: var(--shadow-md), var(--glow-card);
+}
+
+.bf-kanban-popover-item {
+  color: var(--txt-2);
+}
+.bf-kanban-popover-item:hover {
+  background-color: var(--bg-hover);
+  color: var(--txt-1);
+}
+
+/* ── Settings modal ─────────────────────────────────── */
+.bf-kanban-modal {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-2);
+  box-shadow: var(--shadow-lg);
+}
+[data-theme="cyber"] .bf-kanban-modal {
+  box-shadow: var(--shadow-lg), var(--glow-card);
+}
+.bf-kanban-modal-header {
+  border-bottom: 1px solid var(--border-1);
+}
+.bf-kanban-modal-title { color: var(--txt-1); }
+.bf-kanban-modal-text  { color: var(--txt-2); }
+
+/* Section labels and hints inside modal/popovers */
+.bf-kanban-section-label { color: var(--txt-3); }
+.bf-kanban-hint          { color: var(--txt-3); }
+
+/* Dividers inside modal (add-priority separator) */
+.bf-kanban-divider { border-top: 1px solid var(--border-1); }
+
+/* Color swatch border (priority edit/new) */
+.bf-kanban-color-swatch { border-color: var(--border-2); }
