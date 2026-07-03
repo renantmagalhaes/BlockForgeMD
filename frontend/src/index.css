@@ -10,35 +10,31 @@
    Applied via [data-theme="..."] on <html>
 ══════════════════════════════════════════════════════ */
 
-/* ── Dark (default) ─────────────────────────────────── */
+/* ── Dark (true black) ──────────────────────────────── */
 :root {
-  --bg-app:         #0C1018;
-  --bg-surface:     #111827;
-  --bg-elevated:    #1C2640;
-  --bg-input:       #080E18;
-  --bg-hover:       rgba(255,255,255,0.045);
-  --bg-active:      rgba(99,102,241,0.13);
+  --bg-app:         #000000;
+  --bg-surface:     #0a0a0a;
+  --bg-elevated:    #111111;
+  --bg-input:       #0a0a0a;
+  --bg-hover:       rgba(255,255,255,0.05);
+  --bg-active:      rgba(255,255,255,0.06);
 
-  --border-0:       rgba(255,255,255,0.04);
-  --border-1:       rgba(255,255,255,0.07);
-  --border-2:       rgba(255,255,255,0.13);
+  --border-0:       rgba(255,255,255,0.05);
+  --border-1:       rgba(255,255,255,0.08);
+  --border-2:       rgba(255,255,255,0.15);
 
-  --txt-1: #F3F4F6;
-  --txt-2: #9CA3AF;
-  --txt-3: #4B5563;
-  --txt-4: #374151;
+  --txt-1: #f8fafc;
+  --txt-2: #94a3b8;
+  --txt-3: #475569;
+  --txt-4: #334155;
 
-  --accent:         #6366F1;
-  --accent-faint:   rgba(99,102,241,0.13);
-  --accent-border:  rgba(99,102,241,0.38);
+  --accent:         #6366f1;
+  --accent-faint:   rgba(99,102,241,0.1);
+  --accent-border:  rgba(99,102,241,0.35);
 
-  --radius-sm: 5px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-
-  --shadow-sm: 0 1px 4px rgba(0,0,0,0.45);
-  --shadow-md: 0 4px 24px rgba(0,0,0,0.55);
-  --shadow-lg: 0 12px 56px rgba(0,0,0,0.65);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.6);
+  --shadow-md: 0 4px 20px rgba(0,0,0,0.7);
+  --shadow-lg: 0 12px 48px rgba(0,0,0,0.8);
 
   --glow-accent:  none;
   --glow-card:    none;
@@ -47,65 +43,82 @@
 
 /* ── Light ──────────────────────────────────────────── */
 [data-theme="light"] {
-  --bg-app:         #FAFAFA;
-  --bg-surface:     #F3F4F6;
-  --bg-elevated:    #FFFFFF;
-  --bg-input:       #FFFFFF;
+  --bg-app:         #f8fafc;
+  --bg-surface:     #f1f5f9;
+  --bg-elevated:    #ffffff;
+  --bg-input:       #ffffff;
   --bg-hover:       rgba(0,0,0,0.04);
-  --bg-active:      rgba(79,70,229,0.08);
+  --bg-active:      rgba(79,70,229,0.07);
 
-  --border-0:       rgba(0,0,0,0.05);
-  --border-1:       rgba(0,0,0,0.09);
-  --border-2:       rgba(0,0,0,0.16);
+  --border-0:       #e2e8f0;
+  --border-1:       #cbd5e1;
+  --border-2:       #94a3b8;
 
-  --txt-1: #111827;
-  --txt-2: #374151;
-  --txt-3: #6B7280;
-  --txt-4: #9CA3AF;
+  --txt-1: #0f172a;
+  --txt-2: #475569;
+  --txt-3: #64748b;
+  --txt-4: #94a3b8;
 
-  --accent:         #4F46E5;
+  --accent:         #4f46e5;
   --accent-faint:   rgba(79,70,229,0.07);
-  --accent-border:  rgba(79,70,229,0.3);
+  --accent-border:  rgba(79,70,229,0.28);
 
-  --shadow-sm: 0 1px 4px rgba(0,0,0,0.07);
-  --shadow-md: 0 4px 24px rgba(0,0,0,0.1);
-  --shadow-lg: 0 12px 56px rgba(0,0,0,0.14);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.07);
+  --shadow-md: 0 4px 20px rgba(0,0,0,0.09);
+  --shadow-lg: 0 12px 48px rgba(0,0,0,0.12);
 
   --glow-accent:  none;
   --glow-card:    none;
   --glow-active:  none;
 }
 
-/* ── Cyber ──────────────────────────────────────────── */
+/* ── Cyber (cyan / deep indigo navy) ────────────────── */
 [data-theme="cyber"] {
-  --bg-app:         #060912;
-  --bg-surface:     #0D0B1E;
-  --bg-elevated:    #1A1736;
-  --bg-input:       #080715;
-  --bg-hover:       rgba(168,85,247,0.07);
-  --bg-active:      rgba(168,85,247,0.15);
+  --bg-app:         #0b0f19;
+  --bg-surface:     #111827;
+  --bg-elevated:    #1a2235;
+  --bg-input:       #0d1220;
+  --bg-hover:       rgba(6,182,212,0.06);
+  --bg-active:      rgba(6,182,212,0.12);
 
-  --border-0:       rgba(168,85,247,0.07);
-  --border-1:       rgba(168,85,247,0.14);
-  --border-2:       rgba(168,85,247,0.28);
+  --border-0:       rgba(6,182,212,0.12);
+  --border-1:       rgba(6,182,212,0.2);
+  --border-2:       rgba(6,182,212,0.38);
 
-  --txt-1: #E2E8F0;
-  --txt-2: #94A3B8;
-  --txt-3: #475569;
-  --txt-4: #334155;
+  --txt-1: #f3f4f6;
+  --txt-2: #9ca3af;
+  --txt-3: #4b5563;
+  --txt-4: #374151;
 
-  --accent:         #A855F7;
-  --accent-faint:   rgba(168,85,247,0.14);
-  --accent-border:  rgba(168,85,247,0.45);
+  --accent:         #06b6d4;
+  --accent-faint:   rgba(6,182,212,0.12);
+  --accent-border:  rgba(6,182,212,0.4);
 
-  --shadow-sm: 0 1px 6px rgba(0,0,0,0.5), 0 0 12px rgba(168,85,247,0.07);
-  --shadow-md: 0 4px 24px rgba(0,0,0,0.6), 0 0 28px rgba(168,85,247,0.1);
-  --shadow-lg: 0 12px 56px rgba(0,0,0,0.7), 0 0 56px rgba(168,85,247,0.14);
+  --shadow-sm: 0 1px 4px rgba(0,0,0,0.5), 0 0 10px rgba(6,182,212,0.06);
+  --shadow-md: 0 4px 20px rgba(0,0,0,0.6), 0 0 24px rgba(6,182,212,0.08);
+  --shadow-lg: 0 12px 48px rgba(0,0,0,0.7), 0 0 48px rgba(6,182,212,0.1);
 
-  --glow-accent:  0 0 18px rgba(168,85,247,0.35), 0 0 56px rgba(168,85,247,0.1);
-  --glow-card:    0 0 28px rgba(168,85,247,0.12);
-  --glow-active:  0 0 14px rgba(168,85,247,0.28);
+  --shadow-sm: 0 1px 4px rgba(0,0,0,0.5), 0 0 10px rgba(6,182,212,0.06);
+  --shadow-md: 0 4px 20px rgba(0,0,0,0.6), 0 0 24px rgba(6,182,212,0.08);
+  --shadow-lg: 0 12px 48px rgba(0,0,0,0.7), 0 0 48px rgba(6,182,212,0.1);
+
+  --glow-accent:  0 0 16px rgba(6,182,212,0.3), 0 0 48px rgba(6,182,212,0.1);
+  --glow-card:    0 0 24px rgba(6,182,212,0.1);
+  --glow-active:  0 0 12px rgba(6,182,212,0.25);
 }
+
+/* ══════════════════════════════════════════════════════
+   SQUIRCLE — Tighten all Tailwind rounded-* utilities
+   These sit outside @layer so they cascade above utilities.
+══════════════════════════════════════════════════════ */
+.rounded-sm  { border-radius: 2px; }
+.rounded     { border-radius: 3px; }
+.rounded-md  { border-radius: 4px; }
+.rounded-lg  { border-radius: 5px; }
+.rounded-xl  { border-radius: 6px; }
+.rounded-2xl { border-radius: 8px; }
+.rounded-3xl { border-radius: 10px; }
+/* rounded-full stays at 9999px — used for avatar/pill shapes */
 
 /* ══════════════════════════════════════════════════════
    GLOBAL BASE
@@ -163,8 +176,8 @@ body {
   box-shadow: var(--glow-accent), 0 4px 12px rgba(99,102,241,0.35);
 }
 [data-theme="cyber"] .bf-logo {
-  box-shadow: 0 0 20px rgba(168,85,247,0.5), 0 4px 16px rgba(0,0,0,0.5);
-  background: linear-gradient(135deg, #7C3AED 0%, #A855F7 60%, #C084FC 100%) !important;
+  box-shadow: 0 0 20px rgba(6,182,212,0.4), 0 4px 16px rgba(0,0,0,0.5);
+  background: linear-gradient(135deg, #0e7490 0%, #06b6d4 60%, #22d3ee 100%) !important;
 }
 
 /* Workspace picker */
@@ -215,6 +228,7 @@ body {
 [data-theme="cyber"] .bf-tree-item.selected {
   border-left: 2px solid var(--accent);
   box-shadow: var(--glow-active);
+  color: var(--accent) !important;
 }
 [data-theme="light"] .bf-tree-item { color: #374151; }
 [data-theme="light"] .bf-tree-item:hover { color: #111827 !important; }
@@ -495,18 +509,18 @@ body {
 
 /* ── Cyber typography ─────────────────────────────── */
 [data-theme="cyber"] .ProseMirror h1 {
-  background: linear-gradient(120deg, #E2E8F0 20%, #A855F7 100%);
+  background: linear-gradient(120deg, #f3f4f6 20%, #22d3ee 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 [data-theme="cyber"] .ProseMirror h2 {
-  background: linear-gradient(120deg, #CBD5E1 30%, #C084FC 100%);
+  background: linear-gradient(120deg, #e2e8f0 40%, #67e8f9 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
-[data-theme="cyber"] .ProseMirror code { color: #C084FC; background: rgba(168,85,247,0.1); border-color: rgba(168,85,247,0.2); }
+[data-theme="cyber"] .ProseMirror code { color: #22d3ee; background: rgba(6,182,212,0.1); border-color: rgba(6,182,212,0.2); }
 
 /* ══════════════════════════════════════════════════════
    MISC COMPONENTS
