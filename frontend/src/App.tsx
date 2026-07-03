@@ -26,7 +26,6 @@ import {
   ChevronsDown,
   ChevronsUp,
   Brain,
-  Sun,
   Moon,
   Zap,
 } from 'lucide-react'
@@ -541,9 +540,9 @@ const getSearchSnippet = (content: string, query: string) => {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 export const App: React.FC = () => {
-  const [theme, setTheme] = useState<'dark' | 'light' | 'cyber'>(() => {
+  const [theme, setTheme] = useState<'dark' | 'cyber'>(() => {
     const s = localStorage.getItem('bf-theme')
-    return s === 'dark' || s === 'light' || s === 'cyber' ? s : 'dark'
+    return s === 'cyber' ? 'cyber' : 'dark'
   })
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -1750,14 +1749,14 @@ export const App: React.FC = () => {
 
             {/* Theme switcher */}
             <div className="flex items-center gap-1 shrink-0">
-              {(['dark', 'light', 'cyber'] as const).map(t => (
+              {(['dark', 'cyber'] as const).map(t => (
                 <button
                   key={t}
                   onClick={() => setTheme(t)}
                   className={`bf-theme-btn ${theme === t ? 'active' : ''}`}
-                  title={t === 'dark' ? 'Dark mode' : t === 'light' ? 'Light mode' : 'Cyber mode'}
+                  title={t === 'dark' ? 'Dark mode' : 'Cyber mode'}
                 >
-                  {t === 'dark' ? <Moon size={11} /> : t === 'light' ? <Sun size={11} /> : <Zap size={11} />}
+                  {t === 'dark' ? <Moon size={11} /> : <Zap size={11} />}
                 </button>
               ))}
             </div>

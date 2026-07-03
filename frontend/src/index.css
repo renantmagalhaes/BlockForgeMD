@@ -41,36 +41,6 @@
   --glow-active:  none;
 }
 
-/* ── Light ──────────────────────────────────────────── */
-[data-theme="light"] {
-  --bg-app:         #f8fafc;
-  --bg-surface:     #f1f5f9;
-  --bg-elevated:    #ffffff;
-  --bg-input:       #ffffff;
-  --bg-hover:       rgba(0,0,0,0.04);
-  --bg-active:      rgba(79,70,229,0.07);
-
-  --border-0:       #e2e8f0;
-  --border-1:       #cbd5e1;
-  --border-2:       #94a3b8;
-
-  --txt-1: #0f172a;
-  --txt-2: #475569;
-  --txt-3: #64748b;
-  --txt-4: #94a3b8;
-
-  --accent:         #4f46e5;
-  --accent-faint:   rgba(79,70,229,0.07);
-  --accent-border:  rgba(79,70,229,0.28);
-
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.07);
-  --shadow-md: 0 4px 20px rgba(0,0,0,0.09);
-  --shadow-lg: 0 12px 48px rgba(0,0,0,0.12);
-
-  --glow-accent:  none;
-  --glow-card:    none;
-  --glow-active:  none;
-}
 
 /* ── Cyber (cyan / deep indigo navy) ────────────────── */
 [data-theme="cyber"] {
@@ -230,8 +200,6 @@ body {
   box-shadow: var(--glow-active);
   color: var(--accent) !important;
 }
-[data-theme="light"] .bf-tree-item { color: #374151; }
-[data-theme="light"] .bf-tree-item:hover { color: #111827 !important; }
 
 /* Section headings in sidebar */
 .bf-section-label {
@@ -302,12 +270,6 @@ body {
   border-color: var(--border-1) !important;
   box-shadow: var(--shadow-lg), var(--glow-card) !important;
 }
-[data-theme="light"] .editor-root-container {
-  background-color: #FFFFFF !important;
-  border-color: rgba(0,0,0,0.08) !important;
-  box-shadow: 0 12px 56px rgba(0,0,0,0.08) !important;
-}
-
 /* Editor toolbar */
 .bf-toolbar {
   background-color: var(--bg-surface) !important;
@@ -315,18 +277,150 @@ body {
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
 }
-[data-theme="light"] .bf-toolbar {
-  background-color: #FFFFFF !important;
-  border-bottom-color: rgba(0,0,0,0.06) !important;
-}
 
 /* Properties panel */
 .bf-properties {
   background-color: color-mix(in srgb, var(--bg-elevated) 60%, transparent) !important;
   border-color: var(--border-0) !important;
 }
-[data-theme="light"] .bf-properties {
-  background-color: #F9FAFB !important;
+/* ── bf-properties form fields ───────────────────────
+   All inputs/selects inside the Page Attributes panel
+   must use CSS-variable backgrounds regardless of
+   the Tailwind utility that was inlined on them.       */
+.bf-properties select,
+.bf-properties input:not([type="file"]):not([type="checkbox"]) {
+  background-color: var(--bg-input) !important;
+  border-color: var(--border-1) !important;
+  color: var(--txt-1) !important;
+}
+.bf-properties select:hover,
+.bf-properties input:not([type="file"]):not([type="checkbox"]):hover {
+  background-color: var(--bg-elevated) !important;
+  border-color: var(--border-2) !important;
+}
+.bf-properties select:focus,
+.bf-properties input:not([type="file"]):not([type="checkbox"]):focus {
+  border-color: var(--accent-border) !important;
+  background-color: var(--bg-elevated) !important;
+}
+.bf-properties input::placeholder { color: var(--txt-4) !important; }
+
+/* Field labels + section text in bf-properties */
+.bf-properties .text-slate-500 { color: var(--txt-3) !important; }
+.bf-properties .text-slate-400 { color: var(--txt-3) !important; }
+.bf-properties .text-slate-300 { color: var(--txt-2) !important; }
+.bf-properties .text-slate-200 { color: var(--txt-1) !important; }
+.bf-properties .text-slate-600 { color: var(--txt-4) !important; }
+
+/* Dividers inside bf-properties */
+.bf-properties [class*="border-t"],
+.bf-properties [class*="border-slate"] { border-color: var(--border-1) !important; }
+
+/* Buttons inside bf-properties (add-tag, add-file, etc.) */
+.bf-properties button.bg-slate-800,
+.bf-properties button[class*="bg-slate-8"] {
+  background-color: var(--bg-elevated) !important;
+  color: var(--txt-3) !important;
+  border-color: var(--border-1) !important;
+}
+.bf-properties button[class*="bg-slate-8"]:hover,
+.bf-properties button[class*="hover:bg-slate-7"]:hover {
+  background-color: var(--bg-hover) !important;
+  color: var(--txt-2) !important;
+}
+
+/* Attachment file list items */
+.bf-properties [class*="bg-slate-9"] {
+  background-color: var(--bg-input) !important;
+}
+
+/* Tag autocomplete dropdown inside bf-properties (the absolute-positioned div) */
+.bf-properties div[class*="absolute"] {
+  background-color: var(--bg-elevated) !important;
+  border-color: var(--border-2) !important;
+  box-shadow: var(--shadow-md) !important;
+}
+.bf-properties div[class*="absolute"] button {
+  color: var(--txt-2) !important;
+}
+.bf-properties div[class*="absolute"] button:hover {
+  background-color: var(--bg-hover) !important;
+  color: var(--txt-1) !important;
+}
+
+/* ── Editor toolbar buttons ──────────────────────────
+   .bf-toolbar already gets the right background.
+   The individual buttons use text-slate-* and
+   hover:bg-slate-800 which need adapting.             */
+.bf-toolbar button { color: var(--txt-3); }
+.bf-toolbar button:hover {
+  background-color: var(--bg-hover) !important;
+  color: var(--txt-1) !important;
+}
+.bf-toolbar [class*="text-slate-400"] { color: var(--txt-3) !important; }
+.bf-toolbar [class*="text-slate-300"] { color: var(--txt-2) !important; }
+.bf-toolbar [class*="text-slate-500"] { color: var(--txt-3) !important; }
+.bf-toolbar [class*="border-slate"]   { border-color: var(--border-1) !important; }
+
+/* Active toolbar buttons (bold/italic in active state keep their violet) */
+.bf-toolbar [class*="bg-violet-6"] { background-color: var(--accent-faint) !important; }
+.bf-toolbar [class*="text-violet-4"] { color: var(--accent) !important; }
+.bf-toolbar [class*="border-violet-5"] { border-color: var(--accent-border) !important; }
+
+/* Color/highlight picker dropdowns in the toolbar
+   (the absolute-positioned div that has data-color-picker) */
+[data-color-picker][class*="absolute"] {
+  background-color: var(--bg-elevated) !important;
+  border-color: var(--border-2) !important;
+  box-shadow: var(--shadow-md) !important;
+}
+[data-theme="cyber"] [data-color-picker][class*="absolute"] {
+  box-shadow: var(--shadow-md), var(--glow-card) !important;
+}
+[data-color-picker][class*="absolute"] button:hover {
+  background-color: var(--bg-hover) !important;
+}
+[data-color-picker][class*="absolute"] div { color: var(--txt-3) !important; }
+
+/* Toolbar divider */
+.bf-toolbar [class*="border-slate-7"] { border-color: var(--border-1) !important; }
+.bf-toolbar [class*="bg-slate-8"]     { background-color: var(--bg-elevated) !important; }
+
+/* ── Breadcrumb / path bar (bf-main children) ──────── */
+.bf-main .text-slate-400 { color: var(--txt-3) !important; }
+.bf-main .text-slate-500 { color: var(--txt-3) !important; }
+.bf-main .text-slate-300 { color: var(--txt-2) !important; }
+/* "Home" breadcrumb link hover */
+.bf-main button[class*="hover:text-violet"]:hover { color: var(--accent) !important; }
+
+/* ── Sidebar text colors (section labels, icons, tree item utilities) */
+.bf-sidebar .text-slate-500 { color: var(--txt-3) !important; }
+.bf-sidebar .text-slate-400 { color: var(--txt-3) !important; }
+.bf-sidebar .text-slate-300 { color: var(--txt-2) !important; }
+.bf-sidebar .text-slate-600 { color: var(--txt-4) !important; }
+.bf-sidebar [class*="border-slate"] { border-color: var(--border-1) !important; }
+
+/* Sidebar utility icon buttons (small +/edit/move buttons near tree items) */
+.bf-sidebar button[class*="hover:bg-slate"]:hover {
+  background-color: var(--bg-hover) !important;
+}
+.bf-sidebar button[class*="hover:text-white"]:hover  { color: var(--txt-1)  !important; }
+.bf-sidebar button[class*="hover:text-slate"]:hover  { color: var(--txt-1)  !important; }
+
+/* Workspace dropdown items */
+.bf-ws-dropdown button[class*="text-slate"] { color: var(--txt-2) !important; }
+.bf-ws-dropdown button[class*="hover:bg-slate"]:hover { background-color: var(--bg-hover) !important; }
+.bf-ws-dropdown [class*="border-slate"] { border-color: var(--border-1) !important; }
+.bf-ws-dropdown button[class*="hover:text-violet"]:hover { color: var(--accent) !important; }
+
+/* Ctrl+K badge and other bg-[#161b22] inline elements in sidebar */
+.bf-sidebar span[class*="bg-\["] {
+  background-color: var(--bg-elevated) !important;
+  border-color: var(--border-1) !important;
+  color: var(--txt-3) !important;
+}
+.bf-sidebar div[class*="bg-\[#161"]:not(.bf-sidebar):not(.bf-sidebar-header) {
+  background-color: var(--bg-elevated) !important;
 }
 
 /* ══════════════════════════════════════════════════════
@@ -494,18 +588,7 @@ body {
   pointer-events: none;
 }
 
-/* ── Light typography overrides ───────────────────── */
-[data-theme="light"] .ProseMirror { color: #111827; }
-[data-theme="light"] .ProseMirror p { color: #374151; }
-[data-theme="light"] .ProseMirror h1,
-[data-theme="light"] .ProseMirror h2,
-[data-theme="light"] .ProseMirror h3 { color: #111827; }
-[data-theme="light"] .ProseMirror code { background-color: #F3F4F6; color: #DC2626; border-color: #E5E7EB; }
-[data-theme="light"] .ProseMirror pre { background-color: #F9FAFB; border-color: #E5E7EB; }
-[data-theme="light"] .ProseMirror pre code { color: #1F2937; }
-[data-theme="light"] .ProseMirror th { background-color: #F3F4F6; color: #374151; }
-[data-theme="light"] .ProseMirror td, [data-theme="light"] .ProseMirror th { border-color: #E5E7EB !important; }
-[data-theme="light"] .ProseMirror blockquote { color: #6B7280; }
+
 
 /* ── Cyber typography ─────────────────────────────── */
 [data-theme="cyber"] .ProseMirror h1 {
@@ -611,8 +694,6 @@ body {
   background-color: var(--bg-app);
   border: 1px solid var(--border-1);
 }
-[data-theme="light"] .bf-mindmap-canvas { background-color: var(--bg-surface); }
-
 /* ══════════════════════════════════════════════════════
    KANBAN BOARD — THEME-AWARE OVERRIDES
 ══════════════════════════════════════════════════════ */

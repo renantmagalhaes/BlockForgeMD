@@ -7,7 +7,7 @@ interface MindMapProps {
   filePath: string
   onSave: (content: string) => Promise<void>
   isSaving: boolean
-  theme?: 'dark' | 'light' | 'cyber'
+  theme?: 'dark' | 'cyber'
 }
 
 const API_BASE = import.meta.env.DEV ? 'http://localhost:8080' : ''
@@ -45,27 +45,6 @@ const DARK_THEME = {
   },
 }
 
-const LIGHT_THEME = {
-  name: 'blockforge-light',
-  type: 'light' as const,
-  palette: ['#4f46e5', '#0284c7', '#059669', '#d97706', '#dc2626', '#db2777', '#0891b2'],
-  cssVar: {
-    ...SHARED_VARS,
-    '--main-color': '#ffffff',
-    '--main-bgcolor': '#4f46e5',
-    '--main-bgcolor-transparent': 'rgba(79,70,229,0.1)',
-    '--color': '#374151',
-    '--bgcolor': '#f8fafc',
-    '--selected': '#4f46e5',
-    '--accent-color': '#4f46e5',
-    '--root-color': '#ffffff',
-    '--root-bgcolor': '#4f46e5',
-    '--root-border-color': '#818cf8',
-    '--panel-color': '#374151',
-    '--panel-bgcolor': '#f1f5f9',
-    '--panel-border-color': '#e2e8f0',
-  },
-}
 
 const CYBER_THEME = {
   name: 'blockforge-cyber',
@@ -90,7 +69,6 @@ const CYBER_THEME = {
 }
 
 function getMindElixirTheme(theme: string) {
-  if (theme === 'light') return LIGHT_THEME
   if (theme === 'cyber') return CYBER_THEME
   return DARK_THEME
 }
