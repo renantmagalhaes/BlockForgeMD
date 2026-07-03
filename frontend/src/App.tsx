@@ -28,6 +28,7 @@ import {
   Brain,
   Moon,
   Zap,
+  Star,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import Editor from './components/Editor'
@@ -228,6 +229,17 @@ const SECTION_ALLOWED_TYPES: Record<string, string[]> = {
   boards: ['board', 'task', 'folder'],
   canvas: ['canvas', 'folder'],
   mindmaps: ['mindmap', 'folder'],
+}
+
+const getFileTypeIcon = (type?: string) => {
+  switch (type) {
+    case 'task':    return <CheckSquare size={13} className="text-amber-500 shrink-0" />
+    case 'canvas':  return <Brush size={13} className="text-emerald-400 shrink-0" />
+    case 'board':   return <LayoutGrid size={13} className="text-violet-400 shrink-0" />
+    case 'mindmap': return <Brain size={13} className="text-violet-400 shrink-0" />
+    case 'folder':  return <Folder size={13} className="text-slate-400 shrink-0" />
+    default:        return <FileText size={13} className="text-blue-400 shrink-0" />
+  }
 }
 
 // ─── TreeNodeComponent ───────────────────────────────────────────────────────
@@ -590,6 +602,24 @@ export const App: React.FC = () => {
   const [renameWorkspaceTarget, setRenameWorkspaceTarget] = useState<string | null>(null)
   const [renameWorkspaceName, setRenameWorkspaceName] = useState('')
 
+  // ── Favorites ──────────────────────────────────────────────────────────────
+  const [favorites, setFavorites] = useState<string[]>([])
+  const [favoritesCollapsed, setFavoritesCollapsed] = useState(false)
+
+  // Reload favorites from backend whenever the active workspace changes.
+  // Guard against the initial empty-string state before fetchWorkspaces resolves.
+  useEffect(() => {
+    if (!activeWorkspace) return
+    const controller = new AbortController()
+    fetch(`${API_BASE}/api/favorites?workspace=${encodeURIComponent(activeWorkspace)}`, {
+      signal: controller.signal,
+    })
+      .then(r => r.ok ? r.json() : { favorites: [] })
+      .then(data => setFavorites(data.favorites || []))
+      .catch(err => { if (err.name !== 'AbortError') setFavorites([]) })
+    return () => controller.abort()
+  }, [activeWorkspace]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // W(section) → workspace-qualified section root path
   const W = (section: string) => activeWorkspace ? `${activeWorkspace}/${section}` : section
 
@@ -802,6 +832,18 @@ export const App: React.FC = () => {
     setWorkspaceDropdownOpen(false)
     setSelectedPath(null)
     setCollapsedPaths({})
+  }
+
+  const handleToggleFavorite = (path: string) => {
+    const next = favorites.includes(path)
+      ? favorites.filter(p => p !== path)
+      : [path, ...favorites]
+    setFavorites(next)
+    fetch(`${API_BASE}/api/favorites`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspace: activeWorkspace, favorites: next }),
+    }).catch(e => console.error('Failed to save favorites', e))
   }
 
   const fetchSettings = async () => {
@@ -1131,6 +1173,7 @@ export const App: React.FC = () => {
     try {
       const res = await fetch(`${API_BASE}/api/file?path=${encodeURIComponent(path)}`, { method: 'DELETE' })
       if (!res.ok) throw new Error('Failed to delete file')
+      if (favorites.includes(path)) handleToggleFavorite(path)
       fetchFiles()
       if (selectedPath === path) {
         setSelectedPath(null)
@@ -1472,6 +1515,68 @@ export const App: React.FC = () => {
           </div>
 
           <div className="flex-1 overflow-y-auto px-3 py-2 space-y-4 max-h-[calc(100vh-280px)] no-scrollbar">
+            {/* ── Favorites ──────────────────────────────────────────────── */}
+            {favorites.filter(p => files.some(f => f.path === p)).length > 0 && (
+              <div className="space-y-1">
+                <div
+                  className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider flex justify-between items-center rounded-lg transition text-slate-500 select-none"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <Star size={12} className="text-amber-400 fill-amber-400/30" />
+                    Favorites
+                  </span>
+                  <button
+                    onClick={() => setFavoritesCollapsed(p => !p)}
+                    className="hover:text-white transition cursor-pointer"
+                    title={favoritesCollapsed ? 'Expand' : 'Collapse'}
+                  >
+                    {favoritesCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                  </button>
+                </div>
+
+                <AnimatePresence initial={false}>
+                  {!favoritesCollapsed && (
+                    <motion.div
+                      key="fav-list"
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.18, ease: 'easeInOut' }}
+                      style={{ overflow: 'hidden' }}
+                      className="space-y-0.5 pl-1.5"
+                    >
+                      {favorites.map(path => {
+                        const file = files.find(f => f.path === path)
+                        if (!file) return null
+                        const isSelected = selectedPath === path
+                        return (
+                          <div
+                            key={path}
+                            onClick={() => fetchFileContent(path)}
+                            className={`flex items-center justify-between group/fav py-1 px-2 rounded-lg text-xs transition bf-tree-item cursor-pointer ${isSelected ? 'selected' : 'text-slate-300 hover:bg-slate-800/40'}`}
+                            style={{ paddingLeft: '14px' }}
+                          >
+                            <div className="flex items-center gap-1.5 truncate min-w-0">
+                              {getFileTypeIcon(file.type)}
+                              <span className="truncate ml-0.5">{file.title}</span>
+                            </div>
+                            <button
+                              onClick={e => { e.stopPropagation(); handleToggleFavorite(path) }}
+                              className="opacity-0 group-hover/fav:opacity-100 p-0.5 hover:bg-red-900/40 hover:text-red-400 rounded text-slate-500 transition cursor-pointer shrink-0 ml-1"
+                              title="Remove from Favorites"
+                            >
+                              <X size={10} />
+                            </button>
+                          </div>
+                        )
+                      })}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+                <div className="border-b border-slate-800/60 mx-1 pt-1" />
+              </div>
+            )}
+
             {/* Menu 1 - Documents */}
             <div className="space-y-1">
               <div
@@ -2529,6 +2634,19 @@ export const App: React.FC = () => {
                 setRenameInput(fileTitle)
                 setRenameModal({ isOpen: true, path: contextMenu.path!, currentName: fileTitle })
               })
+            })()}
+
+            {/* Favorites toggle — available for all non-folder page types */}
+            {contextMenu.path && contextMenu.nodeType !== 'folder' && (() => {
+              const isFav = favorites.includes(contextMenu.path!)
+              return ctxBtn(
+                isFav ? 'Remove from Favorites' : 'Add to Favorites',
+                <Star
+                  size={13}
+                  className={isFav ? 'text-amber-400 fill-amber-400' : 'text-amber-400'}
+                />,
+                () => handleToggleFavorite(contextMenu.path!)
+              )
             })()}
 
             <div className="border-t border-slate-850/60 my-1" />
