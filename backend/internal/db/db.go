@@ -303,14 +303,26 @@ func (db *DB) GetTasksForFile(filePath string) ([]TaskRecord, error) {
 }
 
 // Search queries files where path, title, or content matches the query string
-func (db *DB) Search(query string) ([]FileRecord, error) {
+func (db *DB) Search(query, wsPrefix string) ([]FileRecord, error) {
 	q := "%" + query + "%"
-	rows, err := db.Conn.Query(`
-		SELECT path, title, type, content_hash, updated_at, COALESCE(content, '') 
-		FROM files 
-		WHERE path LIKE ? OR title LIKE ? OR content LIKE ?
-		ORDER BY title ASC LIMIT 50;
-	`, q, q, q)
+	var rows *sql.Rows
+	var err error
+	if wsPrefix != "" {
+		rows, err = db.Conn.Query(`
+			SELECT path, title, type, content_hash, updated_at, COALESCE(content, '')
+			FROM files
+			WHERE (path LIKE ? OR title LIKE ? OR content LIKE ?)
+			  AND path LIKE ?
+			ORDER BY title ASC LIMIT 50;
+		`, q, q, q, wsPrefix+"%")
+	} else {
+		rows, err = db.Conn.Query(`
+			SELECT path, title, type, content_hash, updated_at, COALESCE(content, '')
+			FROM files
+			WHERE path LIKE ? OR title LIKE ? OR content LIKE ?
+			ORDER BY title ASC LIMIT 50;
+		`, q, q, q)
+	}
 	if err != nil {
 		return nil, err
 	}

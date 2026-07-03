@@ -91,9 +91,11 @@ func (s *Server) setupRoutes() {
 		r.Post("/workspaces/migrate", s.handleMigrateWorkspace)
 	})
 
-	// Serve assets directly from the vault's assets directory
-	s.router.Handle("/assets/*", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fs := http.StripPrefix("/assets", http.FileServer(http.Dir(filepath.Join(s.rootPath, "assets"))))
+	// Serve workspace-scoped assets (e.g. /Default/assets/image.png)
+	s.router.Handle("/{workspace}/assets/*", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		workspace := chi.URLParam(r, "workspace")
+		prefix := "/" + workspace + "/assets"
+		fs := http.StripPrefix(prefix, http.FileServer(http.Dir(filepath.Join(s.rootPath, workspace, "assets"))))
 		fs.ServeHTTP(w, r)
 	}))
 }
@@ -548,6 +550,45 @@ func (s *Server) handleRollbackFile(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, map[string]interface{}{"status": "success", "file": res.Record, "content": string(backupBytes)})
 }
 
+// sectionRoots are the standard top-level section directories present in every
+// workspace. If the first path segment of a note path matches one of these the
+// note lives at vault root (no workspace prefix).
+var sectionRoots = map[string]bool{
+	"Documents": true, "Tasks": true, "Boards": true,
+	"Canvas": true, "MindMaps": true,
+}
+
+// noteAssetBase resolves where to store assets for a given note path.
+// Returns (assetsDir on disk, URL prefix, sub-directory within assets).
+//
+//   notePath "Default/Documents/note.md"  →  {root}/Default/assets, /Default/assets, Documents
+//   notePath "Documents/note.md"          →  {root}/assets,          /assets,          Documents  (no-workspace mode)
+func (s *Server) noteAssetBase(notePath string) (assetsDir, urlBase, subDir string) {
+	dir := filepath.ToSlash(filepath.Dir(notePath))
+	if dir == "." || dir == "/" {
+		dir = ""
+	}
+
+	parts := strings.SplitN(dir, "/", 2)
+	first := ""
+	if len(parts) > 0 {
+		first = parts[0]
+	}
+	rest := ""
+	if len(parts) > 1 {
+		rest = parts[1]
+	}
+
+	if first != "" && !sectionRoots[first] {
+		// first segment is a workspace name
+		return filepath.Join(s.rootPath, first, "assets"),
+			"/" + first + "/assets",
+			rest
+	}
+	// no workspace — legacy root assets dir
+	return filepath.Join(s.rootPath, "assets"), "/assets", dir
+}
+
 func (s *Server) handleUploadAsset(w http.ResponseWriter, r *http.Request) {
 	// Max upload size: 20MB
 	if err := r.ParseMultipartForm(20 << 20); err != nil {
@@ -562,62 +603,66 @@ func (s *Server) handleUploadAsset(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// Parse optional overwritePath query param
+	// ── Overwrite existing asset ─────────────────────────────────────────────
 	overwritePath := r.URL.Query().Get("overwritePath")
 	if overwritePath != "" {
 		// Strip query parameters
 		if idx := strings.Index(overwritePath, "?"); idx != -1 {
 			overwritePath = overwritePath[:idx]
 		}
-		// Clean fully qualified HTTP URLs if passed
+		// Normalise fully-qualified HTTP URLs
 		if strings.HasPrefix(overwritePath, "http://") || strings.HasPrefix(overwritePath, "https://") {
 			if u, err := url.Parse(overwritePath); err == nil {
 				overwritePath = u.Path
 			}
 		}
-		// Clean prefixes
 		overwritePath = strings.TrimPrefix(overwritePath, "/")
-		overwritePath = strings.TrimPrefix(overwritePath, "assets/")
 
-		dstPath := filepath.Join(s.rootPath, "assets", filepath.Clean(overwritePath))
-		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
-			http.Error(w, "Failed to create assets directory: " + err.Error(), http.StatusInternalServerError)
+		// Security: must be an assets path
+		if !strings.Contains("/"+overwritePath, "/assets/") {
+			http.Error(w, "Invalid overwrite path", http.StatusBadRequest)
+			return
+		}
+		cleanRel := filepath.Clean(overwritePath)
+		if strings.HasPrefix(cleanRel, "..") {
+			http.Error(w, "Invalid overwrite path", http.StatusBadRequest)
 			return
 		}
 
+		dstPath := filepath.Join(s.rootPath, cleanRel)
+		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+			http.Error(w, "Failed to create assets directory: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 		dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 		if err != nil {
-			http.Error(w, "Failed to open asset file for overwriting: " + err.Error(), http.StatusInternalServerError)
+			http.Error(w, "Failed to open asset file for overwriting: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		defer dst.Close()
-
 		if _, err := io.Copy(dst, file); err != nil {
-			http.Error(w, "Failed to write asset bytes: " + err.Error(), http.StatusInternalServerError)
+			http.Error(w, "Failed to write asset bytes: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-
-		respondJSON(w, map[string]string{
-			"url": "/" + filepath.Join("assets", filepath.ToSlash(overwritePath)),
-		})
+		respondJSON(w, map[string]string{"url": "/" + filepath.ToSlash(cleanRel)})
 		return
 	}
 
-	// Parse optional notePath query param
+	// ── New upload ───────────────────────────────────────────────────────────
 	notePath := r.URL.Query().Get("notePath")
-	var parentDir string
+
+	var assetsDir, urlBase, subDir string
 	if notePath != "" {
-		parentDir = filepath.Dir(notePath)
-		if parentDir == "." || parentDir == "/" {
-			parentDir = ""
-		}
+		assetsDir, urlBase, subDir = s.noteAssetBase(notePath)
+	} else {
+		assetsDir = filepath.Join(s.rootPath, "assets")
+		urlBase = "/assets"
+		subDir = ""
 	}
 
-	// Ensure assets destination directory exists
-	assetsDir := filepath.Join(s.rootPath, "assets")
-	destSubdir := filepath.Join(assetsDir, parentDir)
+	destSubdir := filepath.Join(assetsDir, subDir)
 	if err := os.MkdirAll(destSubdir, 0755); err != nil {
-		http.Error(w, "Failed to create assets directory: " + err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to create assets directory: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -625,10 +670,10 @@ func (s *Server) handleUploadAsset(w http.ResponseWriter, r *http.Request) {
 	ext := filepath.Ext(handler.Filename)
 	base := strings.TrimSuffix(handler.Filename, ext)
 	base = strings.ReplaceAll(base, " ", "_")
-	
 	cleanBase := ""
 	for _, char := range base {
-		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '_' || char == '-' {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || char == '_' || char == '-' {
 			cleanBase += string(char)
 		}
 	}
@@ -636,19 +681,18 @@ func (s *Server) handleUploadAsset(w http.ResponseWriter, r *http.Request) {
 		cleanBase = "image"
 	}
 
-	// Extract and clean note's base name
+	// Include note's base name in the filename for traceability
 	var noteBase string
 	if notePath != "" {
 		noteFile := filepath.Base(notePath)
 		noteExt := filepath.Ext(noteFile)
 		noteName := strings.TrimSuffix(noteFile, noteExt)
-		cleanNoteName := ""
 		for _, char := range noteName {
-			if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '_' || char == '-' {
-				cleanNoteName += string(char)
+			if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+				(char >= '0' && char <= '9') || char == '_' || char == '-' {
+				noteBase += string(char)
 			}
 		}
-		noteBase = cleanNoteName
 	}
 
 	var filename string
@@ -657,31 +701,26 @@ func (s *Server) handleUploadAsset(w http.ResponseWriter, r *http.Request) {
 	} else {
 		filename = fmt.Sprintf("%s-%d%s", cleanBase, time.Now().UnixNano(), ext)
 	}
-	dstPath := filepath.Join(destSubdir, filename)
 
+	dstPath := filepath.Join(destSubdir, filename)
 	dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
-		http.Error(w, "Failed to create asset file: " + err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to create asset file: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer dst.Close()
-
 	if _, err := io.Copy(dst, file); err != nil {
-		http.Error(w, "Failed to save asset bytes: " + err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to save asset bytes: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Construct relative URL path
 	var urlPath string
-	if parentDir != "" {
-		urlPath = fmt.Sprintf("/assets/%s/%s", filepath.ToSlash(parentDir), filename)
+	if subDir != "" {
+		urlPath = fmt.Sprintf("%s/%s/%s", urlBase, filepath.ToSlash(subDir), filename)
 	} else {
-		urlPath = fmt.Sprintf("/assets/%s", filename)
+		urlPath = fmt.Sprintf("%s/%s", urlBase, filename)
 	}
-
-	respondJSON(w, map[string]string{
-		"url": urlPath,
-	})
+	respondJSON(w, map[string]string{"url": urlPath})
 }
 
 // ─── Link Preview ─────────────────────────────────────────────────────────────
@@ -889,7 +928,13 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results, err := s.db.Search(q)
+	// Scope results to the caller's workspace (empty string = root/no workspace)
+	wsPrefix := ""
+	if ws := r.URL.Query().Get("workspace"); ws != "" {
+		wsPrefix = ws + "/"
+	}
+
+	results, err := s.db.Search(q, wsPrefix)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Search failed: %v", err), http.StatusInternalServerError)
 		return

@@ -2647,7 +2647,7 @@ export const Editor: React.FC<EditorProps> = ({
         return
       }
 
-      const selectedFile = files.find(f => f.path === selectedCanvasPath)
+      const selectedFile = wsFiles.find(f => f.path === selectedCanvasPath)
       const editorType = selectedFile?.frontMatter?.editor || 'excalidraw'
 
       if (editorType === 'drawio') {
@@ -2817,9 +2817,20 @@ export const Editor: React.FC<EditorProps> = ({
     setEmojiActive(false)
   }
 
+  // Derive workspace-scoped file list so embed / mention pickers only show
+  // files that belong to the same workspace as the current document.
+  const SECTION_ROOTS = new Set(['Documents', 'Tasks', 'Boards', 'Canvas', 'MindMaps'])
+  const wsPrefix = (() => {
+    const first = filePath.split('/')[0]
+    return SECTION_ROOTS.has(first) ? '' : first + '/'
+  })()
+  const wsFiles = wsPrefix
+    ? files.filter(f => f.path.startsWith(wsPrefix))
+    : files.filter(f => SECTION_ROOTS.has(f.path.split('/')[0]))
+
   const getFilteredMentions = () => {
     const query = mentionQuery.toLowerCase().trim()
-    const otherFiles = files.filter(f => f.path !== filePath)
+    const otherFiles = wsFiles.filter(f => f.path !== filePath)
     if (!query) return otherFiles
     return otherFiles.filter(
       (f) =>
@@ -3777,7 +3788,7 @@ export const Editor: React.FC<EditorProps> = ({
               <button
                 onClick={() => {
                   setEmbedType('drawio')
-                  const canvasFiles = files.filter(f => f.type === 'canvas')
+                  const canvasFiles = wsFiles.filter(f => f.type === 'canvas')
                   if (canvasFiles.length > 0 && !selectedCanvasPath) {
                     setSelectedCanvasPath(canvasFiles[0].path)
                   }
@@ -3791,7 +3802,7 @@ export const Editor: React.FC<EditorProps> = ({
               <button
                 onClick={() => {
                   setEmbedType('mindmap')
-                  const mindmapFiles = files.filter(f => f.type === 'mindmap')
+                  const mindmapFiles = wsFiles.filter(f => f.type === 'mindmap')
                   if (mindmapFiles.length > 0 && !selectedMindmapPath) {
                     setSelectedMindmapPath(mindmapFiles[0].path)
                   }
@@ -3821,13 +3832,13 @@ export const Editor: React.FC<EditorProps> = ({
               ) : embedType === 'drawio' ? (
                 <div>
                   <label className="block text-xs font-semibold text-slate-455 mb-1.5 uppercase tracking-wider">Select Workspace Drawing</label>
-                  {files.filter(f => f.type === 'canvas').length > 0 ? (
+                  {wsFiles.filter(f => f.type === 'canvas').length > 0 ? (
                     <select
                       value={selectedCanvasPath}
                       onChange={(e) => setSelectedCanvasPath(e.target.value)}
                       className="w-full bg-[#0d1117] border border-slate-750 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-violet-500/80 focus:ring-1 focus:ring-violet-500/30 transition cursor-pointer"
                     >
-                      {files.filter(f => f.type === 'canvas').map(f => (
+                      {wsFiles.filter(f => f.type === 'canvas').map(f => (
                         <option key={f.path} value={f.path}>
                           {f.title || f.path.split('/').pop()} ({f.frontMatter?.editor === 'drawio' ? 'Draw.io' : 'Excalidraw'})
                         </option>
@@ -3835,7 +3846,7 @@ export const Editor: React.FC<EditorProps> = ({
                     </select>
                   ) : (
                     <div className="text-center py-4 bg-[#0d1117] border border-slate-800 rounded-xl select-none">
-                      <p className="text-xs text-slate-500 font-medium">No canvas drawings found in the vault.</p>
+                      <p className="text-xs text-slate-500 font-medium">No canvas drawings found in this workspace.</p>
                       <p className="text-[10px] text-slate-600 mt-1">Create an Excalidraw or Draw.io canvas page from the sidebar menu first.</p>
                     </div>
                   )}
@@ -3843,13 +3854,13 @@ export const Editor: React.FC<EditorProps> = ({
               ) : (
                 <div>
                   <label className="block text-xs font-semibold text-slate-455 mb-1.5 uppercase tracking-wider">Select Mind Map</label>
-                  {files.filter(f => f.type === 'mindmap').length > 0 ? (
+                  {wsFiles.filter(f => f.type === 'mindmap').length > 0 ? (
                     <select
                       value={selectedMindmapPath}
                       onChange={(e) => setSelectedMindmapPath(e.target.value)}
                       className="w-full bg-[#0d1117] border border-slate-750 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-violet-500/80 focus:ring-1 focus:ring-violet-500/30 transition cursor-pointer"
                     >
-                      {files.filter(f => f.type === 'mindmap').map(f => (
+                      {wsFiles.filter(f => f.type === 'mindmap').map(f => (
                         <option key={f.path} value={f.path}>
                           {f.title || f.path.split('/').pop()?.replace('.mindmap.md', '')}
                         </option>
@@ -3857,7 +3868,7 @@ export const Editor: React.FC<EditorProps> = ({
                     </select>
                   ) : (
                     <div className="text-center py-4 bg-[#0d1117] border border-slate-800 rounded-xl select-none">
-                      <p className="text-xs text-slate-500 font-medium">No mind maps found in the vault.</p>
+                      <p className="text-xs text-slate-500 font-medium">No mind maps found in this workspace.</p>
                       <p className="text-[10px] text-slate-600 mt-1">Create a mind map from the sidebar first.</p>
                     </div>
                   )}
@@ -3876,8 +3887,8 @@ export const Editor: React.FC<EditorProps> = ({
               <button
                 onClick={handleInsertEmbed}
                 disabled={
-                  (embedType === 'drawio' && files.filter(f => f.type === 'canvas').length === 0) ||
-                  (embedType === 'mindmap' && files.filter(f => f.type === 'mindmap').length === 0)
+                  (embedType === 'drawio' && wsFiles.filter(f => f.type === 'canvas').length === 0) ||
+                  (embedType === 'mindmap' && wsFiles.filter(f => f.type === 'mindmap').length === 0)
                 }
                 className="px-4 py-2 bg-violet-600 hover:bg-violet-550 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition shadow-lg cursor-pointer"
               >

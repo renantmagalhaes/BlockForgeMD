@@ -918,10 +918,18 @@ export const App: React.FC = () => {
     const delayDebounceFn = setTimeout(async () => {
       setIsSearching(true)
       try {
-        const res = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(searchQuery)}`)
+        const url = `${API_BASE}/api/search?q=${encodeURIComponent(searchQuery)}&workspace=${encodeURIComponent(activeWorkspace)}`
+        const res = await fetch(url)
         if (res.ok) {
-          const data = await res.json()
-          setSearchResults(data || [])
+          const data: FileRecord[] = await res.json() || []
+          // Client-side guard: keep only files that belong to the active workspace
+          const SECTION_ROOTS = new Set(['Documents', 'Tasks', 'Boards', 'Canvas', 'MindMaps'])
+          const scoped = data.filter(f =>
+            activeWorkspace
+              ? f.path.startsWith(activeWorkspace + '/')
+              : SECTION_ROOTS.has(f.path.split('/')[0])
+          )
+          setSearchResults(scoped)
           setSearchSelectedIndex(0)
         }
       } catch (e) {
@@ -932,7 +940,7 @@ export const App: React.FC = () => {
     }, 150)
 
     return () => clearTimeout(delayDebounceFn)
-  }, [searchQuery, searchOpen])
+  }, [searchQuery, searchOpen, activeWorkspace])
 
   useEffect(() => {
     const close = () => {
