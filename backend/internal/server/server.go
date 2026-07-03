@@ -1090,9 +1090,10 @@ type TrashListItem struct {
 	Name         string    `json:"name"`
 	Type         string    `json:"type"`
 	TrashedAt    time.Time `json:"trashedAt"`
-	ExpiresAt    time.Time `json:"expiresAt"` // zero-value means "never expires"
+	ExpiresAt    time.Time `json:"expiresAt"`    // zero-value means "never expires"
 	FileCount    int       `json:"fileCount"`
 	Files        []string  `json:"files"`
+	MatchedFiles []string  `json:"matchedFiles,omitempty"` // files whose content matched the search query
 }
 
 // assetURLRe matches root-relative workspace asset URLs embedded in markdown.
@@ -1715,26 +1716,33 @@ func (s *Server) handleSearchTrash(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// Name / path match (fast path)
-		matched := strings.Contains(strings.ToLower(filepath.Base(meta.OriginalPath)), query) ||
+		// Name / path match (fast path — no per-file attribution needed)
+		nameMatched := strings.Contains(strings.ToLower(filepath.Base(meta.OriginalPath)), query) ||
 			strings.Contains(strings.ToLower(meta.OriginalPath), query)
 
-		// Content match: walk the bundle's content directory
-		if !matched {
+		// Content match: walk the bundle's content directory and record which files matched
+		var matchedFiles []string
+		if !nameMatched {
 			contentDir := filepath.Join(trashDir, entry.Name(), "content")
 			_ = filepath.Walk(contentDir, func(path string, info os.FileInfo, err error) error {
-				if err != nil || info.IsDir() || matched {
+				if err != nil || info.IsDir() {
 					return nil
 				}
 				data, readErr := os.ReadFile(path)
-				if readErr == nil && strings.Contains(strings.ToLower(string(data)), query) {
-					matched = true
+				if readErr != nil {
+					return nil
+				}
+				if strings.Contains(strings.ToLower(string(data)), query) {
+					// rel is the original vault-relative path (mirrors how content was stored)
+					if rel, relErr := filepath.Rel(contentDir, path); relErr == nil {
+						matchedFiles = append(matchedFiles, filepath.ToSlash(rel))
+					}
 				}
 				return nil
 			})
 		}
 
-		if !matched {
+		if !nameMatched && len(matchedFiles) == 0 {
 			continue
 		}
 
@@ -1746,6 +1754,7 @@ func (s *Server) handleSearchTrash(w http.ResponseWriter, r *http.Request) {
 			TrashedAt:    meta.TrashedAt,
 			FileCount:    len(meta.Files),
 			Files:        meta.Files,
+			MatchedFiles: matchedFiles,
 		}
 		if retention > 0 {
 			item.ExpiresAt = meta.TrashedAt.AddDate(0, 0, retention)

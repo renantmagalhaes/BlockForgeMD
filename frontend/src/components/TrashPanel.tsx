@@ -16,6 +16,7 @@ interface TrashItem {
   expiresAt: string
   fileCount: number
   files: string[]
+  matchedFiles?: string[] // vault paths of files whose content matched a search query
 }
 
 interface TrashPanelProps {
@@ -126,12 +127,6 @@ export default function TrashPanel({ onClose, trashRetentionDays, workspace }: T
     return () => { if (searchTimer.current) clearTimeout(searchTimer.current) }
   }, [searchQuery, workspace])
 
-  // Clear folder file selection whenever the selected trash item changes
-  useEffect(() => {
-    setFolderFile(null)
-    setFolderPreview(null)
-  }, [selected])
-
   const selectFolderFile = async (trashId: string, filePath: string) => {
     setFolderFile(filePath)
     setFolderPreview(null)
@@ -149,22 +144,27 @@ export default function TrashPanel({ onClose, trashRetentionDays, workspace }: T
     }
   }
 
-  const selectItem = async (item: TrashItem) => {
+  const selectItem = (item: TrashItem) => {
+    // Reset all sub-state first; set new selected atomically in the same batch
     setSelected(item.id)
     setPreview(null)
+    setFolderFile(null)
+    setFolderPreview(null)
+
     if (item.type === 'file') {
+      // Single-file result: load its content directly
       setPreviewLoading(true)
-      try {
-        const res = await fetch(
-          `${API_BASE}/api/trash/content?workspace=${encodeURIComponent(workspace)}&id=${encodeURIComponent(item.id)}&path=${encodeURIComponent(item.originalPath)}`
-        )
-        if (res.ok) {
-          const data = await res.json()
-          setPreview({ content: data.content, filePath: item.originalPath })
-        }
-      } finally {
-        setPreviewLoading(false)
-      }
+      fetch(
+        `${API_BASE}/api/trash/content?workspace=${encodeURIComponent(workspace)}&id=${encodeURIComponent(item.id)}&path=${encodeURIComponent(item.originalPath)}`
+      )
+        .then(res => res.ok ? res.json() : null)
+        .then(data => { if (data) setPreview({ content: data.content, filePath: item.originalPath }) })
+        .finally(() => setPreviewLoading(false))
+    } else if (item.matchedFiles?.length) {
+      // Folder/board result from a content search: jump straight to the first matched file.
+      // All state setters above (setFolderFile(null) etc.) and inside selectFolderFile are
+      // batched by React into a single commit, so there's no intermediate clear flash.
+      selectFolderFile(item.id, item.matchedFiles[0])
     }
   }
 
@@ -180,7 +180,7 @@ export default function TrashPanel({ onClose, trashRetentionDays, workspace }: T
         showToast(msg || 'Restore failed')
         return
       }
-      if (selected === id) { setSelected(null); setPreview(null) }
+      if (selected === id) { setSelected(null); setPreview(null); setFolderFile(null); setFolderPreview(null) }
       showToast('Restored successfully')
       fetchItems()
     } catch {
@@ -192,7 +192,7 @@ export default function TrashPanel({ onClose, trashRetentionDays, workspace }: T
     try {
       const res = await fetch(`${API_BASE}/api/trash?workspace=${encodeURIComponent(workspace)}&id=${encodeURIComponent(id)}`, { method: 'DELETE' })
       if (!res.ok) { showToast('Delete failed'); return }
-      if (selected === id) { setSelected(null); setPreview(null) }
+      if (selected === id) { setSelected(null); setPreview(null); setFolderFile(null); setFolderPreview(null) }
       showToast('Permanently deleted')
       fetchItems()
     } catch {
@@ -445,10 +445,15 @@ export default function TrashPanel({ onClose, trashRetentionDays, workspace }: T
                             }`}
                           >
                             <FileText size={10} className="text-slate-500 shrink-0 mt-0.5" />
-                            <div className="min-w-0">
+                            <div className="min-w-0 flex-1">
                               <div className="text-[11px] truncate">{name}</div>
                               {dir && <div className="text-[9px] text-slate-600 truncate">{dir}</div>}
                             </div>
+                            {selectedItem.matchedFiles?.includes(f) && (
+                              <span className="text-[8px] font-bold text-violet-400 shrink-0 mt-0.5 px-1 py-0.5 bg-violet-500/10 rounded">
+                                match
+                              </span>
+                            )}
                           </button>
                         )
                       })}
