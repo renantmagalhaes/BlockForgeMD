@@ -963,7 +963,11 @@ export const Kanban: React.FC<KanbanProps> = ({
                       className={`p-3 rounded-lg cursor-pointer transition-all duration-200 select-none group relative bf-kanban-card ${isDragging ? 'opacity-40 scale-95' : isCompleted ? 'opacity-60' : ''}`}
                       data-dragging={isDragging}
                       data-filter={filterAttr}
-                      style={{ borderLeft: `3px solid ${accent}` }}
+                      style={{
+                        border: `1px solid ${accent}70`,
+                        borderLeft: `3px solid ${accent}`,
+                        ['--card-accent']: accent,
+                      } as React.CSSProperties}
                     >
                       {/* Title */}
                       <div className={`font-medium bf-kanban-card-title transition mb-2.5 text-[13px] leading-snug break-words min-w-0 ${isCompleted ? 'line-through' : ''}`}>

@@ -965,11 +965,10 @@ body {
 
 /* Matching card in highlight/focus mode */
 .bf-kanban-card[data-filter="match"] {
-  border-color: var(--accent-border) !important;
-  box-shadow: var(--shadow-sm), 0 0 0 1.5px var(--accent-border) !important;
+  box-shadow: var(--shadow-sm), 0 0 0 1.5px var(--card-accent, var(--accent-border)) !important;
 }
 [data-theme="cyber"] .bf-kanban-card[data-filter="match"] {
-  box-shadow: var(--shadow-sm), 0 0 0 1.5px var(--accent-border), 0 0 18px rgba(6,182,212,0.22) !important;
+  box-shadow: var(--shadow-sm), 0 0 0 1.5px var(--card-accent, var(--accent-border)), 0 0 18px rgba(6,182,212,0.22) !important;
 }
 
 /* ══════════════════════════════════════════════════════
