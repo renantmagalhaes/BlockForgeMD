@@ -168,7 +168,8 @@ turndownService.addRule('bookmark', {
     const description = (el.getAttribute('description') || '').replace(/"/g, '&quot;')
     const image = (el.getAttribute('image') || '').replace(/"/g, '&quot;')
     const favicon = (el.getAttribute('favicon') || '').replace(/"/g, '&quot;')
-    const siteName = (el.getAttribute('siteName') || '').replace(/"/g, '&quot;')
+    // HTML serializers lowercase attribute names, so accept sitename (lowercase) or siteName
+    const siteName = (el.getAttribute('sitename') || el.getAttribute('siteName') || '').replace(/"/g, '&quot;')
     return `\n<bookmark url="${url}" title="${title}" description="${description}" image="${image}" favicon="${favicon}" siteName="${siteName}"></bookmark>\n`
   }
 })
@@ -1331,12 +1332,25 @@ export const BookmarkNode = Node.create({
     return [
       {
         tag: 'bookmark',
+        getAttrs: (el) => {
+          const e = el as HTMLElement
+          return {
+            url: e.getAttribute('url') || '',
+            title: e.getAttribute('title') || '',
+            description: e.getAttribute('description') || '',
+            image: e.getAttribute('image') || '',
+            favicon: e.getAttribute('favicon') || '',
+            // browsers lowercase attribute names, so accept both cases
+            siteName: e.getAttribute('sitename') || e.getAttribute('siteName') || '',
+          }
+        },
       },
     ]
   },
 
   renderHTML({ HTMLAttributes }) {
-    return ['bookmark', mergeAttributes(HTMLAttributes)]
+    // ZWNJ (U+200C) prevents Turndown's isBlank check from firing before our custom rule.
+    return ['bookmark', mergeAttributes(HTMLAttributes), '‌']
   },
 
   addNodeView() {
@@ -1729,10 +1743,15 @@ export const Editor: React.FC<EditorProps> = ({
   }, [emojiActive])
 
   const toEmbedUrl = (url: string) => {
-    // YouTube Watch URLs
+    // YouTube Watch URLs and short links
     const ytMatch1 = url.match(/(?:youtube\.com\/watch\?.*v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/)
     if (ytMatch1) {
       return `https://www.youtube.com/embed/${ytMatch1[1]}`
+    }
+    // YouTube Shorts
+    const ytShortsMatch = url.match(/youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/)
+    if (ytShortsMatch) {
+      return `https://www.youtube.com/embed/${ytShortsMatch[1]}`
     }
     // Vimeo URLs
     const vimeoMatch = url.match(/vimeo\.com\/(?:video\/)?(\d+)/)
@@ -1820,6 +1839,7 @@ export const Editor: React.FC<EditorProps> = ({
     extensions: [
       StarterKit.configure({
         codeBlock: false,
+        link: false,
       }),
       Link.configure({
         openOnClick: false,
