@@ -786,7 +786,7 @@ export const Kanban: React.FC<KanbanProps> = ({
                 onClick={() => toggleColCollapse(col)}
                 title={`${col} (${count} cards) — click to expand`}
                 className="flex flex-col items-center justify-start w-12 shrink-0 min-h-[500px] rounded-xl bf-kanban-col cursor-pointer hover:opacity-80 transition pt-3 pb-3 gap-3"
-                style={{ borderTop: `3px solid ${accent}` }}
+                style={{ borderTop: `3px solid ${accent}`, background: `color-mix(in srgb, ${accent} 7%, var(--bg-surface))` }}
               >
                 <span
                   className="text-[10px] font-black rounded-full w-5 h-5 flex items-center justify-center shrink-0"
@@ -817,7 +817,7 @@ export const Kanban: React.FC<KanbanProps> = ({
               onDrop={e => handleDrop(e, col)}
               className={`flex flex-col rounded-xl min-h-[500px] max-h-full w-[272px] shrink-0 transition-all duration-200 bf-kanban-col ${isOver ? 'scale-[1.01]' : ''}`}
               data-over={isOver}
-              style={{ borderTop: `3px solid ${accent}` }}
+              style={{ borderTop: `3px solid ${accent}`, background: `color-mix(in srgb, ${accent} 7%, var(--bg-surface))` }}
             >
               {/* Column header */}
               <div className="flex justify-between items-center px-3 py-3 bf-kanban-col-header shrink-0 select-none">
@@ -963,7 +963,7 @@ export const Kanban: React.FC<KanbanProps> = ({
                       className={`p-3 rounded-lg cursor-pointer transition-all duration-200 select-none group relative bf-kanban-card ${isDragging ? 'opacity-40 scale-95' : isCompleted ? 'opacity-60' : ''}`}
                       data-dragging={isDragging}
                       data-filter={filterAttr}
-                      style={{ borderLeft: `3px solid ${accent}55` }}
+                      style={{ borderLeft: `3px solid ${accent}` }}
                     >
                       {/* Title */}
                       <div className={`font-medium bf-kanban-card-title transition mb-2.5 text-[13px] leading-snug break-words min-w-0 ${isCompleted ? 'line-through' : ''}`}>
