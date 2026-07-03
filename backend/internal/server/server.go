@@ -1099,39 +1099,69 @@ type TrashListItem struct {
 var assetURLRe = regexp.MustCompile(`(/[^/\s"')]+/assets/[^\s"')>]+)`)
 
 // trashDirForPath derives the workspace from relPath and returns that workspace's
-// .trash directory: {rootPath}/{workspace}/.trash
+// Trash directory: {rootPath}/{workspace}/Trash
 func (s *Server) trashDirForPath(relPath string) string {
 	parts := strings.SplitN(filepath.ToSlash(relPath), "/", 2)
 	if len(parts) == 0 || sectionRoots[parts[0]] {
-		return filepath.Join(s.rootPath, ".trash")
+		return filepath.Join(s.rootPath, "Trash")
 	}
-	return filepath.Join(s.rootPath, parts[0], ".trash")
+	return filepath.Join(s.rootPath, parts[0], "Trash")
 }
 
-// trashDirForWorkspace returns the .trash directory for a named workspace.
+// trashDirForWorkspace returns the Trash directory for a named workspace.
 func (s *Server) trashDirForWorkspace(workspace string) string {
 	if workspace == "" || sectionRoots[workspace] {
-		return filepath.Join(s.rootPath, ".trash")
+		return filepath.Join(s.rootPath, "Trash")
 	}
-	return filepath.Join(s.rootPath, workspace, ".trash")
+	return filepath.Join(s.rootPath, workspace, "Trash")
 }
 
-// allTrashDirs returns the .trash paths for all existing workspaces plus root.
+// allTrashDirs returns the Trash paths for all existing workspaces plus root.
 func (s *Server) allTrashDirs() []string {
 	var dirs []string
-	// root-level .trash (no-workspace mode)
-	dirs = append(dirs, filepath.Join(s.rootPath, ".trash"))
+	// root-level Trash (no-workspace mode)
+	dirs = append(dirs, filepath.Join(s.rootPath, "Trash"))
 	entries, err := os.ReadDir(s.rootPath)
 	if err != nil {
 		return dirs
 	}
 	for _, e := range entries {
-		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") || sectionRoots[e.Name()] {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") || sectionRoots[e.Name()] || e.Name() == "Trash" {
 			continue
 		}
-		dirs = append(dirs, filepath.Join(s.rootPath, e.Name(), ".trash"))
+		dirs = append(dirs, filepath.Join(s.rootPath, e.Name(), "Trash"))
 	}
 	return dirs
+}
+
+// copyFile copies src to dst, creating dst if it doesn't exist.
+// This is a cross-device-safe alternative to os.Rename.
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err = io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
+}
+
+// moveFile moves src to dst using Rename; falls back to copy+delete for cross-device moves.
+func moveFile(src, dst string) error {
+	if err := os.Rename(src, dst); err == nil {
+		return nil
+	}
+	if err := copyFile(src, dst); err != nil {
+		return err
+	}
+	return os.Remove(src)
 }
 
 func (s *Server) trashRetentionDays() int {
@@ -1231,8 +1261,8 @@ func (s *Server) trashFiles(files []string, originalPath, itemType, workspace, i
 				destName = strings.TrimSuffix(filename, ext) + fmt.Sprintf("_%d", i) + ext
 			}
 
-			if mvErr := os.Rename(assetFull, filepath.Join(assetsDir, destName)); mvErr != nil {
-				continue // asset may not exist; skip
+			if mvErr := moveFile(assetFull, filepath.Join(assetsDir, destName)); mvErr != nil {
+				continue // asset may not exist or not accessible; skip
 			}
 			// Include workspace in URL so the asset handler can locate the bundle.
 			newURL := fmt.Sprintf("/api/trash-asset/%s/%s/%s", workspace, id, destName)
@@ -1336,16 +1366,21 @@ func (s *Server) restoreTrashBundle(workspace, id string) error {
 		if mkErr := os.MkdirAll(filepath.Dir(assetDest), 0755); mkErr != nil {
 			continue
 		}
-		_ = os.Rename(filepath.Join(assetsDir, filename), assetDest)
+		_ = moveFile(filepath.Join(assetsDir, filename), assetDest)
 	}
 
-	// Restore files with rewritten content.
+	// Restore files with rewritten content, indexing each one directly so the
+	// DB is consistent before we broadcast (avoids the watcher's 50ms delay).
 	for _, relPath := range meta.Files {
 		src := filepath.Join(contentDir, filepath.FromSlash(relPath))
 		dest := filepath.Join(s.rootPath, filepath.FromSlash(relPath))
-		if mkErr := os.MkdirAll(filepath.Dir(dest), 0755); mkErr != nil {
+		destDir := filepath.Dir(dest)
+		if mkErr := os.MkdirAll(destDir, 0755); mkErr != nil {
 			continue
 		}
+		// Ensure the destination directory is watched so future edits are picked up.
+		s.watcher.WatchPath(destDir)
+
 		fileRaw, readErr := os.ReadFile(src)
 		if readErr != nil {
 			continue
@@ -1353,6 +1388,10 @@ func (s *Server) restoreTrashBundle(workspace, id string) error {
 		content := rewriteContent(string(fileRaw), reversals)
 		if wErr := os.WriteFile(dest, []byte(content), 0644); wErr != nil {
 			continue
+		}
+		// Index immediately so fetchFiles() returns the restored file without delay.
+		if idxErr := s.watcher.IndexFile(relPath); idxErr != nil {
+			log.Printf("restore: failed to index %s: %v", relPath, idxErr)
 		}
 		s.broadcastEvent(relPath)
 	}

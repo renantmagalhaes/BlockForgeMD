@@ -89,6 +89,14 @@ export default function TrashPanel({ onClose, trashRetentionDays, workspace }: T
 
   useEffect(() => { fetchItems() }, [fetchItems])
 
+  // Auto-refresh the trash list whenever a file is deleted or restored
+  // (the server broadcasts file_update events for both operations).
+  useEffect(() => {
+    const es = new EventSource(`${API_BASE}/api/sync/events`)
+    es.addEventListener('file_update', () => { fetchItems() })
+    return () => es.close()
+  }, [fetchItems])
+
   const selectItem = async (item: TrashItem) => {
     setSelected(item.id)
     setPreview(null)

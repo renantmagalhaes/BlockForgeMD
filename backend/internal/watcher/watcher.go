@@ -40,17 +40,22 @@ func NewWatcher(rootPath string, database *db.DB) (*Watcher, error) {
 	}, nil
 }
 
+// isSystemDir returns true for directory names that should never be indexed:
+// hidden dirs (starting with ".") and the "Trash" system folder.
+func isSystemDir(base string) bool {
+	return strings.HasPrefix(base, ".") || base == "Trash"
+}
+
 // Start initiates the watcher event loop
 func (w *Watcher) Start() error {
-	// Watch the root and all subdirectories
+	// Watch the root and all subdirectories (skip hidden and Trash)
 	err := filepath.Walk(w.rootPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		// Skip hidden folders like .git or .blockforge
 		if info.IsDir() {
 			base := filepath.Base(path)
-			if strings.HasPrefix(base, ".") && path != w.rootPath {
+			if isSystemDir(base) && path != w.rootPath {
 				return filepath.SkipDir
 			}
 			return w.fsWatcher.Add(path)
@@ -107,7 +112,7 @@ func (w *Watcher) initialIndex() {
 		}
 		if info.IsDir() {
 			base := filepath.Base(path)
-			if strings.HasPrefix(base, ".") && path != w.rootPath {
+			if isSystemDir(base) && path != w.rootPath {
 				return filepath.SkipDir
 			}
 			return nil
@@ -159,6 +164,22 @@ func (w *Watcher) indexFile(relPath string) error {
 	return nil
 }
 
+// IndexFile parses a file and immediately upserts it into the DB.
+// Used by restore to bypass the fsnotify delay and update the DB synchronously.
+func (w *Watcher) IndexFile(relPath string) error {
+	return w.indexFile(relPath)
+}
+
+// isTrashPath returns true when relPath lives inside a Trash directory
+// (handles both root-level "Trash/..." and workspace-level ".../Trash/...").
+func isTrashPath(relPath string) bool {
+	s := filepath.ToSlash(relPath)
+	return s == "Trash" ||
+		strings.HasPrefix(s, "Trash/") ||
+		strings.Contains(s, "/Trash/") ||
+		strings.HasSuffix(s, "/Trash")
+}
+
 func (w *Watcher) watchLoop() {
 	for {
 		select {
@@ -173,8 +194,8 @@ func (w *Watcher) watchLoop() {
 				continue
 			}
 
-			// Ignore hidden files (e.g. .blockforge, .git)
-			if strings.HasPrefix(relPath, ".") || strings.Contains(relPath, "/.") {
+			// Ignore hidden paths and Trash paths
+			if strings.HasPrefix(relPath, ".") || strings.Contains(relPath, "/.") || isTrashPath(relPath) {
 				continue
 			}
 
@@ -184,8 +205,11 @@ func (w *Watcher) watchLoop() {
 
 			if isDir {
 				if event.Op&fsnotify.Create == fsnotify.Create {
-					w.fsWatcher.Add(event.Name)
-					log.Printf("Watcher: added directory %s", relPath)
+					base := filepath.Base(event.Name)
+					if !isSystemDir(base) {
+						w.fsWatcher.Add(event.Name)
+						log.Printf("Watcher: added directory %s", relPath)
+					}
 				}
 				continue
 			}
@@ -239,7 +263,8 @@ func (w *Watcher) WatchPath(dir string) {
 		if err != nil || !info.IsDir() {
 			return nil
 		}
-		if base := filepath.Base(path); strings.HasPrefix(base, ".") {
+		base := filepath.Base(path)
+		if isSystemDir(base) {
 			return filepath.SkipDir
 		}
 		return w.fsWatcher.Add(path)
