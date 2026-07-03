@@ -19,6 +19,12 @@ type FileRecord struct {
 	UpdatedAt   time.Time         `json:"updatedAt"`
 	Content     string            `json:"content,omitempty"`
 	FrontMatter map[string]string `json:"frontMatter,omitempty"`
+	Position    float64           `json:"position"`
+}
+
+type PositionUpdate struct {
+	Path     string  `json:"path"`
+	Position float64 `json:"position"`
 }
 
 type TaskRecord struct {
@@ -103,6 +109,8 @@ func (db *DB) createTables() error {
 
 	// Automatic migrations
 	_, _ = db.Conn.Exec("ALTER TABLE files ADD COLUMN content TEXT;")
+	_, _ = db.Conn.Exec("ALTER TABLE files ADD COLUMN position REAL DEFAULT 0;")
+	_, _ = db.Conn.Exec("UPDATE files SET position = rowid WHERE position = 0 OR position IS NULL;")
 	_, _ = db.Conn.Exec("INSERT OR IGNORE INTO settings (key, value) VALUES ('history_limit', '50');")
 
 	return nil
@@ -116,10 +124,16 @@ func (db *DB) UpsertFile(file FileRecord, fm map[string]interface{}, tasks []Tas
 	}
 	defer tx.Rollback()
 
-	// 1. Insert or replace file
+	// 1. Insert or update file — preserve position for existing rows, assign max+1 for new ones
 	_, err = tx.Exec(`
-		INSERT OR REPLACE INTO files (path, title, type, content_hash, updated_at, content)
-		VALUES (?, ?, ?, ?, ?, ?);
+		INSERT INTO files (path, title, type, content_hash, updated_at, content, position)
+		VALUES (?, ?, ?, ?, ?, ?, COALESCE((SELECT MAX(position) FROM files), 0) + 1)
+		ON CONFLICT(path) DO UPDATE SET
+			title = excluded.title,
+			type = excluded.type,
+			content_hash = excluded.content_hash,
+			updated_at = excluded.updated_at,
+			content = excluded.content;
 	`, file.Path, file.Title, file.Type, file.ContentHash, file.UpdatedAt, file.Content)
 	if err != nil {
 		return fmt.Errorf("failed to upsert file: %w", err)
@@ -211,9 +225,9 @@ func (db *DB) GetFile(path string) (*FileRecord, error) {
 	return &record, nil
 }
 
-// ListFiles returns all files in the database, including their front matter
+// ListFiles returns all files in the database ordered by position, including their front matter
 func (db *DB) ListFiles() ([]FileRecord, error) {
-	rows, err := db.Conn.Query("SELECT path, title, type, content_hash, updated_at, COALESCE(content, '') FROM files ORDER BY path ASC;")
+	rows, err := db.Conn.Query("SELECT path, title, type, content_hash, updated_at, COALESCE(content, ''), COALESCE(position, rowid) FROM files ORDER BY COALESCE(position, rowid) ASC;")
 	if err != nil {
 		return nil, err
 	}
@@ -224,7 +238,7 @@ func (db *DB) ListFiles() ([]FileRecord, error) {
 
 	for rows.Next() {
 		var record FileRecord
-		err := rows.Scan(&record.Path, &record.Title, &record.Type, &record.ContentHash, &record.UpdatedAt, &record.Content)
+		err := rows.Scan(&record.Path, &record.Title, &record.Type, &record.ContentHash, &record.UpdatedAt, &record.Content, &record.Position)
 		if err == nil {
 			record.FrontMatter = make(map[string]string)
 			records = append(records, record)
@@ -396,6 +410,26 @@ func (db *DB) AddWorkspacePrefix(workspace string) error {
 	}
 	if _, err := tx.Exec("UPDATE tasks SET file_path = ? || file_path", prefix); err != nil {
 		return fmt.Errorf("failed to update tasks: %w", err)
+	}
+	return tx.Commit()
+}
+
+// UpdatePositions batch-updates the position of files for reordering.
+func (db *DB) UpdatePositions(updates []PositionUpdate) error {
+	tx, err := db.Conn.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare("UPDATE files SET position = ? WHERE path = ?")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, u := range updates {
+		if _, err := stmt.Exec(u.Position, u.Path); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

@@ -70,6 +70,7 @@ func (s *Server) setupRoutes() {
 	// API Endpoints
 	s.router.Route("/api", func(r chi.Router) {
 		r.Get("/files", s.handleListFiles)
+		r.Patch("/files/reorder", s.handleReorderFiles)
 		r.Get("/file", s.handleGetFile)
 		r.Post("/file", s.handleSaveFile)
 		r.Delete("/file", s.handleDeleteFile)
@@ -168,6 +169,20 @@ func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, records)
+}
+
+// handleReorderFiles updates the position field for a batch of files to persist custom ordering.
+func (s *Server) handleReorderFiles(w http.ResponseWriter, r *http.Request) {
+	var updates []db.PositionUpdate
+	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if err := s.db.UpdatePositions(updates); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleGetFile reads a markdown file and returns its content plus parsed metadata

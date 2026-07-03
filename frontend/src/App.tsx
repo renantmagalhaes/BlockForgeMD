@@ -143,24 +143,8 @@ const buildTree = (files: FileRecord[]): TreeNode[] => {
     }
   })
 
-  const sortTree = (nodes: TreeNode[], isRoot = false) => {
-    nodes.sort((a, b) => {
-      if (isRoot) {
-        const order = ['Documents', 'Tasks', 'Canvas']
-        const ia = order.indexOf(a.name)
-        const ib = order.indexOf(b.name)
-        if (ia !== -1 && ib !== -1) return ia - ib
-        if (ia !== -1) return -1
-        if (ib !== -1) return 1
-      }
-      if (a.isFolder && !b.isFolder) return -1
-      if (!a.isFolder && b.isFolder) return 1
-      return (a.title || a.name).localeCompare(b.title || b.name)
-    })
-    nodes.forEach(n => { if (n.children.length > 0) sortTree(n.children) })
-  }
-
-  sortTree(root.children, true)
+  // No sorting — ordering is controlled by the backend `position` field.
+  // Section roots (Documents, Tasks, etc.) are hardcoded in the sidebar JSX.
   return root.children
 }
 
@@ -263,6 +247,7 @@ const TreeNodeComponent: React.FC<{
   onDragStart: (filePath: string, nodeType?: string) => void
   onDragEnd: () => void
   onDropNode: (fromFilePath: string, toNode: TreeNode) => void
+  onReorderNode?: (fromFilePath: string, toFilePath: string, pos: 'before' | 'after') => void
 }> = ({
   node,
   depth,
@@ -279,6 +264,7 @@ const TreeNodeComponent: React.FC<{
   onDragStart,
   onDragEnd,
   onDropNode,
+  onReorderNode,
 }) => {
   const getIsCollapsed = () => {
     if (collapsedPaths[node.path] !== undefined) return collapsedPaths[node.path]
@@ -290,7 +276,16 @@ const TreeNodeComponent: React.FC<{
   const isSelected = selectedPath && node.hasPage && node.filePath === selectedPath
   const isBeingDragged = !!(node.filePath && draggingPath === node.filePath)
 
-  const [isDragOver, setIsDragOver] = React.useState(false)
+  // 'before' | 'after' = reorder indicator, 'on' = sub-page drop highlight, null = none
+  const [dropZone, setDropZone] = React.useState<'before' | 'after' | 'on' | null>(null)
+
+  const computeDropZone = (e: React.DragEvent): 'before' | 'after' | 'on' => {
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    const pct = (e.clientY - rect.top) / rect.height
+    if (pct < 0.3) return 'before'
+    if (pct > 0.7) return 'after'
+    return 'on'
+  }
 
   const handleDragStart = (e: React.DragEvent) => {
     if (!node.filePath) { e.preventDefault(); return }
@@ -302,37 +297,56 @@ const TreeNodeComponent: React.FC<{
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    if (!node.hasPage || !node.filePath || isBeingDragged) return
-    // Block cross-section drops: type must match what this section accepts
+    if (!node.filePath || isBeingDragged) return
+
+    const zone = computeDropZone(e)
+
+    if (zone === 'before' || zone === 'after') {
+      // Block cross-type drops even for reorder/peer-move zones
+      if (sectionType && draggingType !== undefined) {
+        const allowed = SECTION_ALLOWED_TYPES[sectionType] ?? []
+        if (!allowed.includes(draggingType)) { setDropZone(null); return }
+      }
+      e.dataTransfer.dropEffect = 'move'
+      setDropZone(zone)
+      return
+    }
+
+    // 'on' zone = sub-page drop (existing behavior) — requires type compatibility
+    if (!node.hasPage) { setDropZone(null); return }
     if (sectionType && draggingType !== undefined) {
       const allowed = SECTION_ALLOWED_TYPES[sectionType] ?? []
-      if (!allowed.includes(draggingType)) return
+      if (!allowed.includes(draggingType)) { setDropZone(null); return }
     }
-    // Block dropping onto a descendant of the dragged item
     if (draggingPath) {
       const dragStem = draggingPath.endsWith('.board.md') ? draggingPath.slice(0, -'.board.md'.length)
         : draggingPath.endsWith('.excalidraw.md') ? draggingPath.slice(0, -'.excalidraw.md'.length)
         : draggingPath.endsWith('.drawio.md') ? draggingPath.slice(0, -'.drawio.md'.length)
         : draggingPath.endsWith('.mindmap.md') ? draggingPath.slice(0, -'.mindmap.md'.length)
         : draggingPath.endsWith('.md') ? draggingPath.slice(0, -3) : draggingPath
-      if (node.filePath.startsWith(dragStem + '/')) return
+      if (node.filePath.startsWith(dragStem + '/')) { setDropZone(null); return }
     }
     e.dataTransfer.dropEffect = 'move'
-    if (!isDragOver) setIsDragOver(true)
+    setDropZone('on')
   }
 
   const handleDragLeave = (e: React.DragEvent) => {
     e.stopPropagation()
-    if (!e.currentTarget.contains(e.relatedTarget as Node)) setIsDragOver(false)
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropZone(null)
   }
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    setIsDragOver(false)
     const fromPath = e.dataTransfer.getData('text/plain')
-    if (fromPath && node.hasPage && node.filePath && fromPath !== node.filePath) {
-      // Final type-compatibility guard (mirrors handleDragOver)
+    const zone = dropZone
+    setDropZone(null)
+
+    if (!fromPath || fromPath === node.filePath) { onDragEnd(); return }
+
+    if ((zone === 'before' || zone === 'after') && node.filePath) {
+      onReorderNode?.(fromPath, node.filePath, zone)
+    } else if (zone === 'on' && node.hasPage && node.filePath) {
       const canDrop = !sectionType || !draggingType ||
         (SECTION_ALLOWED_TYPES[sectionType] ?? []).includes(draggingType)
       if (canDrop) onDropNode(fromPath, node)
@@ -342,15 +356,13 @@ const TreeNodeComponent: React.FC<{
 
   const handleDragEnd = () => {
     onDragEnd()
-    setIsDragOver(false)
+    setDropZone(null)
   }
 
   const handleRowClick = (e: React.MouseEvent) => {
     e.stopPropagation()
     const actAsFolder = node.isFolder || node.type === 'folder'
     if (node.hasPage && node.filePath) {
-      // Folder-type pages: toggle collapse on click instead of opening editor,
-      // since their purpose is organization rather than content authoring.
       if (node.type === 'folder') {
         onToggleCollapse(node.path)
       } else {
@@ -398,7 +410,10 @@ const TreeNodeComponent: React.FC<{
   }
 
   return (
-    <div className="flex flex-col select-none">
+    <div className="flex flex-col select-none relative">
+      {dropZone === 'before' && (
+        <div className="absolute top-0 left-3 right-1 h-0.5 bg-violet-400 rounded-full z-10 pointer-events-none" />
+      )}
       <div
         draggable={!!node.filePath}
         onDragStart={handleDragStart}
@@ -413,7 +428,7 @@ const TreeNodeComponent: React.FC<{
         className={`flex items-center justify-between group py-1 px-2 rounded-lg text-xs transition bf-tree-item ${isSelected ? 'selected' : ''} ${
           isBeingDragged
             ? 'opacity-30 cursor-grabbing'
-            : isDragOver
+            : dropZone === 'on'
             ? 'bg-violet-600/15 border border-violet-500/40 text-violet-300 cursor-copy'
             : isSelected
             ? 'bg-slate-800 text-violet-400 font-semibold border border-slate-700/50 hover:bg-slate-800/80 cursor-pointer'
@@ -463,6 +478,9 @@ const TreeNodeComponent: React.FC<{
           </button>
         </div>
       </div>
+      {dropZone === 'after' && (
+        <div className="absolute bottom-0 left-3 right-1 h-0.5 bg-violet-400 rounded-full z-10 pointer-events-none" />
+      )}
 
       <AnimatePresence initial={false}>
         {(node.isFolder || node.type === 'folder') && !isCollapsed && node.children && (
@@ -493,6 +511,7 @@ const TreeNodeComponent: React.FC<{
                 onDragStart={onDragStart}
                 onDragEnd={onDragEnd}
                 onDropNode={onDropNode}
+                onReorderNode={onReorderNode}
               />
             ))}
           </motion.div>
@@ -511,6 +530,7 @@ interface FileRecord {
   updatedAt: string
   content?: string
   frontMatter?: Record<string, string>
+  position?: number
 }
 
 const splitFrontMatter = (content: string) => {
@@ -1193,6 +1213,84 @@ export const App: React.FC = () => {
     }
   }
 
+  const handleSidebarReorder = async (fromFilePath: string, relToFilePath: string, pos: 'before' | 'after') => {
+    const parentOf = (p: string) => p.split('/').slice(0, -1).join('/')
+    const fromParent = parentOf(fromFilePath)
+    const toParent = parentOf(relToFilePath)
+
+    if (fromParent === toParent) {
+      // Same directory → reorder by position
+      const siblings = [...files]
+        .filter(f => parentOf(f.path) === fromParent)
+        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+
+      const fromFile = siblings.find(f => f.path === fromFilePath)
+      if (!fromFile) return
+      const without = siblings.filter(f => f.path !== fromFilePath)
+      const toIdx = without.findIndex(f => f.path === relToFilePath)
+      if (toIdx === -1) return
+      const insertIdx = pos === 'before' ? toIdx : toIdx + 1
+      const newOrder = [...without.slice(0, insertIdx), fromFile, ...without.slice(insertIdx)]
+      const updates = newOrder.map((f, idx) => ({ path: f.path, position: idx + 1 }))
+
+      setFiles(prev => {
+        const posMap = new Map(updates.map(u => [u.path, u.position]))
+        return [...prev].sort((a, b) => {
+          const pa = posMap.get(a.path) ?? a.position ?? 0
+          const pb = posMap.get(b.path) ?? b.position ?? 0
+          return pa - pb
+        }).map(f => posMap.has(f.path) ? { ...f, position: posMap.get(f.path)! } : f)
+      })
+
+      try {
+        await fetch(`${API_BASE}/api/files/reorder`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updates),
+        })
+      } catch (e) {
+        console.error('Reorder failed', e)
+        fetchFiles()
+      }
+    } else {
+      // Different directory → move the file to become a peer (sibling) of the target
+      const fileName = fromFilePath.split('/').pop()!
+      const newPath = toParent ? `${toParent}/${fileName}` : fileName
+      if (newPath === fromFilePath) return
+      try {
+        const res = await fetch(`${API_BASE}/api/file/move`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from: fromFilePath, to: newPath }),
+        })
+        if (!res.ok) throw new Error('Failed to move file')
+        fetchFiles()
+        if (selectedPath === fromFilePath) fetchFileContent(newPath)
+      } catch (e) {
+        console.error('Error moving file:', e)
+        alert('Failed to move item.')
+      }
+    }
+  }
+
+  const handleReorderCards = async (updates: { path: string; position: number }[]) => {
+    // Optimistic update
+    setFiles(prev => {
+      const posMap = new Map(updates.map(u => [u.path, u.position]))
+      return prev.map(f => posMap.has(f.path) ? { ...f, position: posMap.get(f.path)! } : f)
+    })
+    try {
+      await fetch(`${API_BASE}/api/files/reorder`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      })
+    } catch (e) {
+      console.error('Card reorder failed', e)
+      fetchFiles()
+    }
+  }
+
   const handleRenameFile = async (oldPath: string, newTitle: string) => {
     const trimmed = newTitle.trim()
     if (!trimmed || !oldPath) return
@@ -1436,6 +1534,7 @@ export const App: React.FC = () => {
                       onDragStart={(p, t) => setDragging({ path: p, type: t })}
                       onDragEnd={() => setDragging(null)}
                       onDropNode={handleMoveNode}
+                      onReorderNode={handleSidebarReorder}
                     />
                   ))
                 )}
@@ -1526,6 +1625,7 @@ export const App: React.FC = () => {
                       onDragStart={(p, t) => setDragging({ path: p, type: t })}
                       onDragEnd={() => setDragging(null)}
                       onDropNode={handleMoveNode}
+                      onReorderNode={handleSidebarReorder}
                     />
                   ))
                 )}
@@ -1616,6 +1716,7 @@ export const App: React.FC = () => {
                       onDragStart={(p, t) => setDragging({ path: p, type: t })}
                       onDragEnd={() => setDragging(null)}
                       onDropNode={handleMoveNode}
+                      onReorderNode={handleSidebarReorder}
                     />
                   ))
                 )}
@@ -1706,6 +1807,7 @@ export const App: React.FC = () => {
                       onDragStart={(p, t) => setDragging({ path: p, type: t })}
                       onDragEnd={() => setDragging(null)}
                       onDropNode={handleMoveNode}
+                      onReorderNode={handleSidebarReorder}
                     />
                   ))
                 )}
@@ -1813,6 +1915,7 @@ export const App: React.FC = () => {
                 boardFrontMatter={activeFile?.frontMatter}
                 onUpdateBoardFrontMatter={selectedPath ? (updates) => handleUpdateFrontMatter(selectedPath, updates) : undefined}
                 onUpdateTaskFrontMatter={(path, updates) => handleUpdateFrontMatter(path, updates)}
+                onReorderCards={handleReorderCards}
               />
             </motion.div>
           ) : selectedPath && activeFile ? (

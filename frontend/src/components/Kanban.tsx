@@ -12,6 +12,7 @@ interface FileRecord {
   contentHash: string
   updatedAt: string
   frontMatter?: Record<string, string>
+  position?: number
 }
 
 interface PriorityDef {
@@ -30,6 +31,7 @@ interface KanbanProps {
   boardFrontMatter?: Record<string, string>
   onUpdateBoardFrontMatter?: (updates: Record<string, unknown>) => Promise<void>
   onUpdateTaskFrontMatter?: (path: string, updates: Record<string, unknown>) => Promise<void>
+  onReorderCards?: (updates: { path: string; position: number }[]) => Promise<void>
 }
 
 const DEFAULT_PRIORITIES: PriorityDef[] = [
@@ -442,9 +444,11 @@ export const Kanban: React.FC<KanbanProps> = ({
   boardFrontMatter,
   onUpdateBoardFrontMatter,
   onUpdateTaskFrontMatter,
+  onReorderCards,
 }) => {
   const [draggingPath, setDraggingPath]   = useState<string | null>(null)
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null)
+  const [dragOverCard, setDragOverCard]   = useState<{ path: string; zone: 'before' | 'after' } | null>(null)
   const [newCardTitles, setNewCardTitles] = useState<Record<string, string>>({})
   const [editingColumn, setEditingColumn] = useState<string | null>(null)
   const [editColVal, setEditColVal]       = useState('')
@@ -501,7 +505,9 @@ export const Kanban: React.FC<KanbanProps> = ({
   }, [tasks])
 
   const getTasksByColumn = (col: string) =>
-    tasks.filter(t => (t.frontMatter?.status || '').toLowerCase() === col.toLowerCase())
+    tasks
+      .filter(t => (t.frontMatter?.status || '').toLowerCase() === col.toLowerCase())
+      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
 
   const getColumnColor = (col: string, idx: number) =>
     columnColors[col] || DEFAULT_COL_COLORS[idx % DEFAULT_COL_COLORS.length]
@@ -513,12 +519,29 @@ export const Kanban: React.FC<KanbanProps> = ({
   const handleDragStart = (e: React.DragEvent, path: string) => {
     e.dataTransfer.setData('text/plain', path); setDraggingPath(path)
   }
-  const handleDragEnd = () => { setDraggingPath(null); setDragOverColumn(null) }
+  const handleDragEnd = () => { setDraggingPath(null); setDragOverColumn(null); setDragOverCard(null) }
+
+  // Column-level drop (handles cross-column moves and falls through from card drops)
   const handleDrop = (e: React.DragEvent, col: string) => {
     e.preventDefault()
     const path = e.dataTransfer.getData('text/plain')
     if (path) onMoveCard(path, col)
-    setDraggingPath(null); setDragOverColumn(null)
+    setDraggingPath(null); setDragOverColumn(null); setDragOverCard(null)
+  }
+
+  // Within-column card reorder
+  const handleCardReorder = (fromPath: string, toPath: string, zone: 'before' | 'after', col: string) => {
+    const colTasks = getTasksByColumn(col)
+    const items = [...colTasks]
+    const fromIdx = items.findIndex(t => t.path === fromPath)
+    const toIdx = items.findIndex(t => t.path === toPath)
+    if (fromIdx === -1 || toIdx === -1) return
+    items.splice(fromIdx, 1)
+    const newToIdx = items.findIndex(t => t.path === toPath)
+    const insertIdx = zone === 'before' ? newToIdx : newToIdx + 1
+    items.splice(insertIdx, 0, colTasks[fromIdx])
+    const updates = items.map((t, idx) => ({ path: t.path, position: idx + 1 }))
+    onReorderCards?.(updates)
   }
 
   // ── Quick create ──────────────────────────────────────────────────────────
@@ -766,12 +789,52 @@ export const Kanban: React.FC<KanbanProps> = ({
                     ? (matchesAll ? 'match' : 'dim')
                     : undefined
 
+                  const isOverBefore = dragOverCard?.path === task.path && dragOverCard.zone === 'before'
+                  const isOverAfter  = dragOverCard?.path === task.path && dragOverCard.zone === 'after'
+
                   return (
                     <div
                       key={task.path}
+                      className="relative"
+                    >
+                      {isOverBefore && <div className="absolute top-0 left-0 right-0 h-0.5 rounded-full z-10 pointer-events-none" style={{ background: accent }} />}
+                    <div
                       draggable
                       onDragStart={e => handleDragStart(e, task.path)}
                       onDragEnd={handleDragEnd}
+                      onDragOver={e => {
+                        // Only intercept for same-column cards
+                        const fromTask = tasks.find(t => t.path === draggingPath)
+                        const fromStatus = (fromTask?.frontMatter?.status || '').toLowerCase()
+                        const toStatus = (task.frontMatter?.status || '').toLowerCase()
+                        if (fromStatus !== toStatus) return
+                        e.preventDefault()
+                        e.stopPropagation()
+                        const rect = e.currentTarget.getBoundingClientRect()
+                        const zone = (e.clientY - rect.top) / rect.height < 0.5 ? 'before' : 'after'
+                        if (dragOverCard?.path !== task.path || dragOverCard?.zone !== zone) {
+                          setDragOverCard({ path: task.path, zone })
+                        }
+                      }}
+                      onDragLeave={e => {
+                        if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                          if (dragOverCard?.path === task.path) setDragOverCard(null)
+                        }
+                      }}
+                      onDrop={e => {
+                        const fromPath = e.dataTransfer.getData('text/plain')
+                        const fromTask = tasks.find(t => t.path === fromPath)
+                        const fromStatus = (fromTask?.frontMatter?.status || '').toLowerCase()
+                        const toStatus = (task.frontMatter?.status || '').toLowerCase()
+                        if (fromStatus === toStatus && dragOverCard?.zone && fromPath !== task.path) {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          handleCardReorder(fromPath, task.path, dragOverCard.zone, col)
+                          setDragOverCard(null)
+                          setDraggingPath(null)
+                          setDragOverColumn(null)
+                        }
+                      }}
                       onClick={() => onSelectFile(task.path)}
                       className={`p-3 rounded-lg cursor-pointer transition-all duration-200 select-none group relative bf-kanban-card ${isDragging ? 'opacity-40 scale-95' : ''}`}
                       data-dragging={isDragging}
@@ -863,6 +926,8 @@ export const Kanban: React.FC<KanbanProps> = ({
                           )}
                         </div>
                       </div>
+                    </div>
+                      {isOverAfter && <div className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full z-10 pointer-events-none" style={{ background: accent }} />}
                     </div>
                   )
                 })}
