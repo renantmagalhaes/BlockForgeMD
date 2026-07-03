@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react'
 import {
   Calendar, User, Plus, Trash2, Edit3, X, Check,
   ChevronLeft, ChevronRight, Settings, Palette,
-  Tag, ChevronDown,
+  Tag, ChevronDown, Search, ChevronsLeft,
 } from 'lucide-react'
 
 interface FileRecord {
@@ -142,12 +142,15 @@ const BoardSettingsModal: React.FC<{
   priorities: PriorityDef[]
   tagColors: Record<string, string>
   allBoardTags: string[]
+  columns?: string[]
+  completedColumns?: string[]
   onClose: () => void
   onSavePriority: (idx: number, name: string, color: string) => Promise<void>
   onDeletePriority: (idx: number) => Promise<void>
   onAddPriority: (name: string, color: string) => Promise<void>
   onSetTagColor: (tag: string, color: string) => Promise<void>
-}> = ({ priorities, tagColors, allBoardTags, onClose, onSavePriority, onDeletePriority, onAddPriority, onSetTagColor }) => {
+  onToggleCompleted?: (col: string) => void
+}> = ({ priorities, tagColors, allBoardTags, columns, completedColumns = [], onClose, onSavePriority, onDeletePriority, onAddPriority, onSetTagColor, onToggleCompleted }) => {
   const [editingIdx, setEditingIdx] = useState<number | null>(null)
   const [editName, setEditName]     = useState('')
   const [editColor, setEditColor]   = useState('')
@@ -251,6 +254,30 @@ const BoardSettingsModal: React.FC<{
             </div>
           </div>
 
+          {/* Column Status */}
+          {columns && columns.length > 0 && (
+            <div>
+              <h3 className="text-[10px] font-bold bf-kanban-section-label uppercase tracking-widest mb-3">Column Status</h3>
+              <p className="text-[11px] bf-kanban-hint mb-3">Mark columns as "Completed" — cards in those columns will appear dimmed with strikethrough.</p>
+              <div className="flex flex-col gap-1.5">
+                {columns.map(col => {
+                  const isDone = completedColumns.some(c => c.toLowerCase() === col.toLowerCase())
+                  return (
+                    <label key={col} className="flex items-center gap-2.5 cursor-pointer group">
+                      <div
+                        onClick={() => onToggleCompleted?.(col)}
+                        className={`w-4 h-4 rounded border flex items-center justify-center transition cursor-pointer flex-shrink-0 ${isDone ? 'bg-emerald-500 border-emerald-500' : 'border-zinc-600 hover:border-zinc-400'}`}
+                      >
+                        {isDone && <Check size={10} className="text-white" />}
+                      </div>
+                      <span className={`text-[12px] transition ${isDone ? 'line-through opacity-60' : 'group-hover:opacity-90'}`}>{col}</span>
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Tag colors */}
           {allBoardTags.length > 0 && (
             <div>
@@ -296,14 +323,16 @@ const KanbanFilterBar: React.FC<{
   filterTags: string[]
   filterPriorities: string[]
   filterMode: 'hide' | 'highlight'
+  searchText: string
   onTagToggle: (tag: string) => void
   onPriorityToggle: (name: string) => void
   onModeChange: (mode: 'hide' | 'highlight') => void
+  onSearchChange: (v: string) => void
   onClear: () => void
-}> = ({ allTags, priorities, tagColors, filterTags, filterPriorities, filterMode, onTagToggle, onPriorityToggle, onModeChange, onClear }) => {
+}> = ({ allTags, priorities, tagColors, filterTags, filterPriorities, filterMode, searchText, onTagToggle, onPriorityToggle, onModeChange, onSearchChange, onClear }) => {
   const [tagDropOpen, setTagDropOpen] = useState(false)
   const tagDropRef = useRef<HTMLDivElement>(null)
-  const isActive = filterTags.length > 0 || filterPriorities.length > 0
+  const isActive = filterTags.length > 0 || filterPriorities.length > 0 || searchText.length > 0
 
   useEffect(() => {
     if (!tagDropOpen) return
@@ -418,6 +447,23 @@ const KanbanFilterBar: React.FC<{
         </div>
       )}
 
+      {/* Search input */}
+      <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border transition-all duration-150 ${searchText ? 'bf-kanban-filter-tag-active' : 'bf-kanban-btn'}`}>
+        <Search size={10} className="shrink-0 opacity-60" />
+        <input
+          type="text"
+          value={searchText}
+          onChange={e => onSearchChange(e.target.value)}
+          placeholder="Search cards…"
+          className="bg-transparent outline-none text-[11px] w-28 min-w-0 placeholder:opacity-40"
+        />
+        {searchText && (
+          <button onClick={() => onSearchChange('')} className="shrink-0 opacity-60 hover:opacity-100 transition cursor-pointer">
+            <X size={9} />
+          </button>
+        )}
+      </div>
+
       {/* Clear filters */}
       {isActive && (
         <button
@@ -459,6 +505,8 @@ export const Kanban: React.FC<KanbanProps> = ({
   const [filterTags, setFilterTags]             = useState<string[]>([])
   const [filterPriorities, setFilterPriorities] = useState<string[]>([])
   const [filterMode, setFilterMode]             = useState<'hide' | 'highlight'>('highlight')
+  const [searchText, setSearchText]             = useState('')
+  const [collapsedCols, setCollapsedCols]       = useState<Set<string>>(new Set())
 
   // Priority picker: which card + where to position
   const [priorityPicker, setPriorityPicker] = useState<{ path: string; x: number; y: number } | null>(null)
@@ -482,6 +530,14 @@ export const Kanban: React.FC<KanbanProps> = ({
     () => parseJSON<Record<string, string>>(boardFrontMatter?.tagColors, {}),
     [boardFrontMatter?.tagColors],
   )
+
+  const DONE_NAMES = ['done', 'complete', 'completed', 'finished', 'archive', 'archived', 'closed']
+  const completedColumns = useMemo(() => {
+    const stored = parseJSON<string[] | null>(boardFrontMatter?.completedColumns, null)
+    if (Array.isArray(stored)) return stored
+    // auto-detect on first load
+    return boardColumns.filter(c => DONE_NAMES.includes(c.toLowerCase()))
+  }, [boardFrontMatter?.completedColumns, boardColumns])
 
   const getParentDir = (p: string) => { const i = p.lastIndexOf('/'); return i === -1 ? '' : p.slice(0, i + 1) }
 
@@ -636,10 +692,20 @@ export const Kanban: React.FC<KanbanProps> = ({
   const handlePriorityToggle = (name: string) =>
     setFilterPriorities(prev => prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name])
 
-  const handleClearFilters = () => { setFilterTags([]); setFilterPriorities([]) }
+  const handleClearFilters = () => { setFilterTags([]); setFilterPriorities([]); setSearchText('') }
+
+  const handleToggleColumnCompleted = async (col: string) => {
+    const next = completedColumns.some(c => c.toLowerCase() === col.toLowerCase())
+      ? completedColumns.filter(c => c.toLowerCase() !== col.toLowerCase())
+      : [...completedColumns, col]
+    await onUpdateBoardFrontMatter?.({ completedColumns: next })
+  }
+
+  const toggleColCollapse = (col: string) =>
+    setCollapsedCols(prev => { const s = new Set(prev); s.has(col) ? s.delete(col) : s.add(col); return s })
 
   // Reset filters when board changes
-  useEffect(() => { setFilterTags([]); setFilterPriorities([]) }, [boardPath])
+  useEffect(() => { setFilterTags([]); setFilterPriorities([]); setSearchText(''); setCollapsedCols(new Set()) }, [boardPath])
 
   // Close floating popovers on outside click
   useEffect(() => {
@@ -688,19 +754,56 @@ export const Kanban: React.FC<KanbanProps> = ({
         filterTags={filterTags}
         filterPriorities={filterPriorities}
         filterMode={filterMode}
+        searchText={searchText}
         onTagToggle={handleTagToggle}
         onPriorityToggle={handlePriorityToggle}
         onModeChange={setFilterMode}
+        onSearchChange={setSearchText}
         onClear={handleClearFilters}
       />
 
       {/* ── Board grid ── */}
-      <div className="flex gap-4 flex-1 overflow-x-auto overflow-y-hidden pb-4 no-scrollbar items-start">
-        {boardColumns.map((col, colIdx) => {
+      <div className="flex gap-3 flex-1 overflow-hidden">
+        {/* Collapsed column strips (outside scroll area) */}
+        {boardColumns.filter(c => collapsedCols.has(c)).map(col => {
+          const colIdx  = boardColumns.indexOf(col)
+          const accent  = getColumnColor(col, colIdx)
+          const count   = getTasksByColumn(col).length
+          return (
+            <div
+              key={col}
+              onClick={() => toggleColCollapse(col)}
+              title={`${col} (${count} cards) — click to expand`}
+              className="flex flex-col items-center justify-start w-12 shrink-0 min-h-[500px] rounded-xl bf-kanban-col cursor-pointer hover:opacity-80 transition pt-3 pb-3 gap-3"
+              style={{ borderTop: `3px solid ${accent}` }}
+            >
+              {/* Card count badge */}
+              <span
+                className="text-[10px] font-black rounded-full w-5 h-5 flex items-center justify-center shrink-0"
+                style={{ background: accent + '22', color: accent, border: `1px solid ${accent}44` }}
+              >
+                {count}
+              </span>
+              {/* Column name vertical */}
+              <span
+                className="text-[11px] font-black uppercase tracking-widest flex-1"
+                style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', color: accent }}
+              >
+                {col}
+              </span>
+            </div>
+          )
+        })}
+
+        {/* Expanded columns (scrollable area) */}
+        <div className="flex gap-4 flex-1 overflow-x-auto overflow-y-hidden pb-4 no-scrollbar items-start">
+        {boardColumns.filter(c => !collapsedCols.has(c)).map(col => {
+          const colIdx  = boardColumns.indexOf(col)
           const colTasks    = getTasksByColumn(col)
           const isOver      = dragOverColumn === col
           const isEditing   = editingColumn === col
           const accent      = getColumnColor(col, colIdx)
+          const isCompleted = completedColumns.some(c => c.toLowerCase() === col.toLowerCase())
 
           return (
             <div
@@ -755,11 +858,23 @@ export const Kanban: React.FC<KanbanProps> = ({
                   </div>
                 )}
 
-                {onUpdateColumns && !isEditing && (
+                {!isEditing && (
                   <div className="flex items-center shrink-0 ml-1">
-                    <button onClick={() => moveColumn(col, 'left')} disabled={colIdx === 0} className="p-1 bf-kanban-icon-btn disabled:opacity-10 rounded transition cursor-pointer"><ChevronLeft size={11} /></button>
-                    <button onClick={() => moveColumn(col, 'right')} disabled={colIdx === boardColumns.length - 1} className="p-1 bf-kanban-icon-btn disabled:opacity-10 rounded transition cursor-pointer"><ChevronRight size={11} /></button>
-                    <button onClick={() => handleDeleteColumn(col)} className="p-1 bf-kanban-icon-btn bf-kanban-icon-btn--danger rounded transition cursor-pointer"><Trash2 size={11} /></button>
+                    {/* Collapse button — always visible */}
+                    <button
+                      onClick={e => { e.stopPropagation(); toggleColCollapse(col) }}
+                      className="p-1 bf-kanban-icon-btn rounded transition cursor-pointer"
+                      title="Collapse column"
+                    >
+                      <ChevronsLeft size={11} />
+                    </button>
+                    {onUpdateColumns && (
+                      <>
+                        <button onClick={() => moveColumn(col, 'left')} disabled={colIdx === 0} className="p-1 bf-kanban-icon-btn disabled:opacity-10 rounded transition cursor-pointer"><ChevronLeft size={11} /></button>
+                        <button onClick={() => moveColumn(col, 'right')} disabled={colIdx === boardColumns.length - 1} className="p-1 bf-kanban-icon-btn disabled:opacity-10 rounded transition cursor-pointer"><ChevronRight size={11} /></button>
+                        <button onClick={() => handleDeleteColumn(col)} className="p-1 bf-kanban-icon-btn bf-kanban-icon-btn--danger rounded transition cursor-pointer"><Trash2 size={11} /></button>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -778,12 +893,20 @@ export const Kanban: React.FC<KanbanProps> = ({
                   const showTagEd   = tagEditorCard === task.path
 
                   // ── Filter logic ─────────────────────────────────────────
-                  const isFilterActive = filterTags.length > 0 || filterPriorities.length > 0
+                  const isFilterActive  = filterTags.length > 0 || filterPriorities.length > 0
                   const matchesTags     = filterTags.length === 0 || filterTags.every(t => tags.includes(t))
                   const matchesPriority = filterPriorities.length === 0 || filterPriorities.includes(priority || '')
                   const matchesAll      = matchesTags && matchesPriority
 
                   if (isFilterActive && filterMode === 'hide' && !matchesAll) return null
+
+                  // ── Search filter ─────────────────────────────────────────
+                  if (searchText.trim()) {
+                    const q = searchText.toLowerCase()
+                    const matchesSearch = task.title.toLowerCase().includes(q) ||
+                      (task.frontMatter?.description || '').toLowerCase().includes(q)
+                    if (!matchesSearch) return null
+                  }
 
                   const filterAttr = (isFilterActive && filterMode === 'highlight')
                     ? (matchesAll ? 'match' : 'dim')
@@ -836,13 +959,13 @@ export const Kanban: React.FC<KanbanProps> = ({
                         }
                       }}
                       onClick={() => onSelectFile(task.path)}
-                      className={`p-3 rounded-lg cursor-pointer transition-all duration-200 select-none group relative bf-kanban-card ${isDragging ? 'opacity-40 scale-95' : ''}`}
+                      className={`p-3 rounded-lg cursor-pointer transition-all duration-200 select-none group relative bf-kanban-card ${isDragging ? 'opacity-40 scale-95' : isCompleted ? 'opacity-60' : ''}`}
                       data-dragging={isDragging}
                       data-filter={filterAttr}
                       style={{ borderLeft: `3px solid ${accent}55` }}
                     >
                       {/* Title */}
-                      <div className="font-medium bf-kanban-card-title transition mb-2.5 text-[13px] leading-snug break-words min-w-0">
+                      <div className={`font-medium bf-kanban-card-title transition mb-2.5 text-[13px] leading-snug break-words min-w-0 ${isCompleted ? 'line-through' : ''}`}>
                         {task.title}
                       </div>
 
@@ -955,6 +1078,7 @@ export const Kanban: React.FC<KanbanProps> = ({
             </div>
           )
         })}
+        </div>
       </div>
 
       {/* ── Fixed-position popovers ── */}
@@ -996,11 +1120,14 @@ export const Kanban: React.FC<KanbanProps> = ({
           priorities={priorities}
           tagColors={tagColors}
           allBoardTags={allBoardTags}
+          columns={boardColumns}
+          completedColumns={completedColumns}
           onClose={() => setSettingsOpen(false)}
           onSavePriority={handleSavePriority}
           onDeletePriority={handleDeletePriority}
           onAddPriority={handleAddPriority}
           onSetTagColor={handleSetTagColor}
+          onToggleCompleted={handleToggleColumnCompleted}
         />
       )}
     </div>
