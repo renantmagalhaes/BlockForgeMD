@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import MindElixir, { type MindElixirData, type MindElixirInstance } from 'mind-elixir'
 import 'mind-elixir/style.css'
-import { Maximize2, ZoomIn, ZoomOut } from 'lucide-react'
+import { Maximize2, ZoomIn, ZoomOut, FoldVertical, UnfoldVertical } from 'lucide-react'
 
 interface MindMapProps {
   filePath: string
@@ -279,6 +279,33 @@ const MindMapComponent: React.FC<MindMapProps> = ({ filePath, onSave, isSaving, 
     }
   }, [filePath, theme])
 
+  const walkNodes = (node: any, fn: (n: any) => void) => {
+    fn(node)
+    node.children?.forEach((c: any) => walkNodes(c, fn))
+  }
+
+  const handleExpandAll = () => {
+    const me = meRef.current
+    if (!me) return
+    const data = me.getData()
+    walkNodes(data.nodeData, (n: any) => {
+      if (n.children && n.children.length > 0) n.expanded = true
+    })
+    me.refresh(data)
+  }
+
+  const handleCollapseAll = () => {
+    const me = meRef.current
+    if (!me) return
+    const data = me.getData()
+    data.nodeData.children?.forEach((child: any) => {
+      walkNodes(child, (n: any) => {
+        if (n.children && n.children.length > 0) n.expanded = false
+      })
+    })
+    me.refresh(data)
+  }
+
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
       <div className="flex items-center justify-between mb-3 shrink-0">
@@ -287,6 +314,21 @@ const MindMapComponent: React.FC<MindMapProps> = ({ filePath, onSave, isSaving, 
           <span className="ml-3">Tab = child · Enter = sibling · F2 = rename · Ctrl+V = paste image · Right-click = more</span>
         </span>
         <div className="flex items-center gap-1.5">
+          <button
+            onClick={handleExpandAll}
+            className="p-1.5 bf-kanban-btn rounded-lg transition cursor-pointer"
+            title="Expand all nodes"
+          >
+            <UnfoldVertical size={13} />
+          </button>
+          <button
+            onClick={handleCollapseAll}
+            className="p-1.5 bf-kanban-btn rounded-lg transition cursor-pointer"
+            title="Collapse all nodes"
+          >
+            <FoldVertical size={13} />
+          </button>
+          <div className="w-px h-4 bg-[var(--border-0)] mx-0.5" />
           <button
             onClick={() => meRef.current?.scale(1.25)}
             className="p-1.5 bf-kanban-btn rounded-lg transition cursor-pointer"
