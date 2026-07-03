@@ -2894,7 +2894,7 @@ export const Editor: React.FC<EditorProps> = ({
       {/* Editor Main Work Area */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Control Toolbar */}
-        <div className="flex flex-wrap items-center justify-between p-3 border-b border-slate-800 bg-[#161b22]/80 backdrop-blur-md sticky top-0 z-10 select-none no-print">
+        <div className="flex flex-wrap items-center justify-between p-3 border-b border-slate-800 bg-[#161b22]/80 backdrop-blur-md sticky top-0 z-10 select-none no-print bf-toolbar">
           <div className="flex flex-wrap items-center gap-1">
             <button
               onClick={() => editor.chain().focus().toggleBold().run()}
@@ -3243,7 +3243,7 @@ export const Editor: React.FC<EditorProps> = ({
 
           {/* Notion Page Properties Panel */}
           {frontMatter && onUpdateFrontMatter && (
-            <div className={`mb-6 p-4 bg-[#161b22]/40 border border-slate-800/80 rounded-xl space-y-3.5 select-none transition-all duration-300 no-print ${getWidthClass()}`}>
+            <div className={`mb-6 p-4 bg-[#161b22]/40 border border-slate-800/80 rounded-xl space-y-3.5 select-none transition-all duration-300 no-print bf-properties ${getWidthClass()}`}>
               <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5 mb-1">
                 <Activity size={10} className="text-violet-400" />
                 Page Attributes

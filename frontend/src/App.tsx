@@ -26,6 +26,9 @@ import {
   ChevronsDown,
   ChevronsUp,
   Brain,
+  Sun,
+  Moon,
+  Zap,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import Editor from './components/Editor'
@@ -408,7 +411,7 @@ const TreeNodeComponent: React.FC<{
         onContextMenu={handleContextMenu}
         data-sidebar-path={node.filePath || undefined}
         style={{ paddingLeft: `${depth * 8 + 6}px` }}
-        className={`flex items-center justify-between group py-1 px-2 rounded-lg text-xs transition ${
+        className={`flex items-center justify-between group py-1 px-2 rounded-lg text-xs transition bf-tree-item ${isSelected ? 'selected' : ''} ${
           isBeingDragged
             ? 'opacity-30 cursor-grabbing'
             : isDragOver
@@ -538,6 +541,15 @@ const getSearchSnippet = (content: string, query: string) => {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 export const App: React.FC = () => {
+  const [theme, setTheme] = useState<'dark' | 'light' | 'cyber'>(() => {
+    const s = localStorage.getItem('bf-theme')
+    return s === 'dark' || s === 'light' || s === 'cyber' ? s : 'dark'
+  })
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    localStorage.setItem('bf-theme', theme)
+  }, [theme])
+
   const [files, setFiles] = useState<FileRecord[]>([])
   const [activeView, setActiveView] = useState<'board' | 'editor'>('editor')
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
@@ -1260,13 +1272,13 @@ export const App: React.FC = () => {
   ]
 
   return (
-    <div className="flex h-screen bg-[#0d1117] text-slate-100 font-sans overflow-hidden app-layout-root">
+    <div className="flex h-screen bg-[#0d1117] text-slate-100 font-sans overflow-hidden app-layout-root bf-root">
       {/* ── Sidebar ──────────────────────────────────────────────────────── */}
-      <div className="w-64 bg-[#161b22] border-r border-slate-800 flex flex-col justify-between no-print">
+      <div className="w-64 bg-[#161b22] border-r border-slate-800 flex flex-col justify-between no-print bf-sidebar">
         <div>
-          <div className="p-5 border-b border-slate-800">
+          <div className="p-5 border-b border-slate-800 bf-sidebar-header">
             <div className="flex items-center gap-2">
-              <div className="h-8 w-8 rounded-lg bg-gradient-to-tr from-violet-600 to-blue-500 flex items-center justify-center font-bold text-white shadow-lg">BF</div>
+              <div className="h-8 w-8 rounded-lg bg-gradient-to-tr from-violet-600 to-blue-500 flex items-center justify-center font-bold text-white shadow-lg bf-logo">BF</div>
               <div>
                 <h1 className="font-bold text-sm tracking-tight">BlockForgeMD</h1>
                 <span className="text-[10px] text-slate-500 font-mono">Local-First Vault</span>
@@ -1276,7 +1288,7 @@ export const App: React.FC = () => {
             <div className="mt-3 relative">
               <button
                 onClick={e => { e.stopPropagation(); setWorkspaceDropdownOpen(o => !o) }}
-                className="w-full flex items-center justify-between px-2.5 py-1.5 bg-[#0d1117] border border-slate-800 hover:border-violet-500/50 rounded-lg text-xs transition cursor-pointer group"
+                className="w-full flex items-center justify-between px-2.5 py-1.5 bg-[#0d1117] border border-slate-800 hover:border-violet-500/50 rounded-lg text-xs transition cursor-pointer group bf-ws-trigger"
               >
                 <span className="flex items-center gap-1.5 text-slate-300 font-medium truncate">
                   <Layers size={11} className="text-violet-400 shrink-0" />
@@ -1285,7 +1297,7 @@ export const App: React.FC = () => {
                 <ChevronDown size={11} className="text-slate-500 group-hover:text-slate-300 transition shrink-0" />
               </button>
               {workspaceDropdownOpen && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-[#1c2433] border border-slate-700 rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                <div className="absolute top-full left-0 right-0 mt-1 bg-[#1c2433] border border-slate-700 rounded-lg shadow-xl z-50 py-1 overflow-hidden bf-ws-dropdown">
                   {workspaces.map(ws => (
                     <div key={ws} className="flex items-center group/ws">
                       <button
@@ -1322,7 +1334,7 @@ export const App: React.FC = () => {
           <div className="px-3 pt-3 pb-1">
             <button
               onClick={() => setSearchOpen(true)}
-              className="w-full flex items-center justify-between px-3 py-1.5 bg-[#0d1117] border border-slate-800 hover:border-slate-700 rounded-lg text-xs transition text-slate-400 hover:text-slate-200 cursor-pointer select-none"
+              className="w-full flex items-center justify-between px-3 py-1.5 bg-[#0d1117] border border-slate-800 hover:border-slate-700 rounded-lg text-xs transition text-slate-400 hover:text-slate-200 cursor-pointer select-none bf-search-trigger"
             >
               <div className="flex items-center gap-2">
                 <Search size={14} className="text-slate-500" />
@@ -1695,59 +1707,76 @@ export const App: React.FC = () => {
           </div>
         </div>
 
-        <div className="p-4 border-t border-slate-800 bg-[#161b22]/50 space-y-3">
+        <div className="p-4 border-t border-slate-800 bg-[#161b22]/50 space-y-3 bf-sidebar-footer">
           <div className="grid grid-cols-4 gap-2">
             <button
               onClick={() => handleCreateFile('document', W('Documents'), undefined, ['document'])}
-              className="flex flex-col items-center justify-center py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg transition text-[10px] font-semibold cursor-pointer"
+              className="flex flex-col items-center justify-center py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg transition text-[10px] font-semibold cursor-pointer bf-quick-create-btn"
             >
               <FilePlus size={16} className="text-blue-400 mb-1" />
               Doc
             </button>
             <button
               onClick={() => handleCreateFile('board', W('Boards'), undefined, ['board'])}
-              className="flex flex-col items-center justify-center py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg transition text-[10px] font-semibold cursor-pointer"
+              className="flex flex-col items-center justify-center py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg transition text-[10px] font-semibold cursor-pointer bf-quick-create-btn"
             >
               <LayoutGrid size={16} className="text-amber-500 mb-1" />
               Board
             </button>
             <button
               onClick={() => handleCreateFile('canvas', W('Canvas'), undefined, ['canvas', 'diagram'])}
-              className="flex flex-col items-center justify-center py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg transition text-[10px] font-semibold cursor-pointer"
+              className="flex flex-col items-center justify-center py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg transition text-[10px] font-semibold cursor-pointer bf-quick-create-btn"
             >
               <Brush size={16} className="text-emerald-400 mb-1" />
               Canvas
             </button>
             <button
               onClick={() => handleCreateFile('mindmap', W('MindMaps'), undefined, ['mindmap'])}
-              className="flex flex-col items-center justify-center py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg transition text-[10px] font-semibold cursor-pointer"
+              className="flex flex-col items-center justify-center py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg transition text-[10px] font-semibold cursor-pointer bf-quick-create-btn"
             >
               <Brain size={16} className="text-violet-400 mb-1" />
               Map
             </button>
           </div>
 
-          <div className="flex items-center justify-between text-[10px] border-t border-slate-800/60 pt-3">
+          <div className="flex items-center justify-between text-[10px] border-t border-slate-800/60 pt-3 gap-2">
             <button
               onClick={() => setAdminModalOpen(true)}
-              className="flex items-center gap-1.5 text-slate-500 hover:text-violet-400 transition cursor-pointer select-none"
+              className="flex items-center gap-1.5 text-slate-500 hover:text-violet-400 transition cursor-pointer select-none shrink-0"
             >
               <Settings size={10} />
               <span>Settings</span>
             </button>
-            {isSyncing ? (
-              <span className="text-amber-500 animate-pulse">Syncing...</span>
-            ) : syncError ? (
-              <span className="text-red-400 flex items-center gap-0.5"><AlertCircle size={8} /> Offline</span>
-            ) : (
-              <span className="text-emerald-500 flex items-center gap-0.5"><CloudLightning size={8} /> Live Synced</span>
-            )}
+
+            {/* Theme switcher */}
+            <div className="flex items-center gap-1 shrink-0">
+              {(['dark', 'light', 'cyber'] as const).map(t => (
+                <button
+                  key={t}
+                  onClick={() => setTheme(t)}
+                  className={`bf-theme-btn ${theme === t ? 'active' : ''}`}
+                  title={t === 'dark' ? 'Dark mode' : t === 'light' ? 'Light mode' : 'Cyber mode'}
+                >
+                  {t === 'dark' ? <Moon size={11} /> : t === 'light' ? <Sun size={11} /> : <Zap size={11} />}
+                </button>
+              ))}
+            </div>
+
+            <div className="shrink-0">
+              {isSyncing ? (
+                <span className="text-amber-500 animate-pulse">Syncing...</span>
+              ) : syncError ? (
+                <span className="text-red-400 flex items-center gap-0.5"><AlertCircle size={8} /> Offline</span>
+              ) : (
+                <span className="text-emerald-500 flex items-center gap-0.5"><CloudLightning size={8} /> Live</span>
+              )}
+            </div>
           </div>
         </div>
       </div>
 
       {/* ── Main Panel ───────────────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col overflow-hidden bg-[#0d1117]">
+      <div className="flex-1 flex flex-col overflow-hidden bg-[#0d1117] bf-main">
         <AnimatePresence mode="wait" initial={false}>
           {activeView === 'board' ? (
             <motion.div
