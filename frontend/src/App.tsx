@@ -1264,6 +1264,28 @@ export const App: React.FC = () => {
           body: JSON.stringify({ from: fromFilePath, to: newPath }),
         })
         if (!res.ok) throw new Error('Failed to move file')
+
+        // The move handler immediately re-indexes the new path with MAX(position)+1.
+        // Compute the desired order among the new siblings and fix the position now.
+        const newSiblings = files
+          .filter(f => parentOf(f.path) === toParent && f.path !== fromFilePath)
+          .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+        const toIdx = newSiblings.findIndex(f => f.path === relToFilePath)
+        if (toIdx !== -1) {
+          const insertIdx = pos === 'before' ? toIdx : toIdx + 1
+          const ordered = [
+            ...newSiblings.slice(0, insertIdx),
+            { path: newPath },
+            ...newSiblings.slice(insertIdx),
+          ]
+          const updates = ordered.map((f, idx) => ({ path: f.path, position: idx + 1 }))
+          await fetch(`${API_BASE}/api/files/reorder`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updates),
+          })
+        }
+
         fetchFiles()
         if (selectedPath === fromFilePath) fetchFileContent(newPath)
       } catch (e) {
