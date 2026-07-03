@@ -884,3 +884,120 @@ body {
 
 /* Color swatch border (priority edit/new) */
 .bf-kanban-color-swatch { border-color: var(--border-2); }
+
+/* ══════════════════════════════════════════════════════
+   KANBAN — FILTER BAR
+══════════════════════════════════════════════════════ */
+
+/* Container strip */
+.bf-kanban-filter-bar {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-1);
+}
+[data-theme="cyber"] .bf-kanban-filter-bar {
+  border-color: var(--border-1);
+  box-shadow: 0 0 16px rgba(6,182,212,0.04);
+}
+
+/* Vertical separator between sections */
+.bf-kanban-filter-sep {
+  background-color: var(--border-1);
+}
+
+/* Mode segmented control track */
+.bf-kanban-filter-mode-track {
+  background-color: var(--bg-app);
+  border: 1px solid var(--border-1);
+}
+
+/* Active segment */
+.bf-kanban-filter-mode-on {
+  background-color: var(--accent);
+  color: #ffffff;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+}
+[data-theme="cyber"] .bf-kanban-filter-mode-on {
+  box-shadow: 0 0 10px rgba(6,182,212,0.4), 0 1px 4px rgba(0,0,0,0.4);
+}
+
+/* Inactive segment */
+.bf-kanban-filter-mode-off {
+  color: var(--txt-4);
+}
+.bf-kanban-filter-mode-off:hover {
+  color: var(--txt-2);
+}
+
+/* Tags button — active state (has selections) */
+.bf-kanban-filter-tag-active {
+  background-color: var(--accent-faint);
+  border: 1px solid var(--accent-border);
+  color: var(--accent);
+}
+.bf-kanban-filter-tag-active:hover {
+  background-color: color-mix(in srgb, var(--accent-faint) 160%, transparent);
+}
+
+/* Tag count badge inside the Tags button */
+.bf-kanban-filter-tag-badge {
+  background-color: var(--accent);
+  color: #ffffff;
+}
+
+/* Clear filters button */
+.bf-kanban-filter-clear {
+  color: var(--txt-3);
+  border-color: var(--border-1);
+  background: transparent;
+}
+.bf-kanban-filter-clear:hover {
+  color: #f87171;
+  border-color: rgba(248,113,113,0.35);
+  background-color: rgba(248,113,113,0.08);
+}
+
+/* ── Card filter states ──────────────────────────────── */
+
+/* Dimmed (non-matching) card in highlight/focus mode */
+.bf-kanban-card[data-filter="dim"] {
+  opacity: 0.2;
+}
+
+/* Matching card in highlight/focus mode */
+.bf-kanban-card[data-filter="match"] {
+  border-color: var(--accent-border) !important;
+  box-shadow: var(--shadow-sm), 0 0 0 1.5px var(--accent-border) !important;
+}
+[data-theme="cyber"] .bf-kanban-card[data-filter="match"] {
+  box-shadow: var(--shadow-sm), 0 0 0 1.5px var(--accent-border), 0 0 18px rgba(6,182,212,0.22) !important;
+}
+
+/* ══════════════════════════════════════════════════════
+   KANBAN — URGENT PRIORITY BADGE
+══════════════════════════════════════════════════════ */
+
+/* Expanding ring pulse — like a heartbeat */
+@keyframes bf-urgent-ring {
+  0%   { box-shadow: 0 0 0 0   rgba(239,68,68,0.65); }
+  55%  { box-shadow: 0 0 0 5px rgba(239,68,68,0);    }
+  100% { box-shadow: 0 0 0 0   rgba(239,68,68,0);    }
+}
+
+/* Step-blink for the leading dot */
+@keyframes bf-urgent-dot {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+.bf-kanban-priority-urgent {
+  animation: bf-urgent-ring 1.5s ease-out infinite;
+}
+
+/* Blinking recording-style dot before the label */
+.bf-kanban-priority-urgent::before {
+  content: '●';
+  font-size: 6px;
+  margin-right: 4px;
+  vertical-align: middle;
+  animation: bf-urgent-dot 0.85s step-end infinite;
+}

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react'
 import {
   Calendar, User, Plus, Trash2, Edit3, X, Check,
   ChevronLeft, ChevronRight, Settings, Palette,
+  Tag, ChevronDown,
 } from 'lucide-react'
 
 interface FileRecord {
@@ -32,7 +33,8 @@ interface KanbanProps {
 }
 
 const DEFAULT_PRIORITIES: PriorityDef[] = [
-  { name: 'High',   color: '#ef4444' },
+  { name: 'Urgent', color: '#ef4444' },
+  { name: 'High',   color: '#dc2626' },
   { name: 'Medium', color: '#f59e0b' },
   { name: 'Low',    color: '#3b82f6' },
 ]
@@ -284,6 +286,150 @@ const BoardSettingsModal: React.FC<{
   )
 }
 
+// ─── KanbanFilterBar ──────────────────────────────────────────────────────────
+const KanbanFilterBar: React.FC<{
+  allTags: string[]
+  priorities: PriorityDef[]
+  tagColors: Record<string, string>
+  filterTags: string[]
+  filterPriorities: string[]
+  filterMode: 'hide' | 'highlight'
+  onTagToggle: (tag: string) => void
+  onPriorityToggle: (name: string) => void
+  onModeChange: (mode: 'hide' | 'highlight') => void
+  onClear: () => void
+}> = ({ allTags, priorities, tagColors, filterTags, filterPriorities, filterMode, onTagToggle, onPriorityToggle, onModeChange, onClear }) => {
+  const [tagDropOpen, setTagDropOpen] = useState(false)
+  const tagDropRef = useRef<HTMLDivElement>(null)
+  const isActive = filterTags.length > 0 || filterPriorities.length > 0
+
+  useEffect(() => {
+    if (!tagDropOpen) return
+    const handler = (e: MouseEvent) => {
+      if (tagDropRef.current && !tagDropRef.current.contains(e.target as Node))
+        setTagDropOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [tagDropOpen])
+
+  return (
+    <div className="flex items-center gap-2 flex-wrap mb-4 bf-kanban-filter-bar px-3 py-2 rounded-xl">
+
+      {/* Mode segmented control */}
+      <div className="flex items-center gap-0.5 p-0.5 bf-kanban-filter-mode-track rounded-lg shrink-0">
+        {(['hide', 'highlight'] as const).map(mode => (
+          <button
+            key={mode}
+            onClick={() => onModeChange(mode)}
+            className={`px-2.5 py-1 text-[10px] font-semibold rounded-md transition-all duration-150 cursor-pointer ${
+              filterMode === mode ? 'bf-kanban-filter-mode-on' : 'bf-kanban-filter-mode-off'
+            }`}
+          >
+            {mode === 'hide' ? '⊘ Hide' : '◎ Focus'}
+          </button>
+        ))}
+      </div>
+
+      <div className="w-px h-4 bf-kanban-filter-sep shrink-0" />
+
+      {/* Priority pills */}
+      {priorities.length > 0 && (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[10px] bf-kanban-section-label font-semibold uppercase tracking-wider shrink-0 select-none">
+            Priority
+          </span>
+          {priorities.map(p => {
+            const on = filterPriorities.includes(p.name)
+            return (
+              <button
+                key={p.name}
+                onClick={() => onPriorityToggle(p.name)}
+                className="px-2 py-0.5 text-[10px] font-bold uppercase rounded-md tracking-wider border transition-all duration-150 cursor-pointer"
+                style={
+                  on
+                    ? { background: p.color + '28', borderColor: p.color + '80', color: p.color }
+                    : { background: 'transparent', borderColor: p.color + '30', color: p.color + 'aa' }
+                }
+              >
+                {p.name}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Tags dropdown */}
+      {allTags.length > 0 && (
+        <div className="relative shrink-0" ref={tagDropRef}>
+          <button
+            onClick={() => setTagDropOpen(v => !v)}
+            className={`flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-semibold rounded-lg border transition-all duration-150 cursor-pointer ${
+              filterTags.length > 0 ? 'bf-kanban-filter-tag-active' : 'bf-kanban-btn'
+            }`}
+          >
+            <Tag size={10} />
+            Tags
+            {filterTags.length > 0 && (
+              <span className="px-1 bf-kanban-filter-tag-badge rounded text-[9px] font-bold leading-4">
+                {filterTags.length}
+              </span>
+            )}
+            <ChevronDown
+              size={9}
+              className="transition-transform duration-150"
+              style={{ transform: tagDropOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}
+            />
+          </button>
+
+          {tagDropOpen && (
+            <div className="absolute top-full left-0 mt-1.5 bf-kanban-popover rounded-xl py-1.5 z-50 min-w-[170px] max-h-52 overflow-y-auto no-scrollbar">
+              {allTags.map(tag => {
+                const tc = tagColors[tag] || '#8b5cf6'
+                const checked = filterTags.includes(tag)
+                return (
+                  <button
+                    key={tag}
+                    onClick={() => onTagToggle(tag)}
+                    className="flex items-center gap-2.5 w-full px-3 py-1.5 text-left cursor-pointer bf-kanban-popover-item transition-colors duration-100"
+                  >
+                    <span
+                      className="w-3.5 h-3.5 rounded shrink-0 border flex items-center justify-center transition-all duration-150"
+                      style={checked
+                        ? { background: tc, borderColor: tc }
+                        : { background: 'transparent', borderColor: 'var(--border-2)' }
+                      }
+                    >
+                      {checked && <Check size={8} color="white" strokeWidth={3} />}
+                    </span>
+                    <span
+                      className="px-1.5 py-0.5 text-[10px] rounded-md border font-medium"
+                      style={{ background: tc + '18', borderColor: tc + '44', color: tc }}
+                    >
+                      {tag}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Clear filters */}
+      {isActive && (
+        <button
+          onClick={onClear}
+          className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-semibold rounded-lg border transition-all duration-150 cursor-pointer bf-kanban-filter-clear"
+        >
+          <X size={9} />
+          Clear
+        </button>
+      )}
+    </div>
+  )
+}
+
 // ─── Main Kanban ───────────────────────────────────────────────────────────────
 export const Kanban: React.FC<KanbanProps> = ({
   files,
@@ -304,6 +450,11 @@ export const Kanban: React.FC<KanbanProps> = ({
   const [editColVal, setEditColVal]       = useState('')
 
   const [settingsOpen, setSettingsOpen]   = useState(false)
+
+  // ── Filter state ───────────────────────────────────────────────────────────
+  const [filterTags, setFilterTags]             = useState<string[]>([])
+  const [filterPriorities, setFilterPriorities] = useState<string[]>([])
+  const [filterMode, setFilterMode]             = useState<'hide' | 'highlight'>('highlight')
 
   // Priority picker: which card + where to position
   const [priorityPicker, setPriorityPicker] = useState<{ path: string; x: number; y: number } | null>(null)
@@ -455,6 +606,18 @@ export const Kanban: React.FC<KanbanProps> = ({
   const handleSetTagColor = async (tag: string, color: string) =>
     onUpdateBoardFrontMatter?.({ tagColors: { ...tagColors, [tag]: color } })
 
+  // ── Filter ops ────────────────────────────────────────────────────────────
+  const handleTagToggle = (tag: string) =>
+    setFilterTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag])
+
+  const handlePriorityToggle = (name: string) =>
+    setFilterPriorities(prev => prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name])
+
+  const handleClearFilters = () => { setFilterTags([]); setFilterPriorities([]) }
+
+  // Reset filters when board changes
+  useEffect(() => { setFilterTags([]); setFilterPriorities([]) }, [boardPath])
+
   // Close floating popovers on outside click
   useEffect(() => {
     const close = () => { setPriorityPicker(null); setColColorPicker(null) }
@@ -469,7 +632,7 @@ export const Kanban: React.FC<KanbanProps> = ({
   return (
     <div className="flex flex-col h-full bf-kanban rounded-xl overflow-hidden p-6">
       {/* ── Header ── */}
-      <div className="mb-6 flex justify-between items-center">
+      <div className="mb-4 flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold bf-kanban-title">{boardName}</h1>
           <p className="bf-kanban-hint text-xs mt-0.5">
@@ -493,6 +656,20 @@ export const Kanban: React.FC<KanbanProps> = ({
           )}
         </div>
       </div>
+
+      {/* ── Filter bar ── */}
+      <KanbanFilterBar
+        allTags={allBoardTags}
+        priorities={priorities}
+        tagColors={tagColors}
+        filterTags={filterTags}
+        filterPriorities={filterPriorities}
+        filterMode={filterMode}
+        onTagToggle={handleTagToggle}
+        onPriorityToggle={handlePriorityToggle}
+        onModeChange={setFilterMode}
+        onClear={handleClearFilters}
+      />
 
       {/* ── Board grid ── */}
       <div className="flex gap-4 flex-1 overflow-x-auto overflow-y-hidden pb-4 no-scrollbar items-start">
@@ -576,6 +753,18 @@ export const Kanban: React.FC<KanbanProps> = ({
                   const isDragging  = draggingPath === task.path
                   const showTagEd   = tagEditorCard === task.path
 
+                  // ── Filter logic ─────────────────────────────────────────
+                  const isFilterActive = filterTags.length > 0 || filterPriorities.length > 0
+                  const matchesTags     = filterTags.length === 0 || filterTags.every(t => tags.includes(t))
+                  const matchesPriority = filterPriorities.length === 0 || filterPriorities.includes(priority || '')
+                  const matchesAll      = matchesTags && matchesPriority
+
+                  if (isFilterActive && filterMode === 'hide' && !matchesAll) return null
+
+                  const filterAttr = (isFilterActive && filterMode === 'highlight')
+                    ? (matchesAll ? 'match' : 'dim')
+                    : undefined
+
                   return (
                     <div
                       key={task.path}
@@ -583,8 +772,9 @@ export const Kanban: React.FC<KanbanProps> = ({
                       onDragStart={e => handleDragStart(e, task.path)}
                       onDragEnd={handleDragEnd}
                       onClick={() => onSelectFile(task.path)}
-                      className={`p-3 rounded-lg cursor-pointer transition select-none group relative bf-kanban-card ${isDragging ? 'opacity-40 scale-95' : ''}`}
+                      className={`p-3 rounded-lg cursor-pointer transition-all duration-200 select-none group relative bf-kanban-card ${isDragging ? 'opacity-40 scale-95' : ''}`}
                       data-dragging={isDragging}
+                      data-filter={filterAttr}
                       style={{ borderLeft: `3px solid ${accent}55` }}
                     >
                       {/* Title */}
@@ -606,7 +796,7 @@ export const Kanban: React.FC<KanbanProps> = ({
                                   : { path: task.path, x: r.left, y: r.bottom + 4 }
                               )
                             }}
-                            className="px-2 py-0.5 text-[10px] font-bold uppercase rounded-md tracking-wider border transition hover:opacity-90 cursor-pointer"
+                            className={`px-2 py-0.5 text-[10px] font-bold uppercase rounded-md tracking-wider border transition hover:opacity-90 cursor-pointer${priority?.toLowerCase() === 'urgent' ? ' bf-kanban-priority-urgent' : ''}`}
                             style={{ background: pColor + '20', borderColor: pColor + '50', color: pColor }}
                           >
                             {priority || 'No priority'}
