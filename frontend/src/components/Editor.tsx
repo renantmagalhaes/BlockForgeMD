@@ -1922,12 +1922,15 @@ export const Editor: React.FC<EditorProps> = ({
 
           try {
             const coords = view.coordsAtPos(selection.from)
+            const menuH = 150
+            const menuW = 216 // max-w-[200px] + border/padding
+            const flipUp = window.innerHeight - coords.bottom < menuH
             setPasteInfo({
               url: pastedText,
               from: selection.from,
               to: selection.from + pastedText.length,
-              x: coords.left,
-              y: coords.bottom + 8
+              x: Math.min(coords.left, window.innerWidth - menuW - 8),
+              y: flipUp ? Math.max(4, coords.top - menuH - 4) : coords.bottom + 8
             })
           } catch (e) {
             setPasteInfo({
@@ -2208,9 +2211,12 @@ export const Editor: React.FC<EditorProps> = ({
         setEmojiActive(false)
         try {
           const coords = editor.view.coordsAtPos(selection.from)
+          const menuH = 300 // max-h-72 (288px) + header
+          const menuW = 264 // w-64 (256px) + border
+          const flipUp = window.innerHeight - coords.bottom < menuH
           setCommandCoords({
-            top: coords.bottom + 8,
-            left: coords.left,
+            top: flipUp ? Math.max(4, coords.top - menuH - 4) : coords.bottom + 8,
+            left: Math.min(coords.left, window.innerWidth - menuW - 8),
           })
         } catch (e) {}
       } else if (mentionMatch) {
@@ -2220,9 +2226,12 @@ export const Editor: React.FC<EditorProps> = ({
         setEmojiActive(false)
         try {
           const coords = editor.view.coordsAtPos(selection.from)
+          const menuH = 300
+          const menuW = 328 // w-80 (320px) + border
+          const flipUp = window.innerHeight - coords.bottom < menuH
           setMentionCoords({
-            top: coords.bottom + 8,
-            left: coords.left,
+            top: flipUp ? Math.max(4, coords.top - menuH - 4) : coords.bottom + 8,
+            left: Math.min(coords.left, window.innerWidth - menuW - 8),
           })
         } catch (e) {}
       } else if (emojiMatch) {
@@ -2233,9 +2242,12 @@ export const Editor: React.FC<EditorProps> = ({
         setEmojiSelectedIndex(0)
         try {
           const coords = editor.view.coordsAtPos(selection.from)
+          const menuH = 460 // EmojiPicker default height
+          const menuW = 360
+          const flipUp = window.innerHeight - coords.bottom < menuH
           setEmojiCoords({
-            top: coords.bottom + 8,
-            left: coords.left,
+            top: flipUp ? Math.max(4, coords.top - menuH - 4) : coords.bottom + 8,
+            left: Math.min(coords.left, window.innerWidth - menuW - 8),
           })
         } catch (e) {}
       } else {
