@@ -691,8 +691,11 @@ body {
    MIND MAP CANVAS
 ══════════════════════════════════════════════════════ */
 .bf-mindmap-canvas {
-  background-color: var(--bg-app);
+  background-color: #111111;
   border: 1px solid var(--border-1);
+}
+[data-theme="cyber"] .bf-mindmap-canvas {
+  background-color: #1a2235;
 }
 /* ══════════════════════════════════════════════════════
    KANBAN BOARD — THEME-AWARE OVERRIDES

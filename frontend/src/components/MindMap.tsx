@@ -95,7 +95,15 @@ const MindMapComponent: React.FC<MindMapProps> = ({ filePath, onSave, isSaving, 
   const meRef = useRef<MindElixirInstance | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const frontMatterRef = useRef<string>('')
+  const themeRef = useRef(theme)
+  themeRef.current = theme
   const [loading, setLoading] = useState(true)
+
+  // Update MindElixir theme without re-initializing when the theme prop changes
+  useEffect(() => {
+    if (!meRef.current) return
+    meRef.current.changeTheme(getMindElixirTheme(theme))
+  }, [theme])
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -205,7 +213,7 @@ const MindMapComponent: React.FC<MindMapProps> = ({ filePath, onSave, isSaving, 
           keypress: true,
           newTopicName: 'New Topic',
           allowUndo: true,
-          theme: getMindElixirTheme(theme),
+          theme: getMindElixirTheme(themeRef.current),
         })
 
         me.init(initialData)
@@ -277,7 +285,7 @@ const MindMapComponent: React.FC<MindMapProps> = ({ filePath, onSave, isSaving, 
         meRef.current = null
       }
     }
-  }, [filePath, theme])
+  }, [filePath])
 
   const walkNodes = (node: any, fn: (n: any) => void) => {
     fn(node)
