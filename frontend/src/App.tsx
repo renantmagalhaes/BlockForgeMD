@@ -1938,6 +1938,7 @@ export const App: React.FC = () => {
                 onUpdateBoardFrontMatter={selectedPath ? (updates) => handleUpdateFrontMatter(selectedPath, updates) : undefined}
                 onUpdateTaskFrontMatter={(path, updates) => handleUpdateFrontMatter(path, updates)}
                 onReorderCards={handleReorderCards}
+                onDeleteCard={handleDeleteFile}
               />
             </motion.div>
           ) : selectedPath && activeFile ? (

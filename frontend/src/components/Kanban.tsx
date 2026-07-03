@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react'
 import {
   Calendar, User, Plus, Trash2, Edit3, X, Check,
   ChevronLeft, ChevronRight, Settings, Palette,
-  Tag, ChevronDown, Search, ChevronsLeft,
+  Tag, ChevronDown, Search, ChevronsLeft, Copy, ArrowRight,
 } from 'lucide-react'
 
 interface FileRecord {
@@ -32,6 +32,7 @@ interface KanbanProps {
   onUpdateBoardFrontMatter?: (updates: Record<string, unknown>) => Promise<void>
   onUpdateTaskFrontMatter?: (path: string, updates: Record<string, unknown>) => Promise<void>
   onReorderCards?: (updates: { path: string; position: number }[]) => Promise<void>
+  onDeleteCard?: (path: string) => void
 }
 
 const DEFAULT_PRIORITIES: PriorityDef[] = [
@@ -478,11 +479,161 @@ const KanbanFilterBar: React.FC<{
   )
 }
 
+// ─── CardContextMenu ──────────────────────────────────────────────────────────
+const CardContextMenu: React.FC<{
+  x: number; y: number
+  task: FileRecord
+  currentCol: string
+  columns: string[]
+  priorities: PriorityDef[]
+  onClose: () => void
+  onOpen: () => void
+  onMove: (col: string) => Promise<void>
+  onSetPriority: (name: string) => void
+  onSetDueDate: (date: string) => void
+  onDelete?: () => void
+}> = ({ x, y, task, currentCol, columns, priorities, onClose, onOpen, onMove, onSetPriority, onSetDueDate, onDelete }) => {
+  const [sub, setSub] = useState<'move' | 'priority' | 'date' | null>(null)
+  const [copied, setCopied] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState({ x, y })
+
+  useEffect(() => {
+    if (!ref.current) return
+    const r = ref.current.getBoundingClientRect()
+    setPos({
+      x: Math.min(x, window.innerWidth  - r.width  - 8),
+      y: Math.min(y, window.innerHeight - r.height - 8),
+    })
+  }, [x, y, sub])
+
+  useEffect(() => {
+    const down = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onClose() }
+    const key  = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('mousedown', down)
+    document.addEventListener('keydown', key)
+    return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key) }
+  }, [onClose])
+
+  const currentPriority = task.frontMatter?.priority
+  const currentDue      = task.frontMatter?.dueDate?.split('T')[0] ?? ''
+
+  const Row: React.FC<{
+    icon: React.ReactNode; label: string; onClick: () => void
+    danger?: boolean; active?: boolean; expand?: boolean
+  }> = ({ icon, label, onClick, danger, active, expand }) => (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-2.5 w-full px-3 py-2 text-left text-[12px] transition cursor-pointer bf-kanban-popover-item rounded-md mx-1 ${danger ? 'hover:text-red-400' : ''} ${active ? 'bg-white/5' : ''}`}
+      style={{ width: 'calc(100% - 8px)' }}
+    >
+      <span className="shrink-0 opacity-60">{icon}</span>
+      <span className="flex-1 bf-kanban-modal-text">{label}</span>
+      {expand && <ChevronDown size={10} className={`opacity-40 transition-transform ${active ? 'rotate-180' : ''}`} />}
+    </button>
+  )
+
+  const Divider = () => <div className="my-1 mx-3 border-t border-[var(--border-0)]" />
+
+  return (
+    <div
+      ref={ref}
+      className="fixed z-[9999] bf-kanban-popover rounded-xl overflow-hidden shadow-2xl"
+      style={{ top: pos.y, left: pos.x, minWidth: 210 }}
+      onClick={e => e.stopPropagation()}
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-[var(--border-1)]">
+        <span className="text-[10px] font-bold bf-kanban-section-label uppercase tracking-widest">Card Actions</span>
+        <button onClick={onClose} className="bf-kanban-icon-btn p-0.5 rounded cursor-pointer"><X size={12} /></button>
+      </div>
+
+      <div className="py-1.5">
+        <Row icon={<Edit3 size={13} />} label="Open card" onClick={() => { onOpen(); onClose() }} />
+
+        <Divider />
+
+        {/* Move to column */}
+        <Row icon={<ArrowRight size={13} />} label="Move to column" active={sub === 'move'} expand onClick={() => setSub(sub === 'move' ? null : 'move')} />
+        {sub === 'move' && (
+          <div className="mx-2 mb-1 flex flex-col gap-0.5">
+            {columns.filter(c => c.toLowerCase() !== currentCol.toLowerCase()).map(col => (
+              <button
+                key={col}
+                onClick={() => { onMove(col); onClose() }}
+                className="flex items-center gap-2 w-full px-2.5 py-1.5 text-left text-[11px] rounded-lg bf-kanban-popover-item transition cursor-pointer bf-kanban-modal-text"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-current opacity-50 shrink-0" />{col}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Set priority */}
+        <Row icon={<Tag size={13} />} label="Set priority" active={sub === 'priority'} expand onClick={() => setSub(sub === 'priority' ? null : 'priority')} />
+        {sub === 'priority' && (
+          <div className="mx-2 mb-1 flex flex-col gap-0.5">
+            {priorities.map(p => (
+              <button
+                key={p.name}
+                onClick={() => { onSetPriority(p.name); onClose() }}
+                className="flex items-center gap-2 w-full px-2.5 py-1.5 text-left text-[11px] rounded-lg bf-kanban-popover-item transition cursor-pointer"
+              >
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />
+                <span className="bf-kanban-modal-text flex-1">{p.name}</span>
+                {currentPriority?.toLowerCase() === p.name.toLowerCase() && <Check size={10} className="text-emerald-400" />}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Due date */}
+        <Row icon={<Calendar size={13} />} label="Edit due date" active={sub === 'date'} expand onClick={() => setSub(sub === 'date' ? null : 'date')} />
+        {sub === 'date' && (
+          <div className="mx-3 mb-2">
+            <input
+              type="date"
+              defaultValue={currentDue}
+              className="bf-kanban-input rounded-lg px-2 py-1.5 text-xs w-full outline-none"
+              onChange={e => { if (e.target.value) { onSetDueDate(e.target.value); onClose() } }}
+            />
+          </div>
+        )}
+
+        <Divider />
+
+        <Row
+          icon={copied ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+          label={copied ? 'Copied!' : 'Copy title'}
+          onClick={() => {
+            navigator.clipboard.writeText(task.title)
+            setCopied(true)
+            setTimeout(() => { setCopied(false); onClose() }, 800)
+          }}
+        />
+
+        {onDelete && (
+          <>
+            <Divider />
+            <Row
+              icon={<Trash2 size={13} />}
+              label="Delete card"
+              danger
+              onClick={() => { onDelete(); onClose() }}
+            />
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── Main Kanban ───────────────────────────────────────────────────────────────
 export const Kanban: React.FC<KanbanProps> = ({
   files,
   onMoveCard,
   onSelectFile,
+  onDeleteCard,
   onCreateTaskInColumn,
   boardPath,
   boardColumns,
@@ -507,6 +658,9 @@ export const Kanban: React.FC<KanbanProps> = ({
   const [filterMode, setFilterMode]             = useState<'hide' | 'highlight'>('highlight')
   const [searchText, setSearchText]             = useState('')
   const [collapsedCols, setCollapsedCols]       = useState<Set<string>>(new Set())
+
+  // Card context menu
+  const [cardCtxMenu, setCardCtxMenu] = useState<{ x: number; y: number; task: FileRecord; col: string } | null>(null)
 
   // Priority picker: which card + where to position
   const [priorityPicker, setPriorityPicker] = useState<{ path: string; x: number; y: number } | null>(null)
@@ -960,6 +1114,7 @@ export const Kanban: React.FC<KanbanProps> = ({
                         }
                       }}
                       onClick={() => onSelectFile(task.path)}
+                      onContextMenu={e => { e.preventDefault(); e.stopPropagation(); setCardCtxMenu({ x: e.clientX, y: e.clientY, task, col }) }}
                       className={`p-3 rounded-lg cursor-pointer transition-all duration-200 select-none group relative bf-kanban-card ${isDragging ? 'opacity-40 scale-95' : isCompleted ? 'opacity-60' : ''}`}
                       data-dragging={isDragging}
                       data-filter={filterAttr}
@@ -1132,6 +1287,24 @@ export const Kanban: React.FC<KanbanProps> = ({
           onAddPriority={handleAddPriority}
           onSetTagColor={handleSetTagColor}
           onToggleCompleted={handleToggleColumnCompleted}
+        />
+      )}
+
+      {/* ── Card context menu ── */}
+      {cardCtxMenu && (
+        <CardContextMenu
+          x={cardCtxMenu.x}
+          y={cardCtxMenu.y}
+          task={cardCtxMenu.task}
+          currentCol={cardCtxMenu.col}
+          columns={boardColumns}
+          priorities={priorities}
+          onClose={() => setCardCtxMenu(null)}
+          onOpen={() => onSelectFile(cardCtxMenu.task.path)}
+          onMove={col => onMoveCard(cardCtxMenu.task.path, col)}
+          onSetPriority={name => handleSetCardPriority(cardCtxMenu.task.path, name)}
+          onSetDueDate={date => onUpdateTaskFrontMatter?.(cardCtxMenu.task.path, { dueDate: date })}
+          onDelete={onDeleteCard ? () => onDeleteCard(cardCtxMenu.task.path) : undefined}
         />
       )}
     </div>
