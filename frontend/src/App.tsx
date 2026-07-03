@@ -36,6 +36,7 @@ import Kanban from './components/Kanban'
 import Canvas from './components/Canvas'
 import Diagram from './components/Diagram'
 import MindMap from './components/MindMap'
+import TrashPanel from './components/TrashPanel'
 
 interface TreeNode {
   name: string
@@ -704,6 +705,9 @@ export const App: React.FC = () => {
     return localStorage.getItem('blockforge_global_column_width_override') || 'per-page'
   })
   const [historyLimitInput, setHistoryLimitInput] = useState('50')
+  const [trashRetentionDays, setTrashRetentionDays] = useState(30)
+  const [trashRetentionInput, setTrashRetentionInput] = useState('30')
+  const [showTrash, setShowTrash] = useState(false)
   const [contextMenu, setContextMenu] = useState<{
     isOpen: boolean; x: number; y: number; path: string | null; isFolder: boolean
     sectionType?: 'documents' | 'boards' | 'canvas' | 'mindmaps'
@@ -867,6 +871,10 @@ export const App: React.FC = () => {
         if (data?.theme === 'dark' || data?.theme === 'cyber') {
           setTheme(data.theme)
           localStorage.setItem('bf-theme', data.theme)
+        }
+        if (typeof data?.trash_retention_days === 'number') {
+          setTrashRetentionDays(data.trash_retention_days)
+          setTrashRetentionInput(data.trash_retention_days.toString())
         }
       }
     } catch (e) {
@@ -1183,21 +1191,25 @@ export const App: React.FC = () => {
   }
 
   const handleDeleteFile = async (path: string) => {
-    if (!confirm('Are you sure you want to delete this file permanently from disk?')) return
+    const fileRecord = files.find(f => f.path === path)
+    const isFolder = fileRecord?.type === 'folder'
+    const label = isFolder ? 'folder and all its contents' : 'file'
+    const action = trashRetentionDays > 0 ? 'Move to Trash' : 'Permanently Delete'
+    if (!confirm(`${action}: ${label}?\n\n${path}`)) return
     try {
-      const res = await fetch(`${API_BASE}/api/file?path=${encodeURIComponent(path)}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error('Failed to delete file')
+      const endpoint = isFolder ? 'folder' : 'file'
+      const res = await fetch(`${API_BASE}/api/${endpoint}?path=${encodeURIComponent(path)}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error(`Failed to delete ${label}`)
       if (favorites.includes(path)) handleToggleFavorite(path)
       fetchFiles()
-      if (selectedPath === path) {
+      if (selectedPath === path || (isFolder && selectedPath?.startsWith(path.replace(/\.md$/, '/')))) {
         setSelectedPath(null)
         setSelectedContent('')
         setCurrentFrontMatterStr('')
         setActiveView('editor')
-        // Clear hash so refresh doesn't attempt to reload a deleted file
         window.history.replaceState(null, '', window.location.pathname)
       }
-    } catch (e) { console.error('Error deleting file', e) }
+    } catch (e) { console.error('Error deleting', e) }
   }
 
   const activeFile = files.find((f) => f.path === selectedPath)
@@ -1990,13 +2002,22 @@ export const App: React.FC = () => {
           </div>
 
           <div className="flex items-center justify-between text-[10px] border-t border-slate-800/60 pt-3 gap-2">
-            <button
-              onClick={() => setAdminModalOpen(true)}
-              className="flex items-center gap-1.5 text-slate-500 hover:text-violet-400 transition cursor-pointer select-none shrink-0"
-            >
-              <Settings size={10} />
-              <span>Settings</span>
-            </button>
+            <div className="flex items-center gap-3 shrink-0">
+              <button
+                onClick={() => setAdminModalOpen(true)}
+                className="flex items-center gap-1.5 text-slate-500 hover:text-violet-400 transition cursor-pointer select-none"
+              >
+                <Settings size={10} />
+                <span>Settings</span>
+              </button>
+              <button
+                onClick={() => setShowTrash(true)}
+                className="flex items-center gap-1.5 text-slate-500 hover:text-red-400 transition cursor-pointer select-none"
+              >
+                <Trash2 size={10} />
+                <span>Trash</span>
+              </button>
+            </div>
 
             {/* Theme switcher */}
             <div className="flex items-center gap-1 shrink-0">
@@ -2334,6 +2355,16 @@ export const App: React.FC = () => {
       )}
       </AnimatePresence>
 
+      {/* ── Trash Panel ─────────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showTrash && (
+          <TrashPanel
+            onClose={() => setShowTrash(false)}
+            trashRetentionDays={trashRetentionDays}
+          />
+        )}
+      </AnimatePresence>
+
       {/* ── Settings Menu Modal ─────────────────────────────────────────── */}
       <AnimatePresence>
       {adminModalOpen && (
@@ -2494,6 +2525,40 @@ export const App: React.FC = () => {
                           }}
                           className="w-full bg-[#1f242c] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 outline-none focus:border-violet-500 transition font-medium"
                         />
+                      </div>
+
+                      <div className="space-y-2 pt-2">
+                        <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
+                          Trash Retention (days)
+                        </label>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          How long deleted files are kept in the Trash before being permanently removed.
+                          Set to <strong className="text-slate-300">0</strong> to skip the Trash entirely and delete immediately.
+                        </p>
+                        <input
+                          type="number"
+                          min={0}
+                          max={365}
+                          value={trashRetentionInput}
+                          onChange={(e) => {
+                            setTrashRetentionInput(e.target.value)
+                            const val = parseInt(e.target.value, 10)
+                            if (!isNaN(val) && val >= 0) {
+                              setTrashRetentionDays(val)
+                              fetch(`${API_BASE}/api/settings`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ trash_retention_days: val }),
+                              }).catch(e => console.error('Failed to save trash retention', e))
+                            }
+                          }}
+                          className="w-full bg-[#1f242c] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 outline-none focus:border-violet-500 transition font-medium"
+                        />
+                        {trashRetentionDays === 0 && (
+                          <p className="text-[11px] text-amber-500/80">
+                            Trash is disabled — files are permanently deleted without recovery.
+                          </p>
+                        )}
                       </div>
                     </div>
                   )}
@@ -2671,7 +2736,10 @@ export const App: React.FC = () => {
               }}
               className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-red-950/40 text-slate-400 hover:text-red-400 rounded-lg text-xs transition cursor-pointer text-left w-full font-medium"
             >
-              <Trash2 size={13} className="text-red-500" /> Delete Item
+              <Trash2 size={13} className="text-red-500" />
+              {trashRetentionDays > 0
+                ? (contextMenu.isFolder ? 'Move Folder to Trash' : 'Move to Trash')
+                : (contextMenu.isFolder ? 'Delete Folder Forever' : 'Delete Forever')}
             </button>
           </motion.div>
         )

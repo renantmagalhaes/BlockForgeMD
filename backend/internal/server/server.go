@@ -44,6 +44,7 @@ func NewServer(rootPath string, database *db.DB, w *watcher.Watcher) *Server {
 
 	s.setupRoutes()
 	go s.listenForWatcherUpdates()
+	s.startTrashCleanup()
 
 	return s
 }
@@ -74,6 +75,13 @@ func (s *Server) setupRoutes() {
 		r.Get("/file", s.handleGetFile)
 		r.Post("/file", s.handleSaveFile)
 		r.Delete("/file", s.handleDeleteFile)
+		r.Delete("/folder", s.handleDeleteFolder)
+		r.Get("/trash", s.handleListTrash)
+		r.Post("/trash/restore", s.handleRestoreTrashItem)
+		r.Delete("/trash", s.handlePurgeTrashItem)
+		r.Delete("/trash/all", s.handleEmptyTrash)
+		r.Get("/trash-asset/{id}/{file}", s.handleTrashAsset)
+		r.Get("/trash/content", s.handleGetTrashContent)
 		r.Patch("/file/front-matter", s.handleUpdateFrontMatter)
 		r.Patch("/file/task", s.handleUpdateTaskStatus)
 		r.Get("/file/history", s.handleGetFileHistory)
@@ -279,34 +287,6 @@ func (s *Server) handleSaveFile(w http.ResponseWriter, r *http.Request) {
 
 	s.broadcastEvent(req.Path)
 	respondJSON(w, map[string]interface{}{"status": "success", "file": res.Record})
-}
-
-// handleDeleteFile deletes a markdown file from disk and deletes cache entries
-func (s *Server) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
-	relPath := r.URL.Query().Get("path")
-	if relPath == "" {
-		http.Error(w, "missing path parameter", http.StatusBadRequest)
-		return
-	}
-
-	fullPath := filepath.Join(s.rootPath, relPath)
-	s.watcher.LockPath(relPath)
-	defer s.watcher.UnlockPath(relPath)
-
-	err := os.Remove(fullPath)
-	if err != nil && !os.IsNotExist(err) {
-		http.Error(w, fmt.Sprintf("failed to delete file: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	err = s.db.DeleteFile(relPath)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to delete cache: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	s.broadcastEvent(relPath)
-	respondJSON(w, map[string]string{"status": "deleted"})
 }
 
 // handleUpdateFrontMatter edits front matter fields directly (e.g. Kanban drag and drop)
@@ -993,13 +973,23 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		limit = 50
 	}
 	theme, _ := s.db.GetSetting("theme", "dark")
-	respondJSON(w, map[string]interface{}{"history_limit": limit, "theme": theme})
+	retentionStr, _ := s.db.GetSetting("trash_retention_days", "30")
+	retention, err := strconv.Atoi(retentionStr)
+	if err != nil || retention < 0 {
+		retention = 30
+	}
+	respondJSON(w, map[string]interface{}{
+		"history_limit":        limit,
+		"theme":                theme,
+		"trash_retention_days": retention,
+	})
 }
 
 func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		HistoryLimit *int   `json:"history_limit"`
-		Theme        string `json:"theme"`
+		HistoryLimit        *int   `json:"history_limit"`
+		Theme               string `json:"theme"`
+		TrashRetentionDays  *int   `json:"trash_retention_days"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -1020,6 +1010,17 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	if req.Theme == "dark" || req.Theme == "cyber" {
 		if err := s.db.SetSetting("theme", req.Theme); err != nil {
 			http.Error(w, fmt.Sprintf("failed to save theme: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if req.TrashRetentionDays != nil {
+		if *req.TrashRetentionDays < 0 {
+			http.Error(w, "invalid trash_retention_days value", http.StatusBadRequest)
+			return
+		}
+		if err := s.db.SetSetting("trash_retention_days", strconv.Itoa(*req.TrashRetentionDays)); err != nil {
+			http.Error(w, fmt.Sprintf("failed to save trash_retention_days: %v", err), http.StatusInternalServerError)
 			return
 		}
 	}
@@ -1065,6 +1066,488 @@ func mdStem(fullPath string) string {
 		return fullPath[:len(fullPath)-3]
 	}
 	return fullPath
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TRASH SYSTEM
+// ═══════════════════════════════════════════════════════════════════════════
+
+// TrashMeta describes one trash bundle (one deleted file or folder tree).
+type TrashMeta struct {
+	ID           string            `json:"id"`
+	OriginalPath string            `json:"originalPath"` // relative to rootPath
+	Type         string            `json:"type"`         // "file" or "folder"
+	TrashedAt    time.Time         `json:"trashedAt"`
+	Assets       map[string]string `json:"assets"` // filename-in-trash → original root-relative URL
+	Files        []string          `json:"files"`  // all trashed file rel-paths (always populated)
+}
+
+// TrashListItem is the over-the-wire representation of one trash entry.
+type TrashListItem struct {
+	ID           string    `json:"id"`
+	OriginalPath string    `json:"originalPath"`
+	Name         string    `json:"name"`
+	Type         string    `json:"type"`
+	TrashedAt    time.Time `json:"trashedAt"`
+	ExpiresAt    time.Time `json:"expiresAt"` // zero-value means "never expires"
+	FileCount    int       `json:"fileCount"`
+}
+
+// assetURLRe matches root-relative workspace asset URLs embedded in markdown.
+// e.g. /Default/assets/Documents/note-image-123.png
+var assetURLRe = regexp.MustCompile(`(/[^/\s"')]+/assets/[^\s"')>]+)`)
+
+func (s *Server) trashDir() string {
+	return filepath.Join(s.rootPath, ".blockforge", "trash")
+}
+
+func (s *Server) trashRetentionDays() int {
+	v, _ := s.db.GetSetting("trash_retention_days", "30")
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return 30
+	}
+	return n
+}
+
+// extractAssetURLs returns all unique asset URLs found in markdown content.
+func extractAssetURLs(content string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, m := range assetURLRe.FindAllString(content, -1) {
+		if !seen[m] {
+			seen[m] = true
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// rewriteContent performs bulk string replacement (old URL → new URL).
+func rewriteContent(content string, replacements map[string]string) string {
+	for old, neu := range replacements {
+		content = strings.ReplaceAll(content, old, neu)
+	}
+	return content
+}
+
+// collectFolderFiles returns the folder .md file itself plus all .md files
+// that live inside the derived children directory (recursively).
+func (s *Server) collectFolderFiles(folderMDPath string) ([]string, error) {
+	files := []string{folderMDPath}
+
+	childrenRelDir := mdStem(folderMDPath)
+	childrenAbsDir := filepath.Join(s.rootPath, filepath.FromSlash(childrenRelDir))
+
+	if _, err := os.Stat(childrenAbsDir); os.IsNotExist(err) {
+		return files, nil
+	}
+
+	err := filepath.Walk(childrenAbsDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !info.IsDir() && strings.HasSuffix(path, ".md") {
+			rel, relErr := filepath.Rel(s.rootPath, path)
+			if relErr == nil {
+				files = append(files, filepath.ToSlash(rel))
+			}
+		}
+		return nil
+	})
+	return files, err
+}
+
+// trashFiles moves a list of files (and their referenced assets) into a single
+// trash bundle identified by id.  It writes _meta.json at the end.
+func (s *Server) trashFiles(files []string, originalPath, itemType, id string) error {
+	bundleDir := filepath.Join(s.trashDir(), id)
+	assetsDir := filepath.Join(bundleDir, "assets")
+	contentDir := filepath.Join(bundleDir, "content")
+	for _, dir := range []string{assetsDir, contentDir} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("create trash dir: %w", err)
+		}
+	}
+
+	assetMap := map[string]string{} // trash filename → original URL
+
+	for _, relPath := range files {
+		fullPath := filepath.Join(s.rootPath, filepath.FromSlash(relPath))
+		raw, err := os.ReadFile(fullPath)
+		if err != nil {
+			continue
+		}
+		content := string(raw)
+		replacements := map[string]string{}
+
+		for _, assetURL := range extractAssetURLs(content) {
+			assetRel := strings.TrimPrefix(assetURL, "/")
+			assetFull := filepath.Join(s.rootPath, filepath.FromSlash(assetRel))
+			filename := filepath.Base(assetFull)
+
+			// Resolve name collisions inside the bundle's assets dir.
+			destName := filename
+			for i := 1; ; i++ {
+				if _, statErr := os.Stat(filepath.Join(assetsDir, destName)); os.IsNotExist(statErr) {
+					break
+				}
+				ext := filepath.Ext(filename)
+				destName = strings.TrimSuffix(filename, ext) + fmt.Sprintf("_%d", i) + ext
+			}
+
+			if mvErr := os.Rename(assetFull, filepath.Join(assetsDir, destName)); mvErr != nil {
+				continue // asset may not exist; skip
+			}
+			newURL := fmt.Sprintf("/api/trash-asset/%s/%s", id, destName)
+			assetMap[destName] = assetURL
+			replacements[assetURL] = newURL
+		}
+
+		newContent := rewriteContent(content, replacements)
+		contentDest := filepath.Join(contentDir, filepath.FromSlash(relPath))
+		if mkErr := os.MkdirAll(filepath.Dir(contentDest), 0755); mkErr != nil {
+			continue
+		}
+		if wErr := os.WriteFile(contentDest, []byte(newContent), 0644); wErr != nil {
+			continue
+		}
+
+		if rmErr := os.Remove(fullPath); rmErr != nil && !os.IsNotExist(rmErr) {
+			log.Printf("trash: failed to remove %s: %v", fullPath, rmErr)
+		}
+		_ = s.db.DeleteFile(relPath)
+	}
+
+	meta := TrashMeta{
+		ID:           id,
+		OriginalPath: originalPath,
+		Type:         itemType,
+		TrashedAt:    time.Now().UTC(),
+		Assets:       assetMap,
+		Files:        files,
+	}
+	metaJSON, _ := json.Marshal(meta)
+	return os.WriteFile(filepath.Join(bundleDir, "_meta.json"), metaJSON, 0644)
+}
+
+// permanentlyDeleteFiles removes files and their referenced assets from disk immediately.
+func (s *Server) permanentlyDeleteFiles(files []string, childrenAbsDir string) {
+	for _, relPath := range files {
+		fullPath := filepath.Join(s.rootPath, filepath.FromSlash(relPath))
+		if raw, err := os.ReadFile(fullPath); err == nil {
+			for _, assetURL := range extractAssetURLs(string(raw)) {
+				assetRel := strings.TrimPrefix(assetURL, "/")
+				_ = os.Remove(filepath.Join(s.rootPath, filepath.FromSlash(assetRel)))
+			}
+		}
+		_ = os.Remove(fullPath)
+		_ = s.db.DeleteFile(relPath)
+	}
+	if childrenAbsDir != "" {
+		_ = os.RemoveAll(childrenAbsDir)
+	}
+}
+
+// restoreTrashBundle moves files and assets from a trash bundle back to their
+// original locations and rewrites asset URLs back to their original forms.
+func (s *Server) restoreTrashBundle(id string) error {
+	bundleDir := filepath.Join(s.trashDir(), id)
+	metaPath := filepath.Join(bundleDir, "_meta.json")
+
+	raw, err := os.ReadFile(metaPath)
+	if err != nil {
+		return fmt.Errorf("read trash meta: %w", err)
+	}
+	var meta TrashMeta
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		return fmt.Errorf("parse trash meta: %w", err)
+	}
+
+	// Build reverse replacements: trash URL → original URL
+	reversals := map[string]string{}
+	for filename, originalURL := range meta.Assets {
+		trashURL := fmt.Sprintf("/api/trash-asset/%s/%s", id, filename)
+		reversals[trashURL] = originalURL
+	}
+
+	contentDir := filepath.Join(bundleDir, "content")
+	assetsDir := filepath.Join(bundleDir, "assets")
+
+	// Check for conflicts before touching anything.
+	for _, relPath := range meta.Files {
+		dest := filepath.Join(s.rootPath, filepath.FromSlash(relPath))
+		if _, statErr := os.Stat(dest); statErr == nil {
+			return fmt.Errorf("cannot restore: %s already exists at original location — delete or move it first", relPath)
+		}
+	}
+
+	// Restore assets first so rewritten markdown links immediately resolve.
+	for filename, originalURL := range meta.Assets {
+		assetRel := strings.TrimPrefix(originalURL, "/")
+		assetDest := filepath.Join(s.rootPath, filepath.FromSlash(assetRel))
+		if mkErr := os.MkdirAll(filepath.Dir(assetDest), 0755); mkErr != nil {
+			continue
+		}
+		_ = os.Rename(filepath.Join(assetsDir, filename), assetDest)
+	}
+
+	// Restore files with rewritten content.
+	for _, relPath := range meta.Files {
+		src := filepath.Join(contentDir, filepath.FromSlash(relPath))
+		dest := filepath.Join(s.rootPath, filepath.FromSlash(relPath))
+		if mkErr := os.MkdirAll(filepath.Dir(dest), 0755); mkErr != nil {
+			continue
+		}
+		fileRaw, readErr := os.ReadFile(src)
+		if readErr != nil {
+			continue
+		}
+		content := rewriteContent(string(fileRaw), reversals)
+		if wErr := os.WriteFile(dest, []byte(content), 0644); wErr != nil {
+			continue
+		}
+		s.broadcastEvent(relPath)
+	}
+
+	return os.RemoveAll(bundleDir)
+}
+
+// purgeExpiredTrash permanently deletes all trash bundles older than the retention window.
+func (s *Server) purgeExpiredTrash() {
+	retention := s.trashRetentionDays()
+	if retention == 0 {
+		return
+	}
+	entries, err := os.ReadDir(s.trashDir())
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().UTC().AddDate(0, 0, -retention)
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		metaPath := filepath.Join(s.trashDir(), entry.Name(), "_meta.json")
+		raw, err := os.ReadFile(metaPath)
+		if err != nil {
+			continue
+		}
+		var meta TrashMeta
+		if err := json.Unmarshal(raw, &meta); err != nil {
+			continue
+		}
+		if meta.TrashedAt.Before(cutoff) {
+			_ = os.RemoveAll(filepath.Join(s.trashDir(), entry.Name()))
+		}
+	}
+}
+
+// startTrashCleanup runs purgeExpiredTrash once on startup then daily.
+func (s *Server) startTrashCleanup() {
+	go func() {
+		s.purgeExpiredTrash()
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			s.purgeExpiredTrash()
+		}
+	}()
+}
+
+// ─── HTTP handlers ────────────────────────────────────────────────────────────
+
+func (s *Server) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
+	relPath := r.URL.Query().Get("path")
+	if relPath == "" {
+		http.Error(w, "missing path parameter", http.StatusBadRequest)
+		return
+	}
+
+	s.watcher.LockPath(relPath)
+	defer s.watcher.UnlockPath(relPath)
+
+	retention := s.trashRetentionDays()
+	if retention == 0 {
+		s.permanentlyDeleteFiles([]string{relPath}, "")
+	} else {
+		id := fmt.Sprintf("%d", time.Now().UnixNano())
+		if err := s.trashFiles([]string{relPath}, relPath, "file", id); err != nil {
+			http.Error(w, fmt.Sprintf("failed to move to trash: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	s.broadcastEvent(relPath)
+	respondJSON(w, map[string]string{"status": "deleted"})
+}
+
+func (s *Server) handleDeleteFolder(w http.ResponseWriter, r *http.Request) {
+	folderMDPath := r.URL.Query().Get("path")
+	if folderMDPath == "" {
+		http.Error(w, "missing path parameter", http.StatusBadRequest)
+		return
+	}
+
+	s.watcher.LockPath(folderMDPath)
+	defer s.watcher.UnlockPath(folderMDPath)
+
+	files, err := s.collectFolderFiles(folderMDPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to collect folder contents: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	childrenAbsDir := filepath.Join(s.rootPath, filepath.FromSlash(mdStem(folderMDPath)))
+
+	retention := s.trashRetentionDays()
+	if retention == 0 {
+		s.permanentlyDeleteFiles(files, childrenAbsDir)
+	} else {
+		id := fmt.Sprintf("%d", time.Now().UnixNano())
+		if err := s.trashFiles(files, folderMDPath, "folder", id); err != nil {
+			http.Error(w, fmt.Sprintf("failed to move folder to trash: %v", err), http.StatusInternalServerError)
+			return
+		}
+		// Remove the now-empty children directory (trashFiles only deleted .md files).
+		_ = os.RemoveAll(childrenAbsDir)
+	}
+
+	s.broadcastEvent(folderMDPath)
+	respondJSON(w, map[string]string{"status": "deleted"})
+}
+
+func (s *Server) handleListTrash(w http.ResponseWriter, r *http.Request) {
+	entries, err := os.ReadDir(s.trashDir())
+	if err != nil {
+		if os.IsNotExist(err) {
+			respondJSON(w, []TrashListItem{})
+			return
+		}
+		http.Error(w, "failed to read trash directory", http.StatusInternalServerError)
+		return
+	}
+
+	retention := s.trashRetentionDays()
+	var items []TrashListItem
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(s.trashDir(), entry.Name(), "_meta.json"))
+		if err != nil {
+			continue
+		}
+		var meta TrashMeta
+		if err := json.Unmarshal(raw, &meta); err != nil {
+			continue
+		}
+		item := TrashListItem{
+			ID:           meta.ID,
+			OriginalPath: meta.OriginalPath,
+			Name:         filepath.Base(meta.OriginalPath),
+			Type:         meta.Type,
+			TrashedAt:    meta.TrashedAt,
+			FileCount:    len(meta.Files),
+		}
+		if retention > 0 {
+			item.ExpiresAt = meta.TrashedAt.AddDate(0, 0, retention)
+		}
+		items = append(items, item)
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].TrashedAt.After(items[j].TrashedAt)
+	})
+
+	if items == nil {
+		items = []TrashListItem{}
+	}
+	respondJSON(w, items)
+}
+
+func (s *Server) handleRestoreTrashItem(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ID == "" {
+		http.Error(w, "missing id", http.StatusBadRequest)
+		return
+	}
+	if err := s.restoreTrashBundle(req.ID); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	respondJSON(w, map[string]string{"status": "restored"})
+}
+
+func (s *Server) handlePurgeTrashItem(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		http.Error(w, "missing id parameter", http.StatusBadRequest)
+		return
+	}
+	bundleDir := filepath.Join(s.trashDir(), id)
+	if err := os.RemoveAll(bundleDir); err != nil {
+		http.Error(w, fmt.Sprintf("failed to delete: %v", err), http.StatusInternalServerError)
+		return
+	}
+	respondJSON(w, map[string]string{"status": "deleted"})
+}
+
+func (s *Server) handleEmptyTrash(w http.ResponseWriter, r *http.Request) {
+	entries, err := os.ReadDir(s.trashDir())
+	if err != nil {
+		if os.IsNotExist(err) {
+			respondJSON(w, map[string]string{"status": "ok"})
+			return
+		}
+		http.Error(w, "failed to read trash", http.StatusInternalServerError)
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			_ = os.RemoveAll(filepath.Join(s.trashDir(), entry.Name()))
+		}
+	}
+	respondJSON(w, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleTrashAsset(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	file := chi.URLParam(r, "file")
+	if id == "" || file == "" {
+		http.Error(w, "missing params", http.StatusBadRequest)
+		return
+	}
+	// Prevent path traversal
+	if strings.Contains(file, "..") || strings.Contains(id, "..") {
+		http.Error(w, "invalid params", http.StatusBadRequest)
+		return
+	}
+	assetPath := filepath.Join(s.trashDir(), id, "assets", file)
+	http.ServeFile(w, r, assetPath)
+}
+
+func (s *Server) handleGetTrashContent(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	relPath := r.URL.Query().Get("path")
+	if id == "" || relPath == "" {
+		http.Error(w, "missing params", http.StatusBadRequest)
+		return
+	}
+	if strings.Contains(id, "..") || strings.Contains(relPath, "..") {
+		http.Error(w, "invalid params", http.StatusBadRequest)
+		return
+	}
+	contentPath := filepath.Join(s.trashDir(), id, "content", filepath.FromSlash(relPath))
+	raw, err := os.ReadFile(contentPath)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	respondJSON(w, map[string]string{"content": string(raw)})
 }
 
 // handleMoveFile moves a vault file (and its sub-page directory) to a new path,
