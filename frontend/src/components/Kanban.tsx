@@ -807,7 +807,6 @@ export const Kanban: React.FC<KanbanProps> = ({
           const colTasks    = getTasksByColumn(col)
           const isOver      = dragOverColumn === col
           const isEditing   = editingColumn === col
-          const accent      = getColumnColor(col, colIdx)
           const isCompleted = completedColumns.some(c => c.toLowerCase() === col.toLowerCase())
 
           return (
@@ -898,7 +897,6 @@ export const Kanban: React.FC<KanbanProps> = ({
                   const showTagEd   = tagEditorCard === task.path
 
                   // ── Filter + search logic ────────────────────────────────
-                  const isFilterActive  = filterTags.length > 0 || filterPriorities.length > 0
                   const matchesTags     = filterTags.length === 0 || filterTags.every(t => tags.includes(t))
                   const matchesPriority = filterPriorities.length === 0 || filterPriorities.includes(priority || '')
                   const matchesFilter   = matchesTags && matchesPriority
