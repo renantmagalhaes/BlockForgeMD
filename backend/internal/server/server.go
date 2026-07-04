@@ -101,6 +101,8 @@ func (s *Server) setupRoutes() {
 		r.Post("/workspaces", s.handleCreateWorkspace)
 		r.Post("/workspaces/rename", s.handleRenameWorkspace)
 		r.Post("/workspaces/migrate", s.handleMigrateWorkspace)
+		r.Get("/backlinks", s.handleGetBacklinks)
+		r.Get("/graph", s.handleGetGraph)
 	})
 
 	// Serve workspace-scoped assets (e.g. /Default/assets/image.png)
@@ -1994,4 +1996,142 @@ func (s *Server) handleMigrateWorkspace(w http.ResponseWriter, r *http.Request) 
 	s.watcher.WatchPath(workspaceDir)
 	s.broadcastEvent("__workspace_migrated__")
 	respondJSON(w, map[string]string{"name": name})
+}
+
+// ─── Backlinks ────────────────────────────────────────────────────────────────
+
+var mdLinkRe = regexp.MustCompile(`\[([^\]]*)\]\(([^)]+\.md)\)`)
+
+func (s *Server) handleGetBacklinks(w http.ResponseWriter, r *http.Request) {
+	targetPath := r.URL.Query().Get("path")
+	if targetPath == "" {
+		http.Error(w, "missing path", http.StatusBadRequest)
+		return
+	}
+	targetPath = strings.TrimPrefix(filepath.ToSlash(targetPath), "/")
+
+	type Backlink struct {
+		Path    string `json:"path"`
+		Title   string `json:"title"`
+		Excerpt string `json:"excerpt"`
+	}
+
+	var results []Backlink
+
+	err := filepath.WalkDir(s.rootPath, func(absPath string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil || d.IsDir() {
+			return walkErr
+		}
+		if !strings.HasSuffix(absPath, ".md") {
+			return nil
+		}
+		relPath := filepath.ToSlash(absPath[len(s.rootPath)+1:])
+		if relPath == targetPath {
+			return nil
+		}
+		raw, err := os.ReadFile(absPath)
+		if err != nil {
+			return nil
+		}
+		content := string(raw)
+		matches := mdLinkRe.FindAllStringSubmatch(content, -1)
+		for _, m := range matches {
+			linkTarget := strings.TrimPrefix(filepath.ToSlash(m[2]), "/")
+			if linkTarget == targetPath {
+				title := relPath
+				for _, line := range strings.Split(content, "\n") {
+					line = strings.TrimSpace(line)
+					if strings.HasPrefix(line, "# ") {
+						title = strings.TrimPrefix(line, "# ")
+						break
+					}
+				}
+				excerpt := ""
+				for _, line := range strings.Split(content, "\n") {
+					if strings.Contains(line, m[0]) {
+						excerpt = strings.TrimSpace(line)
+						if len(excerpt) > 200 {
+							excerpt = excerpt[:200] + "…"
+						}
+						break
+					}
+				}
+				results = append(results, Backlink{Path: relPath, Title: title, Excerpt: excerpt})
+				break
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		http.Error(w, "walk error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if results == nil {
+		results = []Backlink{}
+	}
+	respondJSON(w, results)
+}
+
+// ─── Graph ────────────────────────────────────────────────────────────────────
+
+func (s *Server) handleGetGraph(w http.ResponseWriter, r *http.Request) {
+	type Node struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+	}
+	type Edge struct {
+		Source string `json:"source"`
+		Target string `json:"target"`
+	}
+	type Graph struct {
+		Nodes []Node `json:"nodes"`
+		Edges []Edge `json:"edges"`
+	}
+
+	nodeSet := map[string]string{} // id -> title
+	var edges []Edge
+
+	_ = filepath.WalkDir(s.rootPath, func(absPath string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil || d.IsDir() {
+			return walkErr
+		}
+		if !strings.HasSuffix(absPath, ".md") {
+			return nil
+		}
+		relPath := filepath.ToSlash(absPath[len(s.rootPath)+1:])
+		raw, err := os.ReadFile(absPath)
+		if err != nil {
+			return nil
+		}
+		content := string(raw)
+		title := relPath
+		for _, line := range strings.Split(content, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "# ") {
+				title = strings.TrimPrefix(line, "# ")
+				break
+			}
+		}
+		nodeSet[relPath] = title
+		for _, m := range mdLinkRe.FindAllStringSubmatch(content, -1) {
+			target := strings.TrimPrefix(filepath.ToSlash(m[2]), "/")
+			if target != relPath {
+				edges = append(edges, Edge{Source: relPath, Target: target})
+			}
+		}
+		return nil
+	})
+
+	nodes := make([]Node, 0, len(nodeSet))
+	for id, title := range nodeSet {
+		nodes = append(nodes, Node{ID: id, Title: title})
+	}
+
+	if nodes == nil {
+		nodes = []Node{}
+	}
+	if edges == nil {
+		edges = []Edge{}
+	}
+	respondJSON(w, Graph{Nodes: nodes, Edges: edges})
 }

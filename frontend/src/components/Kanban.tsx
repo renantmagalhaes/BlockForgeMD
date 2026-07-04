@@ -40,6 +40,7 @@ interface KanbanProps {
   onUpdateTaskFrontMatter?: (path: string, updates: Record<string, unknown>) => Promise<void>
   onReorderCards?: (updates: { path: string; position: number }[]) => Promise<void>
   onDeleteCard?: (path: string) => void
+  onRenameBoard?: (newName: string) => Promise<void>
 }
 
 const DEFAULT_PRIORITIES: PriorityDef[] = [
@@ -649,6 +650,7 @@ export const Kanban: React.FC<KanbanProps> = ({
   onUpdateBoardFrontMatter,
   onUpdateTaskFrontMatter,
   onReorderCards,
+  onRenameBoard,
 }) => {
   const [draggingPath, setDraggingPath]   = useState<string | null>(null)
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null)
@@ -889,14 +891,40 @@ export const Kanban: React.FC<KanbanProps> = ({
     ? boardPath.split('/').pop()?.replace('.board.md', '') ?? 'Board'
     : 'Workspace Board'
 
+  const [editingBoardName, setEditingBoardName] = useState(false)
+  const [boardNameVal, setBoardNameVal] = useState(boardName)
+  useEffect(() => { setBoardNameVal(boardName) }, [boardName])
+
+  const saveBoardName = async () => {
+    setEditingBoardName(false)
+    const trimmed = boardNameVal.trim()
+    if (!trimmed || trimmed === boardName) return
+    await onRenameBoard?.(trimmed)
+  }
+
   return (
     <div className="flex flex-col h-full bf-kanban rounded-xl overflow-hidden p-6">
       {/* ── Header ── */}
       <div className="mb-4 flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold bf-kanban-title">{boardName}</h1>
+          {editingBoardName ? (
+            <input
+              autoFocus
+              value={boardNameVal}
+              onChange={e => setBoardNameVal(e.target.value)}
+              onBlur={saveBoardName}
+              onKeyDown={e => { if (e.key === 'Enter') saveBoardName(); if (e.key === 'Escape') setEditingBoardName(false) }}
+              className="text-2xl font-bold bg-transparent border-b border-violet-500 outline-none text-slate-100 w-64"
+            />
+          ) : (
+            <h1
+              className="text-2xl font-bold bf-kanban-title cursor-pointer hover:opacity-80"
+              onDoubleClick={() => setEditingBoardName(true)}
+              title="Double-click to rename"
+            >{boardName}</h1>
+          )}
           <p className="bf-kanban-hint text-xs mt-0.5">
-            Drag to move · Double-click column to rename · Click priority badge to change
+            Drag to move · Double-click board title or column to rename · Click priority badge to change
           </p>
         </div>
         <div className="flex items-center gap-2">

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useState, useRef, useCallback } from 'react'
 import EmojiPicker, { Theme } from 'emoji-picker-react'
 import { useEditor, EditorContent, NodeViewWrapper, NodeViewContent, ReactNodeViewRenderer, isNodeSelection } from '@tiptap/react'
 import { Node, mergeAttributes } from '@tiptap/core'
@@ -67,6 +67,8 @@ const TableHeader = TableHeaderBase.extend({
   },
 })
 import Placeholder from '@tiptap/extension-placeholder'
+import Mathematics from '@tiptap/extension-mathematics'
+import 'katex/dist/katex.min.css'
 import { TextStyle } from '@tiptap/extension-text-style'
 import { Color } from '@tiptap/extension-color'
 import Highlight from '@tiptap/extension-highlight'
@@ -126,6 +128,9 @@ import {
   ExternalLink,
   Trash2,
   ImageIcon,
+  Sigma,
+  Columns2,
+  Link as LinkIcon,
 } from 'lucide-react'
 
 // Configure Turndown for clean Markdown serialization
@@ -273,6 +278,38 @@ turndownService.addRule('highlight', {
     const bg = (node as HTMLElement).style.backgroundColor
     if (!bg) return content
     return `<mark style="background: ${bg};">${content}</mark>`
+  },
+})
+
+turndownService.addRule('mathDisplay', {
+  filter: (node) => node.nodeName === 'DIV' && (node as HTMLElement).classList.contains('math-display'),
+  replacement: (_content, node) => {
+    const latex = (node as HTMLElement).getAttribute('data-latex') || node.textContent || ''
+    return `\n\n$${latex}$\n\n`
+  },
+})
+
+turndownService.addRule('mathInline', {
+  filter: (node) => node.nodeName === 'SPAN' && (node as HTMLElement).classList.contains('math-inline'),
+  replacement: (_content, node) => {
+    const latex = (node as HTMLElement).getAttribute('data-latex') || node.textContent || ''
+    return `$${latex}$`
+  },
+})
+
+turndownService.addRule('footnoteRef', {
+  filter: (node) => node.nodeName === 'SUP' && (node as HTMLElement).classList.contains('footnote-ref'),
+  replacement: (_content, node) => {
+    const num = (node as HTMLElement).getAttribute('data-fn') || node.textContent || ''
+    return `[^${num}]`
+  },
+})
+
+turndownService.addRule('footnoteItem', {
+  filter: (node) => node.nodeName === 'LI' && (node as HTMLElement).classList.contains('footnote-item'),
+  replacement: (content, node) => {
+    const num = (node as HTMLElement).getAttribute('data-fn') || ''
+    return `\n[^${num}]: ${content.trim()}\n`
   },
 })
 
@@ -1603,6 +1640,9 @@ const getCommandIcon = (id: string, active: boolean) => {
     case 'subpage': return <FilePlus size={s} className={cls} />
     case 'embed': return <MonitorPlay size={s} className={cls} />
     case 'toc': return <BookOpen size={s} className={cls} />
+    case 'math': return <Sigma size={s} className={cls} />
+    case '2col': return <Columns2 size={s} className={cls} />
+    case '3col': return <Columns2 size={s} className={cls} />
     case 'callout': return <span className="text-sm leading-none select-none">🎨</span>
     case 'callout-note': return <span className="text-sm leading-none select-none">📝</span>
     case 'callout-tip': return <span className="text-sm leading-none select-none">💡</span>
@@ -1682,6 +1722,50 @@ const TocBlockNode = Node.create({
     return ['toc-block', mergeAttributes(HTMLAttributes), '‌']
   },
   addNodeView() { return ReactNodeViewRenderer(TocBlockComponent) },
+})
+
+// ── Multi-column layout nodes ─────────────────────────────────────
+const ColumnNode = Node.create({
+  name: 'column',
+  group: 'block',
+  content: 'block+',
+  defining: true,
+  parseHTML() { return [{ tag: 'div[data-column]' }] },
+  renderHTML({ HTMLAttributes }) {
+    return ['div', mergeAttributes(HTMLAttributes, { 'data-column': 'true', style: 'flex:1;min-width:0' }), 0]
+  },
+  addNodeView() {
+    return () => {
+      const dom = document.createElement('div')
+      dom.setAttribute('data-column', 'true')
+      dom.style.cssText = 'flex:1;min-width:0;padding:0 8px'
+      const contentDOM = document.createElement('div')
+      dom.appendChild(contentDOM)
+      return { dom, contentDOM }
+    }
+  },
+})
+
+const ColumnsNode = Node.create({
+  name: 'columns',
+  group: 'block',
+  content: 'column{2,3}',
+  defining: true,
+  parseHTML() { return [{ tag: 'div[data-columns]' }] },
+  renderHTML({ HTMLAttributes }) {
+    return ['div', mergeAttributes(HTMLAttributes, { 'data-columns': 'true', style: 'display:flex;gap:16px;align-items:flex-start' }), 0]
+  },
+  addNodeView() {
+    return () => {
+      const dom = document.createElement('div')
+      dom.setAttribute('data-columns', 'true')
+      dom.style.cssText = 'display:flex;gap:16px;align-items:flex-start;width:100%;margin:8px 0'
+      const contentDOM = document.createElement('div')
+      contentDOM.style.cssText = 'display:contents'
+      dom.appendChild(contentDOM)
+      return { dom, contentDOM }
+    }
+  },
 })
 
 // ── ImageWithCaption node ──────────────────────────────────────────
@@ -1787,6 +1871,9 @@ const COMMANDS = [
   { id: 'callout-bug',   label: 'Bug Callout',                desc: 'Callout styled as a Bug',         search: 'callout bug box preset',                          shortcut: undefined },
   { id: 'subpage',       label: 'Sub-page',                   desc: 'Create a sub-page inside this page', search: 'subpage sub page child nested',               shortcut: undefined },
   { id: 'embed',         label: 'Embed Link / Canvas / Mind Map', desc: 'Embed a website, canvas, or mind map', search: 'embed iframe link website canvas drawio mindmap mind map brain', shortcut: undefined },
+  { id: 'math',          label: 'Math / KaTeX',               desc: 'Insert a LaTeX math expression',   search: 'math latex katex formula equation',               shortcut: undefined },
+  { id: '2col',          label: 'Two Columns',                desc: 'Split content into two columns',    search: '2 two columns layout split',                      shortcut: undefined },
+  { id: '3col',          label: 'Three Columns',              desc: 'Split content into three columns',  search: '3 three columns layout split',                    shortcut: undefined },
 ]
 
 export const Editor: React.FC<EditorProps> = ({
@@ -1864,6 +1951,23 @@ export const Editor: React.FC<EditorProps> = ({
 
   // Table cell color picker
   const [tableCellColorOpen, setTableCellColorOpen] = useState(false)
+
+  // Backlinks panel
+  const [backlinksOpen, setBacklinksOpen] = useState(false)
+  const [backlinks, setBacklinks] = useState<{ path: string; title: string; excerpt: string }[]>([])
+  const [backlinksLoading, setBacklinksLoading] = useState(false)
+
+  // Page icon (emoji stored in frontmatter)
+  const [iconPickerOpen, setIconPickerOpen] = useState(false)
+
+  // Cover image position control
+  const [coverRepositioning, setCoverRepositioning] = useState(false)
+  const [coverPosY, setCoverPosY] = useState(50)
+
+  useEffect(() => {
+    const saved = frontMatter?.coverPositionY
+    setCoverPosY(typeof saved === 'number' ? saved : 50)
+  }, [filePath])
 
   // Image Viewer & Editor state
   const [editingImageSrc, setEditingImageSrc] = useState<string | null>(null)
@@ -2082,7 +2186,11 @@ export const Editor: React.FC<EditorProps> = ({
 
   const getHTMLFromMarkdown = (markdown: string) => {
     if (!markdown.trim()) return '<p></p>'
-    let rawHtml = marked.parse(markdown)
+    // Pre-process footnotes before marked parsing
+    let md = markdown
+      .replace(/^\[\^(\d+)\]:\s*(.+)$/gm, '<li class="footnote-item" data-fn="$1">$2</li>')
+      .replace(/\[\^(\d+)\]/g, '<sup class="footnote-ref" data-fn="$1">$1</sup>')
+    let rawHtml = marked.parse(md)
     if (typeof rawHtml !== 'string') rawHtml = ''
     rawHtml = rawHtml
       // Convert <font color="..."> → <span style="color: ..."> for TipTap Color extension
@@ -2136,6 +2244,9 @@ export const Editor: React.FC<EditorProps> = ({
       }),
       ImageWithCaption,
       TocBlockNode,
+      ColumnsNode,
+      ColumnNode,
+      Mathematics,
       DragHandle.configure({
         render: () => dragHandleEl.current,
         onNodeChange: (data: any) => { dragNodeRef.current = data },
@@ -2651,6 +2762,22 @@ export const Editor: React.FC<EditorProps> = ({
     editor.on('update', update)
     return () => { editor.off('update', update) }
   }, [editor])
+
+  // Backlinks: fetch when panel opens or file changes
+  const fetchBacklinks = useCallback(() => {
+    if (!filePath) return
+    setBacklinksLoading(true)
+    fetch(`${API_BASE}/api/backlinks?path=${encodeURIComponent(filePath)}`)
+      .then(r => r.json())
+      .then(data => setBacklinks(data || []))
+      .catch(() => setBacklinks([]))
+      .finally(() => setBacklinksLoading(false))
+  }, [filePath])
+
+  useEffect(() => {
+    if (!backlinksOpen) return
+    fetchBacklinks()
+  }, [backlinksOpen, fetchBacklinks])
 
   // Drag handle click handler (extension manages DOM placement; we just add click listener)
   useEffect(() => {
@@ -3295,6 +3422,28 @@ export const Editor: React.FC<EditorProps> = ({
       case 'toc':
         editor.chain().focus().insertContent({ type: 'tocBlock' }).run()
         break
+      case 'math':
+        editor.chain().focus().insertContent('$\\LaTeX$').run()
+        break
+      case '2col':
+        editor.chain().focus().insertContent({
+          type: 'columns',
+          content: [
+            { type: 'column', content: [{ type: 'paragraph' }] },
+            { type: 'column', content: [{ type: 'paragraph' }] },
+          ],
+        }).run()
+        break
+      case '3col':
+        editor.chain().focus().insertContent({
+          type: 'columns',
+          content: [
+            { type: 'column', content: [{ type: 'paragraph' }] },
+            { type: 'column', content: [{ type: 'paragraph' }] },
+            { type: 'column', content: [{ type: 'paragraph' }] },
+          ],
+        }).run()
+        break
       case 'code':
         editor.chain().focus().insertContent('<pre><code>\n// Code here\n</code></pre>').run()
         break
@@ -3716,6 +3865,16 @@ export const Editor: React.FC<EditorProps> = ({
               title="Table of Contents"
             >
               <BookOpen size={16} />
+            </button>
+
+            <button
+              onClick={() => setBacklinksOpen(!backlinksOpen)}
+              className={`p-2 rounded-lg hover:bg-slate-800 transition cursor-pointer ${
+                backlinksOpen ? 'bg-violet-600/20 text-violet-400 border border-violet-500/30' : 'text-slate-400'
+              }`}
+              title="Backlinks — pages that link here"
+            >
+              <LinkIcon size={16} />
             </button>
 
             <button
@@ -4158,6 +4317,122 @@ export const Editor: React.FC<EditorProps> = ({
             </div>
           )}
 
+          {/* Page Cover + Icon header */}
+          <div className={`${getWidthClass()} transition-all duration-300`}>
+            {/* Cover image */}
+            {frontMatter?.cover ? (
+              <div className="relative group/cover mb-0 -mx-4 overflow-hidden" style={{ height: 220 }}>
+                <img
+                  src={frontMatter.cover}
+                  alt="Cover"
+                  className="w-full h-full object-cover"
+                  style={{ objectPosition: `center ${coverPosY}%` }}
+                />
+                {coverRepositioning ? (
+                  <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-end pb-4 gap-3">
+                    <div className="text-[10px] text-white/70">Drag to reposition</div>
+                    <input
+                      type="range" min={0} max={100} value={coverPosY}
+                      onChange={e => setCoverPosY(Number(e.target.value))}
+                      className="w-48 accent-violet-500"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          onUpdateFrontMatter?.({ coverPositionY: coverPosY })
+                          setCoverRepositioning(false)
+                        }}
+                        className="text-[10px] px-3 py-1 bg-violet-600 text-white rounded-lg hover:bg-violet-500 transition cursor-pointer"
+                      >
+                        Save position
+                      </button>
+                      <button
+                        onClick={() => {
+                          setCoverPosY(typeof frontMatter?.coverPositionY === 'number' ? frontMatter.coverPositionY : 50)
+                          setCoverRepositioning(false)
+                        }}
+                        className="text-[10px] px-3 py-1 bg-black/60 text-white rounded-lg hover:bg-slate-700 transition cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="absolute inset-0 bg-black/30 opacity-0 group-hover/cover:opacity-100 transition-opacity flex items-end justify-end gap-2 p-3">
+                    {onUpdateFrontMatter && (
+                      <button
+                        onClick={() => setCoverRepositioning(true)}
+                        className="text-[10px] px-2 py-1 bg-black/60 text-white rounded-lg hover:bg-slate-700/80 transition cursor-pointer"
+                      >
+                        Reposition
+                      </button>
+                    )}
+                    <button
+                      onClick={() => onUpdateFrontMatter?.({ cover: '' })}
+                      className="text-[10px] px-2 py-1 bg-black/60 text-white rounded-lg hover:bg-red-600/80 transition cursor-pointer"
+                    >
+                      Remove cover
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              onUpdateFrontMatter && (
+                <div className="group/coveradd -mx-4 overflow-hidden" style={{ height: 8 }}>
+                  <div className="opacity-0 group-hover/coveradd:opacity-100 transition-opacity flex justify-end px-4 pt-1">
+                    <button
+                      onClick={() => {
+                        const url = window.prompt('Enter cover image URL or asset path:')
+                        if (url) onUpdateFrontMatter({ cover: url })
+                      }}
+                      className="text-[10px] px-2 py-0.5 bg-slate-800/80 text-slate-400 hover:text-white rounded-lg transition cursor-pointer"
+                    >
+                      + Add cover
+                    </button>
+                  </div>
+                </div>
+              )
+            )}
+
+            {/* Page icon */}
+            {onUpdateFrontMatter && (
+              <div className={`relative flex items-start gap-3 px-4 pt-4 pb-0 ${frontMatter?.cover ? '-mt-10' : ''}`}>
+                <div className="relative shrink-0">
+                  {frontMatter?.icon ? (
+                    <button
+                      onClick={() => setIconPickerOpen(o => !o)}
+                      className="text-5xl leading-none hover:bg-slate-800/60 rounded-xl p-1 transition cursor-pointer select-none"
+                      title="Change icon"
+                    >
+                      {frontMatter.icon}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setIconPickerOpen(o => !o)}
+                      className="text-[11px] px-2 py-1 bg-slate-800/60 text-slate-500 hover:text-slate-300 rounded-lg transition cursor-pointer"
+                    >
+                      + icon
+                    </button>
+                  )}
+                  {iconPickerOpen && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setIconPickerOpen(false)} />
+                      <div className="absolute top-12 left-0 z-50">
+                        <EmojiPicker
+                          theme={Theme.DARK}
+                          onEmojiClick={(emojiData) => {
+                            onUpdateFrontMatter({ icon: emojiData.emoji })
+                            setIconPickerOpen(false)
+                          }}
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Document Content Block */}
           <div className={`flex-1 transition-all duration-300 ${getWidthClass()} ${
             editorFontSize === 'sm' ? 'text-sm' : editorFontSize === 'lg' ? 'text-lg' : 'text-base'
@@ -4205,6 +4480,61 @@ export const Editor: React.FC<EditorProps> = ({
                   </li>
                 ))}
               </ul>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Backlinks Sidebar Drawer */}
+      {backlinksOpen && (
+        <div className="w-72 border-l border-slate-800 bg-[#161b22]/70 backdrop-blur-md flex flex-col shrink-0 select-none animate-in slide-in-from-right duration-250">
+          <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-[#161b22]">
+            <div className="flex items-center gap-2">
+              <LinkIcon size={14} className="text-violet-400" />
+              <h3 className="font-bold text-sm text-slate-200">Backlinks</h3>
+              {!backlinksLoading && (
+                <span className="text-[10px] text-slate-500">{backlinks.length}</span>
+              )}
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={fetchBacklinks}
+                disabled={backlinksLoading}
+                className="p-1 hover:bg-slate-800 rounded text-slate-500 hover:text-slate-300 transition cursor-pointer disabled:opacity-40"
+                title="Refresh"
+              >
+                <RotateCcw size={12} />
+              </button>
+              <button
+                onClick={() => setBacklinksOpen(false)}
+                className="p-1 hover:bg-slate-800 rounded text-slate-500 hover:text-slate-300 transition cursor-pointer"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto p-3 no-scrollbar space-y-2">
+            {backlinksLoading ? (
+              <div className="flex justify-center py-8 text-slate-500 text-xs">
+                <Loader2 className="animate-spin mr-1.5" size={14} /> Scanning…
+              </div>
+            ) : backlinks.length === 0 ? (
+              <p className="text-xs text-slate-500 italic py-6 text-center">No pages link to this page yet.</p>
+            ) : (
+              backlinks.map((bl, i) => (
+                <div
+                  key={i}
+                  onClick={() => { onSelectFile?.(bl.path); setBacklinksOpen(false) }}
+                  className="p-2.5 bg-[#0d1117] border border-slate-800 rounded-lg hover:border-slate-700 transition cursor-pointer group"
+                >
+                  <div className="text-xs font-semibold text-slate-200 group-hover:text-violet-400 transition truncate mb-1">
+                    {bl.title}
+                  </div>
+                  {bl.excerpt && (
+                    <p className="text-[10px] text-slate-500 leading-relaxed line-clamp-2">{bl.excerpt}</p>
+                  )}
+                </div>
+              ))
             )}
           </div>
         </div>

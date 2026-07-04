@@ -29,6 +29,7 @@ import {
   Moon,
   Zap,
   Star,
+  Network,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import Editor from './components/Editor'
@@ -37,6 +38,7 @@ import Canvas from './components/Canvas'
 import Diagram from './components/Diagram'
 import MindMap from './components/MindMap'
 import TrashPanel from './components/TrashPanel'
+import { GraphView } from './components/GraphView'
 
 interface TreeNode {
   name: string
@@ -593,7 +595,7 @@ export const App: React.FC = () => {
   }
 
   const [files, setFiles] = useState<FileRecord[]>([])
-  const [activeView, setActiveView] = useState<'board' | 'editor'>('editor')
+  const [activeView, setActiveView] = useState<'board' | 'editor' | 'graph'>('editor')
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [selectedContent, setSelectedContent] = useState<string>('')
   const [currentFrontMatterStr, setCurrentFrontMatterStr] = useState<string>('')
@@ -2014,8 +2016,8 @@ export const App: React.FC = () => {
             </button>
           </div>
 
-          <div className="flex items-center justify-between text-[10px] border-t border-slate-800/60 pt-3 gap-2">
-            <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center justify-between text-[10px] border-t border-slate-800/60 pt-3">
+            <div className="flex items-center gap-3">
               <button
                 onClick={() => setAdminModalOpen(true)}
                 className="flex items-center gap-1.5 text-slate-500 hover:text-violet-400 transition cursor-pointer select-none"
@@ -2030,23 +2032,16 @@ export const App: React.FC = () => {
                 <Trash2 size={10} />
                 <span>Trash</span>
               </button>
+              <button
+                onClick={() => setActiveView(v => v === 'graph' ? 'editor' : 'graph')}
+                className={`flex items-center gap-1.5 transition cursor-pointer select-none ${activeView === 'graph' ? 'text-violet-400' : 'text-slate-500 hover:text-violet-400'}`}
+                title="Knowledge Graph"
+              >
+                <Network size={10} />
+                <span>Graph</span>
+              </button>
             </div>
-
-            {/* Theme switcher */}
-            <div className="flex items-center gap-1 shrink-0">
-              {(['dark', 'cyber'] as const).map(t => (
-                <button
-                  key={t}
-                  onClick={() => handleSetTheme(t)}
-                  className={`bf-theme-btn ${theme === t ? 'active' : ''}`}
-                  title={t === 'dark' ? 'Dark mode' : 'Cyber mode'}
-                >
-                  {t === 'dark' ? <Moon size={11} /> : <Zap size={11} />}
-                </button>
-              ))}
-            </div>
-
-            <div className="shrink-0">
+            <div>
               {isSyncing ? (
                 <span className="text-amber-500 animate-pulse">Syncing...</span>
               ) : syncError ? (
@@ -2062,7 +2057,22 @@ export const App: React.FC = () => {
       {/* ── Main Panel ───────────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col overflow-hidden bg-[#0d1117] bf-main">
         <AnimatePresence mode="wait" initial={false}>
-          {activeView === 'board' ? (
+          {activeView === 'graph' ? (
+            <motion.div
+              key="graph"
+              className="flex-1 overflow-hidden flex flex-col"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.12 }}
+            >
+              <GraphView
+                workspace={activeWorkspace}
+                currentPath={selectedPath}
+                onSelectFile={(path) => { fetchFileContent(path); setActiveView('editor') }}
+              />
+            </motion.div>
+          ) : activeView === 'board' ? (
             <motion.div
               key="board"
               className="flex-1 p-6 overflow-hidden"
@@ -2092,6 +2102,18 @@ export const App: React.FC = () => {
                 onUpdateTaskFrontMatter={(path, updates) => handleUpdateFrontMatter(path, updates)}
                 onReorderCards={handleReorderCards}
                 onDeleteCard={handleDeleteFile}
+                onRenameBoard={selectedPath ? async (newName: string) => {
+                  const parts = selectedPath.split('/')
+                  parts[parts.length - 1] = newName + '.board.md'
+                  const newPath = parts.join('/')
+                  await fetch(`${API_BASE}/api/file/move`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ from: selectedPath, to: newPath }),
+                  })
+                  await fetchFiles()
+                  fetchFileContent(newPath)
+                } : undefined}
               />
             </motion.div>
           ) : selectedPath && activeFile ? (
@@ -2504,6 +2526,35 @@ export const App: React.FC = () => {
                               <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/>
                             </svg>
                           </div>
+                        </div>
+                      </div>
+
+                      {/* Theme */}
+                      <div className="space-y-2 pt-2">
+                        <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
+                          Appearance
+                        </label>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Choose the colour theme for the interface.
+                        </p>
+                        <div className="flex gap-2">
+                          {([
+                            { id: 'dark' as const, label: 'Dark', icon: <Moon size={14} /> },
+                            { id: 'cyber' as const, label: 'Cyber', icon: <Zap size={14} /> },
+                          ]).map(t => (
+                            <button
+                              key={t.id}
+                              onClick={() => handleSetTheme(t.id)}
+                              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold border transition cursor-pointer ${
+                                theme === t.id
+                                  ? 'bg-violet-600/15 border-violet-500/40 text-violet-300'
+                                  : 'bg-[#1f242c] border-slate-700/80 text-slate-400 hover:text-slate-200 hover:border-slate-600'
+                              }`}
+                            >
+                              {t.icon}
+                              {t.label}
+                            </button>
+                          ))}
                         </div>
                       </div>
                     </div>
