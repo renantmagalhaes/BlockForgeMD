@@ -1032,29 +1032,25 @@ body {
   background: rgba(255, 255, 255, 0.02);
 }
 
-/* Drag handle */
+/* Drag handle — positioning is managed by @tiptap/extension-drag-handle via floating-ui */
 .bf-drag-handle {
-  position: fixed;
-  opacity: 0;
-  transition: opacity 0.15s ease;
   cursor: grab;
-  z-index: 50;
-  padding: 2px 4px;
+  padding: 3px 4px;
   border-radius: 4px;
   color: #64748b;
-  pointer-events: auto;
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: background 0.1s, color 0.1s;
+  user-select: none;
 }
 .bf-drag-handle:hover {
-  opacity: 1 !important;
-  background: rgba(148, 163, 184, 0.08);
+  background: rgba(148, 163, 184, 0.10);
   color: #94a3b8;
 }
 .bf-drag-handle::before {
   content: '⠿';
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1;
 }
 

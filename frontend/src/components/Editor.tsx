@@ -17,8 +17,55 @@ import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { Table } from '@tiptap/extension-table'
 import TableRow from '@tiptap/extension-table-row'
-import TableCell from '@tiptap/extension-table-cell'
-import TableHeader from '@tiptap/extension-table-header'
+import TableCellBase from '@tiptap/extension-table-cell'
+
+const CELL_COLORS = [
+  { label: 'None', value: '' },
+  { label: 'Slate', value: 'rgba(100,116,139,0.18)' },
+  { label: 'Red', value: 'rgba(239,68,68,0.18)' },
+  { label: 'Orange', value: 'rgba(249,115,22,0.18)' },
+  { label: 'Amber', value: 'rgba(245,158,11,0.18)' },
+  { label: 'Green', value: 'rgba(34,197,94,0.18)' },
+  { label: 'Teal', value: 'rgba(20,184,166,0.18)' },
+  { label: 'Blue', value: 'rgba(59,130,246,0.18)' },
+  { label: 'Violet', value: 'rgba(139,92,246,0.18)' },
+  { label: 'Pink', value: 'rgba(236,72,153,0.18)' },
+]
+
+const TableCell = TableCellBase.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      backgroundColor: {
+        default: null,
+        renderHTML: (attrs) => attrs.backgroundColor ? { style: `background-color: ${attrs.backgroundColor};` } : {},
+        parseHTML: (el) => {
+          const style = el.getAttribute('style') || ''
+          const m = style.match(/background-color:\s*([^;]+)/)
+          return m ? m[1].trim() : null
+        },
+      },
+    }
+  },
+})
+import TableHeaderBase from '@tiptap/extension-table-header'
+
+const TableHeader = TableHeaderBase.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      backgroundColor: {
+        default: null,
+        renderHTML: (attrs) => attrs.backgroundColor ? { style: `background-color: ${attrs.backgroundColor};` } : {},
+        parseHTML: (el) => {
+          const style = el.getAttribute('style') || ''
+          const m = style.match(/background-color:\s*([^;]+)/)
+          return m ? m[1].trim() : null
+        },
+      },
+    }
+  },
+})
 import Placeholder from '@tiptap/extension-placeholder'
 import { TextStyle } from '@tiptap/extension-text-style'
 import { Color } from '@tiptap/extension-color'
@@ -43,6 +90,7 @@ import {
   FilePlus,
   CheckSquare,
   BookOpen,
+  Palette,
   Undo,
   Redo,
   Save,
@@ -1638,16 +1686,53 @@ const TocBlockNode = Node.create({
 
 // ── ImageWithCaption node ──────────────────────────────────────────
 const ImageCaptionComponent = (props: any) => {
-  const { src, alt, title } = props.node.attrs
+  const { src, alt, title, width } = props.node.attrs
+  const figureRef = useRef<HTMLElement>(null)
+  const isResizingRef = useRef(false)
+  const startXRef = useRef(0)
+  const startWRef = useRef(0)
+
+  const onResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    isResizingRef.current = true
+    startXRef.current = e.clientX
+    startWRef.current = figureRef.current?.offsetWidth ?? 400
+    const onMove = (ev: MouseEvent) => {
+      if (!isResizingRef.current) return
+      const newW = Math.max(80, startWRef.current + (ev.clientX - startXRef.current))
+      props.updateAttributes({ width: newW })
+    }
+    const onUp = () => {
+      isResizingRef.current = false
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
+
   return (
     <NodeViewWrapper className="image-caption-wrapper my-4">
-      <figure contentEditable={false}>
+      <figure
+        ref={figureRef as any}
+        contentEditable={false}
+        className="group relative inline-block"
+        style={{ width: width ? `${width}px` : undefined, maxWidth: '100%' }}
+      >
         <img
           src={src}
           alt={alt || ''}
-          className="max-w-full rounded-xl border border-slate-800 shadow-lg w-full cursor-pointer"
+          style={{ width: '100%', display: 'block' }}
+          className="rounded-xl border border-slate-800 shadow-lg cursor-pointer"
           onClick={() => _imageClickRef.current(src)}
           draggable={false}
+        />
+        {/* Resize handle */}
+        <div
+          onMouseDown={onResizeStart}
+          title="Drag to resize"
+          className="absolute bottom-1 right-1 w-3.5 h-3.5 rounded-sm bg-slate-400/80 hover:bg-violet-400 cursor-se-resize opacity-0 group-hover:opacity-100 transition-opacity shadow"
         />
         <figcaption>
           <input
@@ -1665,6 +1750,19 @@ const ImageCaptionComponent = (props: any) => {
 }
 
 const ImageWithCaption = Image.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      width: {
+        default: null,
+        renderHTML: (attrs) => attrs.width ? { width: String(attrs.width) } : {},
+        parseHTML: (el) => {
+          const w = el.getAttribute('width')
+          return w ? parseInt(w, 10) : null
+        },
+      },
+    }
+  },
   addNodeView() {
     return ReactNodeViewRenderer(ImageCaptionComponent)
   },
@@ -1763,6 +1861,9 @@ export const Editor: React.FC<EditorProps> = ({
   // Link hover preview
   const [linkPreview, setLinkPreview] = useState<{ href: string; title: string; excerpt: string; coords: { top: number; left: number } } | null>(null)
   const linkPreviewTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Table cell color picker
+  const [tableCellColorOpen, setTableCellColorOpen] = useState(false)
 
   // Image Viewer & Editor state
   const [editingImageSrc, setEditingImageSrc] = useState<string | null>(null)
@@ -2511,6 +2612,19 @@ export const Editor: React.FC<EditorProps> = ({
     _imageClickRef.current = setEditingImageSrc
   }, [])
 
+  // Apply font size to ProseMirror via prose-sm / prose-xl utility class
+  useEffect(() => {
+    if (!editor) return
+    const sizeClass = editorFontSize === 'sm' ? 'prose-sm' : editorFontSize === 'lg' ? 'prose-xl' : ''
+    const base = 'prose prose-invert max-w-none focus:outline-none min-h-[450px] text-slate-200 px-4 py-2'
+    editor.setOptions({
+      editorProps: {
+        ...editor.options.editorProps,
+        attributes: { class: sizeClass ? `${base} ${sizeClass}` : base },
+      },
+    })
+  }, [editor, editorFontSize])
+
   // Word count
   useEffect(() => {
     if (!editor) return
@@ -2538,12 +2652,11 @@ export const Editor: React.FC<EditorProps> = ({
     return () => { editor.off('update', update) }
   }, [editor])
 
-  // Drag handle DOM setup
+  // Drag handle click handler (extension manages DOM placement; we just add click listener)
   useEffect(() => {
     const el = dragHandleEl.current
     el.className = 'bf-drag-handle'
-    document.body.appendChild(el)
-    el.addEventListener('click', () => {
+    const onClick = () => {
       const data = dragNodeRef.current
       if (!data || !data.editor) return
       const domEl = data.editor.view.nodeDOM(data.pos)
@@ -2551,8 +2664,9 @@ export const Editor: React.FC<EditorProps> = ({
         const rect = domEl.getBoundingClientRect()
         setBlockMenu({ open: true, coords: { top: rect.top, left: rect.left - 8 }, pos: data.pos })
       }
-    })
-    return () => { el.remove() }
+    }
+    el.addEventListener('click', onClick)
+    return () => { el.removeEventListener('click', onClick) }
   }, [])
 
   // Close block menu and context menu on outside click / Escape
@@ -2592,13 +2706,25 @@ export const Editor: React.FC<EditorProps> = ({
           const res = await fetch(`${API_BASE}/api/file?path=${encodeURIComponent(href)}`)
           if (!res.ok) return
           const data = await res.json()
-          const text: string = data.content || ''
-          const lines = text.split('\n').filter((l: string) => l.trim() && !l.startsWith('#')).slice(0, 3)
+          let text: string = data.content || ''
+          // Strip YAML frontmatter
+          if (text.startsWith('---')) {
+            const end = text.indexOf('\n---', 3)
+            if (end !== -1) text = text.slice(end + 4)
+          }
+          // Extract title from first H1, fall back to anchor text
+          const h1 = text.match(/^#\s+(.+)/m)
+          const previewTitle = h1 ? h1[1].trim() : (anchor.textContent || href)
+          // Collect first 3 non-empty, non-heading, non-metadata lines
+          const lines = text.split('\n')
+            .map((l: string) => l.trim())
+            .filter((l: string) => l && !l.startsWith('#') && !l.startsWith('!') && l.length > 15)
+            .slice(0, 3)
           const rect = anchor.getBoundingClientRect()
           setLinkPreview({
             href,
-            title: anchor.textContent || href,
-            excerpt: lines.join(' ').slice(0, 160),
+            title: previewTitle,
+            excerpt: lines.join(' ').slice(0, 200),
             coords: { top: rect.bottom + 6, left: rect.left },
           })
         } catch { /* ignore */ }
@@ -4785,6 +4911,46 @@ export const Editor: React.FC<EditorProps> = ({
           >
             <Minus size={12} />
           </button>
+
+          {/* Cell background color picker */}
+          <div
+            style={{
+              position: 'fixed',
+              top: `${activeTableRect.top - 38}px`,
+              left: `${activeTableRect.cellLeft + activeTableRect.cellWidth / 2 + 20}px`,
+              zIndex: 9999,
+            }}
+          >
+            <button
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setTableCellColorOpen(o => !o) }}
+              title="Cell background color"
+              className="bg-[#1e2330] hover:bg-violet-600 border border-slate-700 hover:border-violet-500 text-slate-400 hover:text-white rounded-lg px-1.5 h-6 shadow-2xl transition cursor-pointer flex items-center gap-1 text-[9px] font-bold"
+            >
+              <Palette size={10} /> Color
+            </button>
+            {tableCellColorOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onMouseDown={() => setTableCellColorOpen(false)} />
+                <div className="absolute top-7 left-0 z-20 bg-[#161b22] border border-slate-700 rounded-xl shadow-2xl p-2 flex flex-wrap gap-1.5 w-48">
+                  {CELL_COLORS.map((c) => (
+                    <button
+                      key={c.value}
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        editor.chain().focus().updateAttributes('tableCell', { backgroundColor: c.value || null }).run()
+                        editor.chain().focus().updateAttributes('tableHeader', { backgroundColor: c.value || null }).run()
+                        setTableCellColorOpen(false)
+                      }}
+                      title={c.label}
+                      className="w-6 h-6 rounded border border-slate-700 hover:border-violet-400 transition cursor-pointer"
+                      style={{ background: c.value || 'rgba(255,255,255,0.03)' }}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         </>
       )}
     </div>
