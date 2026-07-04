@@ -1022,3 +1022,61 @@ body {
   border-color: var(--border-1);
   box-shadow: inset 0 0 20px rgba(6,182,212,0.04);
 }
+
+/* ══════════════════════════════════════════════════════
+   EDITOR ENHANCEMENTS
+══════════════════════════════════════════════════════ */
+
+/* Striped table rows */
+.ProseMirror table tbody tr:nth-child(even) td {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* Drag handle */
+.bf-drag-handle {
+  position: fixed;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  cursor: grab;
+  z-index: 50;
+  padding: 2px 4px;
+  border-radius: 4px;
+  color: #64748b;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.bf-drag-handle:hover {
+  opacity: 1 !important;
+  background: rgba(148, 163, 184, 0.08);
+  color: #94a3b8;
+}
+.bf-drag-handle::before {
+  content: '⠿';
+  font-size: 14px;
+  line-height: 1;
+}
+
+/* Image caption */
+.image-caption-wrapper figcaption input {
+  display: block;
+  width: 100%;
+  text-align: center;
+  font-size: 0.75rem;
+  color: #64748b;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid transparent;
+  outline: none;
+  padding-bottom: 2px;
+  margin-top: 6px;
+  transition: border-color 0.15s, color 0.15s;
+}
+.image-caption-wrapper figcaption input:focus {
+  border-bottom-color: rgba(100, 116, 139, 0.4);
+  color: #cbd5e1;
+}
+.image-caption-wrapper figcaption input::placeholder {
+  color: #334155;
+}

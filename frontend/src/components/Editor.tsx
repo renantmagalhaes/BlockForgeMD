@@ -3,6 +3,7 @@ import EmojiPicker, { Theme } from 'emoji-picker-react'
 import { useEditor, EditorContent, NodeViewWrapper, NodeViewContent, ReactNodeViewRenderer, isNodeSelection } from '@tiptap/react'
 import { Node, mergeAttributes } from '@tiptap/core'
 import UnderlineExtension from '@tiptap/extension-underline'
+import { DragHandle } from '@tiptap/extension-drag-handle'
 import { Excalidraw } from '@excalidraw/excalidraw'
 import StarterKit from '@tiptap/starter-kit'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
@@ -41,6 +42,7 @@ import {
   Code2,
   FilePlus,
   CheckSquare,
+  BookOpen,
   Undo,
   Redo,
   Save,
@@ -188,6 +190,11 @@ turndownService.addRule('bookmark', {
 turndownService.addRule('underline', {
   filter: ['u'],
   replacement: (content) => `<u>${content}</u>`,
+})
+
+turndownService.addRule('tocBlock', {
+  filter: (node) => node.nodeName.toLowerCase() === 'toc-block',
+  replacement: () => '\n<toc-block></toc-block>\n',
 })
 
 // Custom rule for callout nodes in Turndown
@@ -1547,6 +1554,7 @@ const getCommandIcon = (id: string, active: boolean) => {
     case 'code': return <Code2 size={s} className={cls} />
     case 'subpage': return <FilePlus size={s} className={cls} />
     case 'embed': return <MonitorPlay size={s} className={cls} />
+    case 'toc': return <BookOpen size={s} className={cls} />
     case 'callout': return <span className="text-sm leading-none select-none">🎨</span>
     case 'callout-note': return <span className="text-sm leading-none select-none">📝</span>
     case 'callout-tip': return <span className="text-sm leading-none select-none">💡</span>
@@ -1557,24 +1565,130 @@ const getCommandIcon = (id: string, active: boolean) => {
   }
 }
 
+// Module-level ref so the image caption component (defined at module level) can
+// trigger the image editor that lives inside the component.
+const _imageClickRef = { current: (_src: string) => {} }
+
+// ── TocBlock node ──────────────────────────────────────────────────
+const TocBlockComponent = (props: any) => {
+  const ed = props.editor
+  const [headings, setHeadings] = useState<{ level: number; text: string; pos: number }[]>([])
+
+  useEffect(() => {
+    if (!ed) return
+    const update = () => {
+      const hs: { level: number; text: string; pos: number }[] = []
+      ed.state.doc.descendants((node: any, pos: number) => {
+        if (node.type.name === 'heading') hs.push({ level: node.attrs.level, text: node.textContent, pos })
+      })
+      setHeadings(hs)
+    }
+    update()
+    ed.on('update', update)
+    return () => ed.off('update', update)
+  }, [ed])
+
+  const jump = (pos: number) => {
+    if (!ed) return
+    ed.commands.setTextSelection(pos + 1)
+    ed.view.focus()
+    const dom = ed.view.nodeDOM(pos)
+    if (dom instanceof HTMLElement) dom.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  return (
+    <NodeViewWrapper className="my-4">
+      <div contentEditable={false} className="bf-toc-block border border-slate-700/60 rounded-xl p-4 bg-[#161b22]/60 select-none">
+        <div className="flex items-center gap-2 mb-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+          <BookOpen size={11} className="text-violet-400" />
+          Table of Contents
+        </div>
+        {headings.length === 0 ? (
+          <p className="text-xs text-slate-500 italic">No headings found in this document.</p>
+        ) : (
+          <ul className="space-y-1">
+            {headings.map((h, i) => (
+              <li key={i} style={{ paddingLeft: `${(h.level - 1) * 14}px` }}>
+                <button
+                  onClick={() => jump(h.pos)}
+                  className="text-xs text-slate-300 hover:text-violet-400 hover:underline transition text-left w-full truncate leading-relaxed"
+                >
+                  {h.level > 1 && <span className="text-slate-600 mr-1">{'–'.repeat(h.level - 1)}</span>}
+                  {h.text}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </NodeViewWrapper>
+  )
+}
+
+const TocBlockNode = Node.create({
+  name: 'tocBlock',
+  group: 'block',
+  atom: true,
+  parseHTML() { return [{ tag: 'toc-block' }] },
+  renderHTML({ HTMLAttributes }) {
+    return ['toc-block', mergeAttributes(HTMLAttributes), '‌']
+  },
+  addNodeView() { return ReactNodeViewRenderer(TocBlockComponent) },
+})
+
+// ── ImageWithCaption node ──────────────────────────────────────────
+const ImageCaptionComponent = (props: any) => {
+  const { src, alt, title } = props.node.attrs
+  return (
+    <NodeViewWrapper className="image-caption-wrapper my-4">
+      <figure contentEditable={false}>
+        <img
+          src={src}
+          alt={alt || ''}
+          className="max-w-full rounded-xl border border-slate-800 shadow-lg w-full cursor-pointer"
+          onClick={() => _imageClickRef.current(src)}
+          draggable={false}
+        />
+        <figcaption>
+          <input
+            type="text"
+            value={title || ''}
+            onChange={(e) => props.updateAttributes({ title: e.target.value })}
+            placeholder="Add a caption…"
+            onMouseDown={(e) => e.stopPropagation()}
+            className="w-full bg-transparent text-center text-xs text-slate-500 placeholder-slate-600 focus:text-slate-300 outline-none border-b border-transparent focus:border-slate-700/60 pb-0.5 mt-2 transition-colors"
+          />
+        </figcaption>
+      </figure>
+    </NodeViewWrapper>
+  )
+}
+
+const ImageWithCaption = Image.extend({
+  addNodeView() {
+    return ReactNodeViewRenderer(ImageCaptionComponent)
+  },
+})
+
 const COMMANDS = [
-  { id: 'h1', label: 'Heading 1', desc: 'Large section header', search: 'h1 heading1 large text' },
-  { id: 'h2', label: 'Heading 2', desc: 'Medium section header', search: 'h2 heading2 medium text' },
-  { id: 'h3', label: 'Heading 3', desc: 'Small section header', search: 'h3 heading3 small text' },
-  { id: 'bullet', label: 'Bullet List', desc: 'Simple bulleted list', search: 'bullet list unordered' },
-  { id: 'number', label: 'Numbered List', desc: 'Ordered numbered list', search: 'number list ordered' },
-  { id: 'task', label: 'Task List', desc: 'Checkbox checklist', search: 'task todo checklist check' },
-  { id: 'quote', label: 'Blockquote', desc: 'Indented block quote', search: 'quote blockquote indent' },
-  { id: 'callout', label: 'Custom Callout', desc: 'Fully customizable callout box', search: 'callout note custom box' },
-  { id: 'callout-note', label: 'Note Callout', desc: 'Callout styled as a Note', search: 'callout note box preset' },
-  { id: 'callout-tip', label: 'Tip Callout', desc: 'Callout styled as a Tip', search: 'callout tip box preset' },
-  { id: 'callout-warning', label: 'Warning Callout', desc: 'Callout styled as a Warning', search: 'callout warning box preset' },
-  { id: 'callout-danger', label: 'Danger Callout', desc: 'Callout styled as a Danger', search: 'callout danger box preset' },
-  { id: 'callout-bug', label: 'Bug Callout', desc: 'Callout styled as a Bug', search: 'callout bug box preset' },
-  { id: 'table', label: 'Table Grid', desc: 'Insert a 2x2 grid table', search: 'table grid columns cell' },
-  { id: 'code', label: 'Code Block', desc: 'Monospace fenced code block', search: 'code block script pre' },
-  { id: 'subpage', label: 'Sub-page', desc: 'Create a sub-page inside this page', search: 'subpage sub page child nested' },
-  { id: 'embed', label: 'Embed Link / Canvas / Mind Map', desc: 'Embed a website, canvas, or mind map', search: 'embed iframe link website canvas drawio mindmap mind map brain' },
+  { id: 'h1',            label: 'Heading 1',                  desc: 'Large section header',            search: 'h1 heading1 large text',                          shortcut: '# '    },
+  { id: 'h2',            label: 'Heading 2',                  desc: 'Medium section header',           search: 'h2 heading2 medium text',                         shortcut: '## '   },
+  { id: 'h3',            label: 'Heading 3',                  desc: 'Small section header',            search: 'h3 heading3 small text',                          shortcut: '### '  },
+  { id: 'bullet',        label: 'Bullet List',                desc: 'Simple bulleted list',            search: 'bullet list unordered',                           shortcut: '- '    },
+  { id: 'number',        label: 'Numbered List',              desc: 'Ordered numbered list',           search: 'number list ordered',                             shortcut: '1. '   },
+  { id: 'task',          label: 'Task List',                  desc: 'Checkbox checklist',              search: 'task todo checklist check',                       shortcut: '[] '   },
+  { id: 'quote',         label: 'Blockquote',                 desc: 'Indented block quote',            search: 'quote blockquote indent',                         shortcut: '> '    },
+  { id: 'code',          label: 'Code Block',                 desc: 'Monospace fenced code block',     search: 'code block script pre',                           shortcut: '``` '  },
+  { id: 'table',         label: 'Table Grid',                 desc: 'Insert a 2x2 grid table',         search: 'table grid columns cell',                         shortcut: undefined },
+  { id: 'toc',           label: 'Table of Contents',          desc: 'Live auto-updating heading index',search: 'toc table contents outline headings index',       shortcut: undefined },
+  { id: 'callout',       label: 'Custom Callout',             desc: 'Fully customizable callout box',  search: 'callout note custom box',                         shortcut: undefined },
+  { id: 'callout-note',  label: 'Note Callout',               desc: 'Callout styled as a Note',        search: 'callout note box preset',                         shortcut: undefined },
+  { id: 'callout-tip',   label: 'Tip Callout',                desc: 'Callout styled as a Tip',         search: 'callout tip box preset',                          shortcut: undefined },
+  { id: 'callout-warning',label: 'Warning Callout',           desc: 'Callout styled as a Warning',     search: 'callout warning box preset',                      shortcut: undefined },
+  { id: 'callout-danger',label: 'Danger Callout',             desc: 'Callout styled as a Danger',      search: 'callout danger box preset',                       shortcut: undefined },
+  { id: 'callout-bug',   label: 'Bug Callout',                desc: 'Callout styled as a Bug',         search: 'callout bug box preset',                          shortcut: undefined },
+  { id: 'subpage',       label: 'Sub-page',                   desc: 'Create a sub-page inside this page', search: 'subpage sub page child nested',               shortcut: undefined },
+  { id: 'embed',         label: 'Embed Link / Canvas / Mind Map', desc: 'Embed a website, canvas, or mind map', search: 'embed iframe link website canvas drawio mindmap mind map brain', shortcut: undefined },
 ]
 
 export const Editor: React.FC<EditorProps> = ({
@@ -1627,6 +1741,28 @@ export const Editor: React.FC<EditorProps> = ({
   // Bubble menu state (floating formatting bar on text selection)
   const [bubbleVisible, setBubbleVisible] = useState(false)
   const [bubbleCoords, setBubbleCoords] = useState({ top: 0, left: 0 })
+
+  // Word count + reading time
+  const [wordCount, setWordCount] = useState(0)
+
+  // TOC sidebar
+  const [tocOpen, setTocOpen] = useState(false)
+  const [tocHeadings, setTocHeadings] = useState<{ level: number; text: string; pos: number }[]>([])
+
+  // Font size control
+  const [editorFontSize, setEditorFontSize] = useState<'sm' | 'base' | 'lg'>('base')
+
+  // Drag handle block menu
+  const dragHandleEl = useRef<HTMLDivElement>(document.createElement('div'))
+  const dragNodeRef = useRef<{ node: any; editor: any; pos: number } | null>(null)
+  const [blockMenu, setBlockMenu] = useState<{ open: boolean; coords: { top: number; left: number }; pos: number } | null>(null)
+
+  // Right-click context menu
+  const [contextMenu, setContextMenu] = useState<{ open: boolean; coords: { top: number; left: number }; pos: number } | null>(null)
+
+  // Link hover preview
+  const [linkPreview, setLinkPreview] = useState<{ href: string; title: string; excerpt: string; coords: { top: number; left: number } } | null>(null)
+  const linkPreviewTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Image Viewer & Editor state
   const [editingImageSrc, setEditingImageSrc] = useState<string | null>(null)
@@ -1854,6 +1990,7 @@ export const Editor: React.FC<EditorProps> = ({
       // Normalize <mark style="background:"> → background-color for Highlight extension
       .replace(/<mark style="background:\s*([^"]+)">/gi, '<mark style="background-color: $1">')
       .replace(/<p>\s*(<bookmark[^>]*>.*?<\/bookmark>)\s*<\/p>/gi, '$1')
+      .replace(/<p>\s*(<toc-block[^>]*>.*?<\/toc-block>)\s*<\/p>/gi, '$1')
       .replace(/<p>\s*(<drawio[^>]*>.*?<\/drawio>)\s*<\/p>/gi, '$1')
       .replace(/<p>\s*(<excalidraw[^>]*>.*?<\/excalidraw>)\s*<\/p>/gi, '$1')
       .replace(/<p>\s*(<mindmap[^>]*>.*?<\/mindmap>)\s*<\/p>/gi, '$1')
@@ -1896,10 +2033,11 @@ export const Editor: React.FC<EditorProps> = ({
           class: 'mention-link text-violet-400 font-semibold underline hover:text-violet-300 cursor-pointer',
         },
       }),
-      Image.configure({
-        HTMLAttributes: {
-          class: 'max-w-full rounded-xl border border-slate-800 shadow-lg my-4',
-        },
+      ImageWithCaption,
+      TocBlockNode,
+      DragHandle.configure({
+        render: () => dragHandleEl.current,
+        onNodeChange: (data: any) => { dragNodeRef.current = data },
       }),
       TaskList,
       TaskItem.configure({
@@ -2366,6 +2504,131 @@ export const Editor: React.FC<EditorProps> = ({
       editor.off('focus', cancelHide)
       if (blurTimer) clearTimeout(blurTimer)
     }
+  }, [editor])
+
+  // Wire image click callback into module-level ref so ImageWithCaption node view can call it
+  useEffect(() => {
+    _imageClickRef.current = setEditingImageSrc
+  }, [])
+
+  // Word count
+  useEffect(() => {
+    if (!editor) return
+    const update = () => {
+      const text = editor.state.doc.textContent
+      setWordCount(text.trim() ? text.trim().split(/\s+/).length : 0)
+    }
+    update()
+    editor.on('update', update)
+    return () => { editor.off('update', update) }
+  }, [editor])
+
+  // TOC sidebar headings (live)
+  useEffect(() => {
+    if (!editor) return
+    const update = () => {
+      const hs: { level: number; text: string; pos: number }[] = []
+      editor.state.doc.descendants((node: any, pos: number) => {
+        if (node.type.name === 'heading') hs.push({ level: node.attrs.level, text: node.textContent, pos })
+      })
+      setTocHeadings(hs)
+    }
+    update()
+    editor.on('update', update)
+    return () => { editor.off('update', update) }
+  }, [editor])
+
+  // Drag handle DOM setup
+  useEffect(() => {
+    const el = dragHandleEl.current
+    el.className = 'bf-drag-handle'
+    document.body.appendChild(el)
+    el.addEventListener('click', () => {
+      const data = dragNodeRef.current
+      if (!data || !data.editor) return
+      const domEl = data.editor.view.nodeDOM(data.pos)
+      if (domEl instanceof HTMLElement) {
+        const rect = domEl.getBoundingClientRect()
+        setBlockMenu({ open: true, coords: { top: rect.top, left: rect.left - 8 }, pos: data.pos })
+      }
+    })
+    return () => { el.remove() }
+  }, [])
+
+  // Close block menu and context menu on outside click / Escape
+  useEffect(() => {
+    if (!blockMenu?.open && !contextMenu?.open) return
+    const close = (e: MouseEvent) => {
+      const t = e.target as Element
+      if (!t.closest?.('[data-block-menu]') && !t.closest?.('[data-context-menu]')) {
+        setBlockMenu(null)
+        setContextMenu(null)
+      }
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setBlockMenu(null); setContextMenu(null) }
+    }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [blockMenu?.open, contextMenu?.open])
+
+  // Link preview: hover over internal [[page]] links
+  useEffect(() => {
+    const editorEl = document.querySelector('.ProseMirror')
+    if (!editorEl || !editor) return
+    const onOver = (e: Event) => {
+      const target = (e as MouseEvent).target as HTMLElement
+      const anchor = target.closest?.('a') as HTMLAnchorElement | null
+      if (!anchor) { clearPreview(); return }
+      const href = anchor.getAttribute('href')
+      if (!href || href.startsWith('http://') || href.startsWith('https://')) { clearPreview(); return }
+      if (linkPreviewTimer.current) clearTimeout(linkPreviewTimer.current)
+      linkPreviewTimer.current = setTimeout(async () => {
+        try {
+          const res = await fetch(`${API_BASE}/api/file?path=${encodeURIComponent(href)}`)
+          if (!res.ok) return
+          const data = await res.json()
+          const text: string = data.content || ''
+          const lines = text.split('\n').filter((l: string) => l.trim() && !l.startsWith('#')).slice(0, 3)
+          const rect = anchor.getBoundingClientRect()
+          setLinkPreview({
+            href,
+            title: anchor.textContent || href,
+            excerpt: lines.join(' ').slice(0, 160),
+            coords: { top: rect.bottom + 6, left: rect.left },
+          })
+        } catch { /* ignore */ }
+      }, 400)
+    }
+    const clearPreview = () => {
+      if (linkPreviewTimer.current) clearTimeout(linkPreviewTimer.current)
+      setLinkPreview(null)
+    }
+    editorEl.addEventListener('mouseover', onOver)
+    editorEl.addEventListener('mouseout', clearPreview)
+    return () => {
+      editorEl.removeEventListener('mouseover', onOver)
+      editorEl.removeEventListener('mouseout', clearPreview)
+    }
+  }, [editor])
+
+  // Right-click context menu on editor
+  useEffect(() => {
+    const editorEl = document.querySelector('.ProseMirror')
+    if (!editorEl || !editor) return
+    const onContextMenu = (e: Event) => {
+      const me = e as MouseEvent
+      me.preventDefault()
+      const coords = editor.view.posAtCoords({ left: me.clientX, top: me.clientY })
+      const pos = coords?.pos ?? 0
+      setContextMenu({ open: true, coords: { top: me.clientY, left: me.clientX }, pos })
+    }
+    editorEl.addEventListener('contextmenu', onContextMenu)
+    return () => { editorEl.removeEventListener('contextmenu', onContextMenu) }
   }, [editor])
 
   // Track initial content updates (switching files or external non-focused updates)
@@ -2903,6 +3166,9 @@ export const Editor: React.FC<EditorProps> = ({
       case 'table':
         editor.chain().focus().insertTable({ rows: 2, cols: 2, withHeaderRow: true }).run()
         break
+      case 'toc':
+        editor.chain().focus().insertContent({ type: 'tocBlock' }).run()
+        break
       case 'code':
         editor.chain().focus().insertContent('<pre><code>\n// Code here\n</code></pre>').run()
         break
@@ -3293,6 +3559,38 @@ export const Editor: React.FC<EditorProps> = ({
                 </span>
               </button>
             )}
+
+            {/* Word count + reading time */}
+            <span className="text-[10px] text-slate-500 select-none whitespace-nowrap hidden sm:block" title="Word count / reading time">
+              {wordCount} words · {Math.max(1, Math.ceil(wordCount / 200))} min read
+            </span>
+
+            {/* Font size S/M/L */}
+            <div className="flex items-center gap-0.5 bg-slate-800/60 rounded-lg p-0.5">
+              {(['sm', 'base', 'lg'] as const).map((sz) => (
+                <button
+                  key={sz}
+                  onClick={() => setEditorFontSize(sz)}
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider transition ${
+                    editorFontSize === sz ? 'bg-violet-600/30 text-violet-400' : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                  title={sz === 'sm' ? 'Small text' : sz === 'base' ? 'Normal text' : 'Large text'}
+                >
+                  {sz === 'sm' ? 'S' : sz === 'base' ? 'M' : 'L'}
+                </button>
+              ))}
+            </div>
+
+            {/* TOC toggle */}
+            <button
+              onClick={() => setTocOpen(!tocOpen)}
+              className={`p-2 rounded-lg hover:bg-slate-800 transition cursor-pointer ${
+                tocOpen ? 'bg-violet-600/20 text-violet-400 border border-violet-500/30' : 'text-slate-400'
+              }`}
+              title="Table of Contents"
+            >
+              <BookOpen size={16} />
+            </button>
 
             <button
               onClick={() => setHistoryOpen(!historyOpen)}
@@ -3735,11 +4033,56 @@ export const Editor: React.FC<EditorProps> = ({
           )}
 
           {/* Document Content Block */}
-          <div className={`flex-1 transition-all duration-300 ${getWidthClass()}`}>
+          <div className={`flex-1 transition-all duration-300 ${getWidthClass()} ${
+            editorFontSize === 'sm' ? 'text-sm' : editorFontSize === 'lg' ? 'text-lg' : 'text-base'
+          }`}>
             <EditorContent editor={editor} />
           </div>
         </div>
       </div>
+
+      {/* TOC Sidebar Drawer */}
+      {tocOpen && (
+        <div className="w-60 border-l border-slate-800 bg-[#161b22]/70 backdrop-blur-md flex flex-col shrink-0 select-none animate-in slide-in-from-right duration-250">
+          <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-[#161b22]">
+            <div className="flex items-center gap-2">
+              <BookOpen size={14} className="text-violet-400" />
+              <h3 className="font-bold text-sm text-slate-200">Contents</h3>
+            </div>
+            <button
+              onClick={() => setTocOpen(false)}
+              className="p-1 hover:bg-slate-800 rounded text-slate-500 hover:text-slate-300 transition cursor-pointer"
+            >
+              <X size={14} />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-3 no-scrollbar">
+            {tocHeadings.length === 0 ? (
+              <p className="text-xs text-slate-500 italic py-4 text-center">No headings found.</p>
+            ) : (
+              <ul className="space-y-0.5">
+                {tocHeadings.map((h, i) => (
+                  <li key={i} style={{ paddingLeft: `${(h.level - 1) * 12}px` }}>
+                    <button
+                      onClick={() => {
+                        if (!editor) return
+                        editor.commands.setTextSelection(h.pos + 1)
+                        editor.view.focus()
+                        const dom = editor.view.nodeDOM(h.pos)
+                        if (dom instanceof HTMLElement) dom.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                      }}
+                      className="text-xs text-slate-400 hover:text-violet-400 hover:underline transition text-left w-full truncate leading-relaxed py-0.5"
+                    >
+                      {h.level > 1 && <span className="text-slate-600 mr-1">{'–'.repeat(h.level - 1)}</span>}
+                      {h.text}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Version History Sidebar Drawer */}
       {historyOpen && (
@@ -3872,6 +4215,97 @@ export const Editor: React.FC<EditorProps> = ({
         </div>
       )}
 
+      {/* Block menu (drag handle click) */}
+      {blockMenu?.open && editor && (
+        <div
+          data-block-menu
+          style={{ position: 'fixed', top: `${blockMenu.coords.top}px`, left: `${blockMenu.coords.left - 160}px`, zIndex: 9999 }}
+          className="w-40 bg-[#161b22] border border-slate-700/80 rounded-xl shadow-2xl p-1.5 flex flex-col space-y-0.5 select-none animate-in fade-in zoom-in-95 duration-100"
+        >
+          <button
+            onClick={() => {
+              editor.chain().focus().deleteRange({ from: blockMenu.pos, to: blockMenu.pos + (editor.state.doc.nodeAt(blockMenu.pos)?.nodeSize ?? 1) }).run()
+              setBlockMenu(null)
+            }}
+            className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-red-400 hover:bg-red-500/10 transition cursor-pointer"
+          >
+            <Trash2 size={12} /> Delete block
+          </button>
+          <button
+            onClick={() => {
+              const node = editor.state.doc.nodeAt(blockMenu.pos)
+              if (node) {
+                const nodeJSON = node.toJSON()
+                editor.chain().focus().insertContentAt(blockMenu.pos + (node.nodeSize ?? 1), nodeJSON).run()
+              }
+              setBlockMenu(null)
+            }}
+            className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-slate-300 hover:bg-slate-700/60 transition cursor-pointer"
+          >
+            <Copy size={12} /> Duplicate
+          </button>
+        </div>
+      )}
+
+      {/* Right-click context menu */}
+      {contextMenu?.open && editor && (
+        <div
+          data-context-menu
+          style={{ position: 'fixed', top: `${contextMenu.coords.top}px`, left: `${contextMenu.coords.left}px`, zIndex: 9999 }}
+          className="w-44 bg-[#161b22] border border-slate-700/80 rounded-xl shadow-2xl p-1.5 flex flex-col space-y-0.5 select-none animate-in fade-in zoom-in-95 duration-100"
+        >
+          <button
+            onClick={() => {
+              editor.chain().focus().setTextSelection(contextMenu.pos).run()
+              document.execCommand('copy')
+              setContextMenu(null)
+            }}
+            className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-slate-300 hover:bg-slate-700/60 transition cursor-pointer"
+          >
+            <Copy size={12} /> Copy
+          </button>
+          <button
+            onClick={() => {
+              const html = editor.getHTML()
+              const md = turndownService.turndown(html)
+              navigator.clipboard.writeText(md)
+              setContextMenu(null)
+            }}
+            className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-slate-300 hover:bg-slate-700/60 transition cursor-pointer"
+          >
+            <FileText size={12} /> Copy as Markdown
+          </button>
+          <div className="w-full h-px bg-slate-800 my-0.5" />
+          <button
+            onClick={() => {
+              const node = editor.state.doc.nodeAt(contextMenu.pos)
+              if (node) {
+                editor.chain().focus().deleteRange({ from: contextMenu.pos, to: contextMenu.pos + node.nodeSize }).run()
+              }
+              setContextMenu(null)
+            }}
+            className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-red-400 hover:bg-red-500/10 transition cursor-pointer"
+          >
+            <Trash2 size={12} /> Delete block
+          </button>
+        </div>
+      )}
+
+      {/* Internal link hover preview */}
+      {linkPreview && (
+        <div
+          style={{ position: 'fixed', top: `${linkPreview.coords.top}px`, left: `${linkPreview.coords.left}px`, zIndex: 9999 }}
+          className="w-64 bg-[#161b22] border border-slate-700/80 rounded-xl shadow-2xl p-3 pointer-events-none animate-in fade-in zoom-in-95 duration-100"
+        >
+          <div className="text-xs font-semibold text-slate-200 mb-1 truncate">{linkPreview.title}</div>
+          {linkPreview.excerpt ? (
+            <p className="text-[10px] text-slate-500 leading-relaxed line-clamp-3">{linkPreview.excerpt}</p>
+          ) : (
+            <p className="text-[10px] text-slate-600 italic">No content preview available.</p>
+          )}
+        </div>
+      )}
+
       {/* Floating Slash Command Popup Menu */}
       {commandActive && filteredList.length > 0 && (
         <div
@@ -3900,8 +4334,13 @@ export const Editor: React.FC<EditorProps> = ({
                 <div className="mt-0.5 shrink-0">
                   {getCommandIcon(cmd.id, isSelected)}
                 </div>
-                <div>
-                  <div className="font-semibold text-xs leading-none mb-0.5">{cmd.label}</div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-xs leading-none mb-0.5">{cmd.label}</span>
+                    {cmd.shortcut && (
+                      <span className="text-[9px] font-mono text-slate-600 bg-slate-800 px-1 py-0.5 rounded shrink-0">{cmd.shortcut}</span>
+                    )}
+                  </div>
                   <div className="text-[10px] text-slate-500 leading-tight">{cmd.desc}</div>
                 </div>
               </div>
