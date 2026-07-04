@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react'
 import EmojiPicker, { Theme } from 'emoji-picker-react'
-import { useEditor, EditorContent, NodeViewWrapper, NodeViewContent, ReactNodeViewRenderer } from '@tiptap/react'
+import { useEditor, EditorContent, NodeViewWrapper, NodeViewContent, ReactNodeViewRenderer, isNodeSelection } from '@tiptap/react'
 import { Node, mergeAttributes } from '@tiptap/core'
+import UnderlineExtension from '@tiptap/extension-underline'
 import { Excalidraw } from '@excalidraw/excalidraw'
 import StarterKit from '@tiptap/starter-kit'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
@@ -28,8 +29,17 @@ import 'mind-elixir/style.css'
 import {
   Bold,
   Italic,
+  Strikethrough,
+  Underline as UnderlineIcon,
+  Code,
   Heading1,
   Heading2,
+  Heading3,
+  List,
+  ListOrdered,
+  Quote,
+  Code2,
+  FilePlus,
   CheckSquare,
   Undo,
   Redo,
@@ -174,6 +184,12 @@ turndownService.addRule('bookmark', {
   }
 })
 
+// Markdown has no underline syntax; preserve as raw HTML so the round-trip is lossless.
+turndownService.addRule('underline', {
+  filter: ['u'],
+  replacement: (content) => `<u>${content}</u>`,
+})
+
 // Custom rule for callout nodes in Turndown
 turndownService.addRule('callout', {
   filter: (node) => node.nodeName.toLowerCase() === 'div' && (node as HTMLElement).getAttribute('data-callout') === 'true',
@@ -207,6 +223,8 @@ turndownService.addRule('highlight', {
 
 const TEXT_COLORS = [
   { label: 'Default', value: null },
+  { label: 'White', value: '#ffffff' },
+  { label: 'Black', value: '#000000' },
   { label: 'Red', value: '#ef4444' },
   { label: 'Orange', value: '#f97316' },
   { label: 'Amber', value: '#f59e0b' },
@@ -222,6 +240,8 @@ const TEXT_COLORS = [
 
 const BG_COLORS = [
   { label: 'None', value: null },
+  { label: 'White', value: 'rgba(255,255,255,0.12)' },
+  { label: 'Black', value: 'rgba(0,0,0,0.5)' },
   { label: 'Red', value: 'rgba(239,68,68,0.3)' },
   { label: 'Orange', value: 'rgba(249,115,22,0.3)' },
   { label: 'Amber', value: 'rgba(245,158,11,0.3)' },
@@ -1512,6 +1532,31 @@ interface HistoryVersion {
 
 const API_BASE = import.meta.env.DEV ? 'http://localhost:8080' : ''
 
+const getCommandIcon = (id: string, active: boolean) => {
+  const cls = active ? 'text-violet-400' : 'text-slate-400'
+  const s = 14
+  switch (id) {
+    case 'h1': return <Heading1 size={s} className={cls} />
+    case 'h2': return <Heading2 size={s} className={cls} />
+    case 'h3': return <Heading3 size={s} className={cls} />
+    case 'bullet': return <List size={s} className={cls} />
+    case 'number': return <ListOrdered size={s} className={cls} />
+    case 'task': return <CheckSquare size={s} className={cls} />
+    case 'quote': return <Quote size={s} className={cls} />
+    case 'table': return <Grid size={s} className={cls} />
+    case 'code': return <Code2 size={s} className={cls} />
+    case 'subpage': return <FilePlus size={s} className={cls} />
+    case 'embed': return <MonitorPlay size={s} className={cls} />
+    case 'callout': return <span className="text-sm leading-none select-none">🎨</span>
+    case 'callout-note': return <span className="text-sm leading-none select-none">📝</span>
+    case 'callout-tip': return <span className="text-sm leading-none select-none">💡</span>
+    case 'callout-warning': return <span className="text-sm leading-none select-none">⚠️</span>
+    case 'callout-danger': return <span className="text-sm leading-none select-none">🚨</span>
+    case 'callout-bug': return <span className="text-sm leading-none select-none">🐛</span>
+    default: return <Info size={s} className={cls} />
+  }
+}
+
 const COMMANDS = [
   { id: 'h1', label: 'Heading 1', desc: 'Large section header', search: 'h1 heading1 large text' },
   { id: 'h2', label: 'Heading 2', desc: 'Medium section header', search: 'h2 heading2 medium text' },
@@ -1520,12 +1565,12 @@ const COMMANDS = [
   { id: 'number', label: 'Numbered List', desc: 'Ordered numbered list', search: 'number list ordered' },
   { id: 'task', label: 'Task List', desc: 'Checkbox checklist', search: 'task todo checklist check' },
   { id: 'quote', label: 'Blockquote', desc: 'Indented block quote', search: 'quote blockquote indent' },
-  { id: 'callout', label: '🎨 Custom Callout', desc: 'Fully customizable callout box', search: 'callout note custom box' },
-  { id: 'callout-note', label: '📝 Note Callout', desc: 'Callout styled as a Note', search: 'callout note box preset' },
-  { id: 'callout-tip', label: '💡 Tip Callout', desc: 'Callout styled as a Tip', search: 'callout tip box preset' },
-  { id: 'callout-warning', label: '⚠️ Warning Callout', desc: 'Callout styled as a Warning', search: 'callout warning box preset' },
-  { id: 'callout-danger', label: '🚨 Danger Callout', desc: 'Callout styled as a Danger', search: 'callout danger box preset' },
-  { id: 'callout-bug', label: '🐛 Bug Callout', desc: 'Callout styled as a Bug', search: 'callout bug box preset' },
+  { id: 'callout', label: 'Custom Callout', desc: 'Fully customizable callout box', search: 'callout note custom box' },
+  { id: 'callout-note', label: 'Note Callout', desc: 'Callout styled as a Note', search: 'callout note box preset' },
+  { id: 'callout-tip', label: 'Tip Callout', desc: 'Callout styled as a Tip', search: 'callout tip box preset' },
+  { id: 'callout-warning', label: 'Warning Callout', desc: 'Callout styled as a Warning', search: 'callout warning box preset' },
+  { id: 'callout-danger', label: 'Danger Callout', desc: 'Callout styled as a Danger', search: 'callout danger box preset' },
+  { id: 'callout-bug', label: 'Bug Callout', desc: 'Callout styled as a Bug', search: 'callout bug box preset' },
   { id: 'table', label: 'Table Grid', desc: 'Insert a 2x2 grid table', search: 'table grid columns cell' },
   { id: 'code', label: 'Code Block', desc: 'Monospace fenced code block', search: 'code block script pre' },
   { id: 'subpage', label: 'Sub-page', desc: 'Create a sub-page inside this page', search: 'subpage sub page child nested' },
@@ -1578,6 +1623,10 @@ export const Editor: React.FC<EditorProps> = ({
   const attachmentInputRef = useRef<HTMLInputElement>(null)
   // Stable ref so the paste handler always calls the latest uploadAttachment
   const uploadAttachmentRef = useRef<(file: File) => Promise<void>>(async () => {})
+
+  // Bubble menu state (floating formatting bar on text selection)
+  const [bubbleVisible, setBubbleVisible] = useState(false)
+  const [bubbleCoords, setBubbleCoords] = useState({ top: 0, left: 0 })
 
   // Image Viewer & Editor state
   const [editingImageSrc, setEditingImageSrc] = useState<string | null>(null)
@@ -1884,6 +1933,7 @@ export const Editor: React.FC<EditorProps> = ({
       TextStyle,
       Color,
       Highlight.configure({ multicolor: true }),
+      UnderlineExtension,
     ],
     content: getHTMLFromMarkdown(initialContent),
     editorProps: {
@@ -2265,6 +2315,58 @@ export const Editor: React.FC<EditorProps> = ({
     }
   }, [editor])
 
+  // Bubble menu: show a floating toolbar above selected text
+  useEffect(() => {
+    if (!editor) return
+
+    let blurTimer: ReturnType<typeof setTimeout> | null = null
+
+    const updateBubble = () => {
+      if (blurTimer) clearTimeout(blurTimer)
+
+      const { empty } = editor.state.selection
+      if (empty || isNodeSelection(editor.state.selection) || editor.isActive('codeBlock') || editor.isActive('code')) {
+        setBubbleVisible(false)
+        return
+      }
+
+      try {
+        const domSel = window.getSelection()
+        if (!domSel || domSel.rangeCount === 0) { setBubbleVisible(false); return }
+        const rect = domSel.getRangeAt(0).getBoundingClientRect()
+        if (!rect.width && !rect.height) { setBubbleVisible(false); return }
+
+        const BUBBLE_W = 310
+        const BUBBLE_H = 44
+        const centerX = rect.left + rect.width / 2
+        const left = Math.max(8, Math.min(centerX - BUBBLE_W / 2, window.innerWidth - BUBBLE_W - 8))
+        const top = rect.top >= BUBBLE_H + 12 ? rect.top - BUBBLE_H - 8 : rect.bottom + 8
+
+        setBubbleCoords({ top, left })
+        setBubbleVisible(true)
+      } catch {
+        setBubbleVisible(false)
+      }
+    }
+
+    const hideBubble = () => {
+      blurTimer = setTimeout(() => setBubbleVisible(false), 180)
+    }
+    const cancelHide = () => { if (blurTimer) clearTimeout(blurTimer) }
+
+    editor.on('selectionUpdate', updateBubble)
+    editor.on('update', updateBubble)
+    editor.on('blur', hideBubble)
+    editor.on('focus', cancelHide)
+
+    return () => {
+      editor.off('selectionUpdate', updateBubble)
+      editor.off('update', updateBubble)
+      editor.off('blur', hideBubble)
+      editor.off('focus', cancelHide)
+      if (blurTimer) clearTimeout(blurTimer)
+    }
+  }, [editor])
 
   // Track initial content updates (switching files or external non-focused updates)
   useEffect(() => {
@@ -3000,10 +3102,29 @@ export const Editor: React.FC<EditorProps> = ({
               className={`p-2 rounded-lg hover:bg-slate-800 hover:text-white transition ${
                 editor.isActive('italic') ? 'bg-violet-600/20 text-violet-400 border border-violet-500/30' : 'text-slate-400'
               }`}
-              title="Italic"
+              title="Italic (Ctrl+I)"
             >
               <Italic size={16} />
             </button>
+            <button
+              onClick={() => editor.chain().focus().toggleUnderline().run()}
+              className={`p-2 rounded-lg hover:bg-slate-800 hover:text-white transition ${
+                editor.isActive('underline') ? 'bg-violet-600/20 text-violet-400 border border-violet-500/30' : 'text-slate-400'
+              }`}
+              title="Underline (Ctrl+U)"
+            >
+              <UnderlineIcon size={16} />
+            </button>
+            <button
+              onClick={() => editor.chain().focus().toggleStrike().run()}
+              className={`p-2 rounded-lg hover:bg-slate-800 hover:text-white transition ${
+                editor.isActive('strike') ? 'bg-violet-600/20 text-violet-400 border border-violet-500/30' : 'text-slate-400'
+              }`}
+              title="Strikethrough"
+            >
+              <Strikethrough size={16} />
+            </button>
+            <div className="w-px h-4 bg-slate-700 mx-0.5" />
 
             {/* Text color */}
             <div className="relative" data-color-picker>
@@ -3034,7 +3155,7 @@ export const Editor: React.FC<EditorProps> = ({
                         >
                           {c.value === null && <span className="text-slate-400 text-[9px]">✕</span>}
                         </span>
-                        <span className="text-sm" style={{ color: c.value ?? '#e2e8f0' }}>{c.label}</span>
+                        <span className="text-sm" style={{ color: c.value === '#000000' ? '#94a3b8' : (c.value ?? '#e2e8f0') }}>{c.label}</span>
                         {active && <span className="ml-auto text-violet-400 text-xs">✓</span>}
                       </button>
                     )
@@ -3701,6 +3822,56 @@ export const Editor: React.FC<EditorProps> = ({
         </div>
       )}
 
+      {/* Bubble Formatting Menu — appears above selected text */}
+      {bubbleVisible && (
+        <div
+          style={{ position: 'fixed', top: `${bubbleCoords.top}px`, left: `${bubbleCoords.left}px`, zIndex: 9999 }}
+          className="flex items-center gap-0.5 px-1.5 py-1 bg-[#1a2236] border border-slate-700/80 rounded-xl shadow-2xl select-none animate-in fade-in zoom-in-95 duration-100"
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          {[
+            { mark: 'bold',       icon: <Bold size={13} />,           title: 'Bold (Ctrl+B)',           action: () => editor.chain().focus().toggleBold().run() },
+            { mark: 'italic',     icon: <Italic size={13} />,         title: 'Italic (Ctrl+I)',         action: () => editor.chain().focus().toggleItalic().run() },
+            { mark: 'underline',  icon: <UnderlineIcon size={13} />,  title: 'Underline (Ctrl+U)',      action: () => editor.chain().focus().toggleUnderline().run() },
+            { mark: 'strike',     icon: <Strikethrough size={13} />,  title: 'Strikethrough',           action: () => editor.chain().focus().toggleStrike().run() },
+            { mark: 'code',       icon: <Code size={13} />,           title: 'Inline Code',             action: () => editor.chain().focus().toggleCode().run() },
+          ].map(({ mark, icon, title, action }) => (
+            <button
+              key={mark}
+              onClick={action}
+              title={title}
+              className={`p-1.5 rounded-lg transition ${
+                editor.isActive(mark)
+                  ? 'bg-violet-600/20 text-violet-400 border border-violet-500/30'
+                  : 'text-slate-300 hover:bg-slate-700/60 hover:text-white'
+              }`}
+            >
+              {icon}
+            </button>
+          ))}
+          <div className="w-px h-4 bg-slate-600/60 mx-0.5" />
+          <button
+            onClick={() => {
+              const attrs = editor.getAttributes('link')
+              if (attrs.href) {
+                editor.chain().focus().unsetLink().run()
+              } else {
+                const url = window.prompt('Enter URL:')
+                if (url) editor.chain().focus().setLink({ href: url }).run()
+              }
+            }}
+            title="Link"
+            className={`p-1.5 rounded-lg transition ${
+              editor.isActive('link')
+                ? 'bg-violet-600/20 text-violet-400 border border-violet-500/30'
+                : 'text-slate-300 hover:bg-slate-700/60 hover:text-white'
+            }`}
+          >
+            <Link2 size={13} />
+          </button>
+        </div>
+      )}
+
       {/* Floating Slash Command Popup Menu */}
       {commandActive && filteredList.length > 0 && (
         <div
@@ -3727,11 +3898,7 @@ export const Editor: React.FC<EditorProps> = ({
                 }`}
               >
                 <div className="mt-0.5 shrink-0">
-                  {cmd.id === 'table' ? (
-                    <Grid size={14} className={isSelected ? 'text-violet-400' : 'text-slate-400'} />
-                  ) : (
-                    <Info size={14} className={isSelected ? 'text-violet-400' : 'text-slate-400'} />
-                  )}
+                  {getCommandIcon(cmd.id, isSelected)}
                 </div>
                 <div>
                   <div className="font-semibold text-xs leading-none mb-0.5">{cmd.label}</div>
