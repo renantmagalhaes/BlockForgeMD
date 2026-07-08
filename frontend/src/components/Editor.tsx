@@ -4074,6 +4074,12 @@ export const Editor: React.FC<
   const saveTimeoutRef = useRef<
     any | null
   >(null);
+  // useEditor() has no deps array, so its onUpdate callback is captured once at
+  // mount and never refreshed — reading autosaveDelay through a ref (kept fresh
+  // every render below) instead of the prop directly avoids that stale closure.
+  const autosaveDelayRef = useRef(
+    autosaveDelay
+  );
 
   // Version history states
   const [historyOpen, setHistoryOpen] =
@@ -5197,6 +5203,9 @@ export const Editor: React.FC<
     emojiSelectedIndexRef.current =
       emojiSelectedIndex;
     emojiQueryRef.current = emojiQuery;
+
+    autosaveDelayRef.current =
+      autosaveDelay;
   });
 
   useEffect(() => {
@@ -6188,7 +6197,7 @@ export const Editor: React.FC<
       () => {
         executeAutoSave();
       },
-      autosaveDelay
+      autosaveDelayRef.current
     );
   };
 

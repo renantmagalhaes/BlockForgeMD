@@ -57,6 +57,7 @@ interface KanbanProps {
   onSaveCardViewMode?: (mode: 'modal' | 'sidebar' | 'fullscreen') => void
   initialPropertiesCollapsed?: boolean
   isMobile?: boolean
+  autosaveDelay?: number
 }
 
 const DEFAULT_PRIORITIES: PriorityDef[] = [
@@ -825,7 +826,8 @@ const CardDetailPanel: React.FC<{
   initialPropertiesCollapsed?: boolean
   closing?: boolean
   isMobile?: boolean
-}> = ({ task, viewMode, columns, allBoardTags, files, onClose, onSetMode, onUpdateFrontMatter, onDelete, onCardSaved, initialPropertiesCollapsed, closing, isMobile }) => {
+  autosaveDelay?: number
+}> = ({ task, viewMode, columns, allBoardTags, files, onClose, onSetMode, onUpdateFrontMatter, onDelete, onCardSaved, initialPropertiesCollapsed, closing, isMobile, autosaveDelay }) => {
   // Modal (80vw/80vh) and Sidebar (fixed 560px) modes don't fit a phone screen —
   // mobile always gets the fullscreen layout regardless of the saved preference.
   const effectiveViewMode: CardViewMode = isMobile ? 'fullscreen' : viewMode
@@ -1035,6 +1037,7 @@ const CardDetailPanel: React.FC<{
         files={files}
         onSelectFile={() => {}}
         initialPropertiesCollapsed={initialPropertiesCollapsed}
+        autosaveDelay={autosaveDelay}
       />
     </div>
   )
@@ -1113,6 +1116,7 @@ const Kanban: React.FC<KanbanProps> = ({
   onSaveCardViewMode,
   initialPropertiesCollapsed,
   isMobile,
+  autosaveDelay,
 }) => {
   const [newCardTitles, setNewCardTitles] = useState<Record<string, string>>({})
   const [editingColumn, setEditingColumn] = useState<string | null>(null)
@@ -2050,6 +2054,7 @@ const Kanban: React.FC<KanbanProps> = ({
             initialPropertiesCollapsed={initialPropertiesCollapsed}
             closing={closingCard}
             isMobile={isMobile}
+            autosaveDelay={autosaveDelay}
           />
         )
       })()}

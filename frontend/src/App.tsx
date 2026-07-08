@@ -2939,6 +2939,7 @@ const App: React.FC = () => {
                 onSaveCardViewMode={saveKanbanCardViewMode}
                 initialPropertiesCollapsed={propertiesCollapsed}
                 isMobile={isMobile}
+                autosaveDelay={autosaveDelay}
               />
             </motion.div>
           ) : selectedPath && activeFile ? (
