@@ -931,15 +931,22 @@ const CardDetailPanel: React.FC<{
   }, [onClose])
 
   const handleSave = async (content: string) => {
+    const path = task.path
     setIsSaving(true)
     try {
       const full = fmStr ? `---\n${fmStr}\n---\n\n${content}` : content
       await fetch(`${API_BASE}/api/file`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: task.path, content: full }),
+        body: JSON.stringify({ path, content: full }),
       })
-      setBody(content)
+      // Only apply the saved content to this panel's shared body state if the
+      // user is still on this same card — a save flushed on switching cards
+      // (or any save that simply resolves late) must not overwrite whatever
+      // card is open now with this one's content.
+      if (taskPathRef.current === path) {
+        setBody(content)
+      }
       onCardSaved?.()
     } catch (e) {
       console.error('Error saving card', e)
@@ -1025,6 +1032,7 @@ const CardDetailPanel: React.FC<{
   ) : (
     <div className={`flex-1 overflow-hidden transition-opacity duration-200 ease-in-out ${contentVisible ? 'opacity-100' : 'opacity-0'}`}>
       <Editor
+        key={task.path}
         filePath={task.path}
         initialContent={body!}
         onSave={handleSave}

@@ -1634,16 +1634,23 @@ const App: React.FC = () => {
 
   const handleSaveFile = async (content: string) => {
     if (!selectedPath) return
+    const path = selectedPath
     setIsSaving(true)
     const full = currentFrontMatterStr ? `---\n${currentFrontMatterStr}\n---\n\n${content}` : content
     try {
       const res = await fetch(`${API_BASE}/api/file`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: selectedPath, content: full }),
+        body: JSON.stringify({ path, content: full }),
       })
       if (!res.ok) throw new Error('Failed to save file')
-      setSelectedContent(content)
+      // Only apply the saved content to the shared editor state if the user is
+      // still on this same file — a save flushed on navigating away (or any
+      // save that simply resolves late) must not overwrite whatever file is
+      // open now with this one's content.
+      if (selectedPathRef.current === path) {
+        setSelectedContent(content)
+      }
       fetchFiles()
     } catch (e) {
       console.error('Error saving file', e)

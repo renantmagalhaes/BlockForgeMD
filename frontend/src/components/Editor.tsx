@@ -6208,6 +6208,11 @@ export const Editor: React.FC<
         clearTimeout(
           saveTimeoutRef.current
         );
+        // A debounced save was still pending when this page/card was navigated
+        // away from (or closed) — flush it immediately instead of silently
+        // dropping the edit. This instance is remounted per file (keyed by
+        // path), so onSave/executeAutoSave here still target the right file.
+        executeAutoSave();
       }
     };
   }, []);
