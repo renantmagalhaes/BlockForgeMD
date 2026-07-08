@@ -6,6 +6,7 @@ const API_BASE = import.meta.env.DEV ? 'http://localhost:8080' : ''
 interface GraphNode {
   id: string
   title: string
+  type?: 'file' | 'tag'
   x?: number
   y?: number
   fx?: number | null
@@ -75,11 +76,16 @@ export const GraphView: React.FC<GraphViewProps> = ({ workspace, onSelectFile, c
         target: nodeMap.get(resolveId(e.target))!,
       }))
 
+    const isTag = (d: GraphNode) => d.type === 'tag'
+    const baseRadius = (d: GraphNode) => isTag(d) ? 8 : (d.id === currentPath ? 9 : 6)
+    const baseFill = (d: GraphNode) => isTag(d) ? '#b45309' : (d.id === currentPath ? '#7c3aed' : '#4b5563')
+    const baseStroke = (d: GraphNode) => isTag(d) ? '#f59e0b' : (d.id === currentPath ? '#a78bfa' : '#6b7280')
+
     const sim = d3.forceSimulation<GraphNode>(nodes)
       .force('link', d3.forceLink<GraphNode, GraphEdge>(links).id(n => n.id).distance(80).strength(0.5))
       .force('charge', d3.forceManyBody().strength(-200))
       .force('center', d3.forceCenter(W / 2, H / 2))
-      .force('collision', d3.forceCollide(18))
+      .force('collision', d3.forceCollide(d => isTag(d as GraphNode) ? 24 : 18))
     simulationRef.current = sim
 
     const link = g.append('g')
@@ -107,26 +113,25 @@ export const GraphView: React.FC<GraphViewProps> = ({ workspace, onSelectFile, c
             d.fx = null; d.fy = null
           })
       )
-      .on('click', (_event, d) => onSelectFile(d.id))
+      .on('click', (_event, d) => { if (!isTag(d)) onSelectFile(d.id) })
 
     node.append('circle')
-      .attr('r', d => d.id === currentPath ? 9 : 6)
-      .attr('fill', d => d.id === currentPath ? '#7c3aed' : '#4b5563')
-      .attr('stroke', d => d.id === currentPath ? '#a78bfa' : '#6b7280')
+      .attr('r', baseRadius)
+      .attr('fill', baseFill)
+      .attr('stroke', baseStroke)
       .attr('stroke-width', 1.5)
-      .on('mouseover', function() {
-        d3.select(this).attr('fill', '#7c3aed').attr('r', 9)
+      .on('mouseover', function(_, d) {
+        d3.select(this).attr('fill', isTag(d) ? '#f59e0b' : '#7c3aed').attr('r', isTag(d) ? 11 : 9)
       })
       .on('mouseout', function(_, d) {
-        d3.select(this)
-          .attr('fill', d.id === currentPath ? '#7c3aed' : '#4b5563')
-          .attr('r', d.id === currentPath ? 9 : 6)
+        d3.select(this).attr('fill', baseFill(d)).attr('r', baseRadius(d))
       })
 
     node.append('text')
       .text(d => d.title.length > 20 ? d.title.slice(0, 20) + '…' : d.title)
       .attr('font-size', 10)
-      .attr('fill', '#94a3b8')
+      .attr('fill', d => isTag(d) ? '#fbbf24' : '#94a3b8')
+      .attr('font-weight', d => isTag(d) ? 600 : 400)
       .attr('dy', '1.8em')
       .attr('text-anchor', 'middle')
       .attr('pointer-events', 'none')
@@ -152,7 +157,11 @@ export const GraphView: React.FC<GraphViewProps> = ({ workspace, onSelectFile, c
     if (!svgRef.current || !search.trim()) return
     const q = search.toLowerCase()
     d3.select(svgRef.current).selectAll<SVGCircleElement, GraphNode>('circle')
-      .attr('fill', d => d.title.toLowerCase().includes(q) ? '#a78bfa' : (d.id === currentPath ? '#7c3aed' : '#4b5563'))
+      .attr('fill', d => {
+        if (d.title.toLowerCase().includes(q)) return '#a78bfa'
+        if (d.type === 'tag') return '#b45309'
+        return d.id === currentPath ? '#7c3aed' : '#4b5563'
+      })
   }, [search, currentPath])
 
   if (loading) return (

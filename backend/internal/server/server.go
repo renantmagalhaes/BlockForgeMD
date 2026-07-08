@@ -2458,6 +2458,7 @@ func (s *Server) handleGetGraph(w http.ResponseWriter, r *http.Request) {
 	type Node struct {
 		ID    string `json:"id"`
 		Title string `json:"title"`
+		Type  string `json:"type"`
 	}
 	type Edge struct {
 		Source string `json:"source"`
@@ -2474,6 +2475,7 @@ func (s *Server) handleGetGraph(w http.ResponseWriter, r *http.Request) {
 	}
 
 	nodeSet := map[string]string{} // id -> title
+	tagSet := map[string]bool{}    // tag name -> seen
 	var edges []Edge
 
 	_ = filepath.WalkDir(searchRoot, func(absPath string, d os.DirEntry, walkErr error) error {
@@ -2534,6 +2536,10 @@ func (s *Server) handleGetGraph(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		nodeSet[relPath] = title
+		for _, tag := range parser.ExtractTags(content) {
+			tagSet[tag] = true
+			edges = append(edges, Edge{Source: relPath, Target: "tag:" + tag})
+		}
 		sourceDir := filepath.Dir(filepath.FromSlash(relPath))
 		for _, m := range mdLinkRe.FindAllStringSubmatch(content, -1) {
 			raw := strings.TrimPrefix(filepath.ToSlash(m[2]), "/")
@@ -2587,9 +2593,12 @@ func (s *Server) handleGetGraph(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	nodes := make([]Node, 0, len(nodeSet))
+	nodes := make([]Node, 0, len(nodeSet)+len(tagSet))
 	for id, title := range nodeSet {
-		nodes = append(nodes, Node{ID: id, Title: title})
+		nodes = append(nodes, Node{ID: id, Title: title, Type: "file"})
+	}
+	for tag := range tagSet {
+		nodes = append(nodes, Node{ID: "tag:" + tag, Title: "#" + tag, Type: "tag"})
 	}
 
 	if nodes == nil {

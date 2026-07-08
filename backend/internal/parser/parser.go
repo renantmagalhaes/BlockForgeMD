@@ -187,6 +187,41 @@ func extractFrontMatter(lines []string) (fm []string, body []string, bodyStartId
 	return fm, body, fmEnd + 1
 }
 
+// ExtractTags reads the `tags` front-matter field out of a raw file's content
+// (YAML list or inline array) and returns a clean, deduplicated tag slice.
+func ExtractTags(content string) []string {
+	fmRaw, _, _ := extractFrontMatter(strings.Split(content, "\n"))
+	if len(fmRaw) == 0 {
+		return nil
+	}
+
+	var fm map[string]interface{}
+	if err := yaml.Unmarshal([]byte(strings.Join(fmRaw, "\n")), &fm); err != nil {
+		return nil
+	}
+
+	raw, ok := fm["tags"]
+	if !ok {
+		return nil
+	}
+	list, ok := raw.([]interface{})
+	if !ok {
+		return nil
+	}
+
+	seen := make(map[string]bool, len(list))
+	tags := make([]string, 0, len(list))
+	for _, v := range list {
+		t, ok := v.(string)
+		if !ok || t == "" || seen[t] {
+			continue
+		}
+		seen[t] = true
+		tags = append(tags, t)
+	}
+	return tags
+}
+
 // UpdateFrontMatterInFile reads a file, updates specific front matter keys, and writes it back.
 func UpdateFrontMatterInFile(rootPath, relPath string, updates map[string]interface{}) (string, error) {
 	fullPath := filepath.Join(rootPath, relPath)
