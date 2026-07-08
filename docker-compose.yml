@@ -9,7 +9,16 @@ services:
     volumes:
       # Map a folder named 'vault' in the current host directory to /workspace inside the container.
       # This is where all your flat Markdown files, Kanban tasks, and drawings will reside.
+      # If ./vault is a NAS / network share (NFS, SMB/CIFS, etc.), keep this mount as-is —
+      # but the cache-db volume below MUST stay on local disk (see note).
       - ./vault:/workspace
+      # SQLite's cache/index db (.blockforge/cache.db) is rebuilt from your Markdown files on
+      # every startup — it is not your data. SQLite's WAL mode requires file-locking and mmap
+      # guarantees that most network filesystems don't provide reliably, which causes
+      # "database is locked" errors when /workspace lives on a NAS. This named volume shadows
+      # just the .blockforge subfolder with local Docker storage so the cache never touches
+      # the network share, while your actual vault files above stay on the NAS.
+      - blockforge-cache:/workspace/.blockforge
     restart: unless-stopped
     # The entrypoint script runs as root, chowns /workspace to PUID:PGID,
     # then drops to that user before starting the app.
@@ -18,3 +27,6 @@ services:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
       - TZ=UTC
+
+volumes:
+  blockforge-cache:
