@@ -27,6 +27,7 @@ const docsHTML = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>BlockForgeMD · API Reference</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <style>
 :root{
   --bg:#0d1117;--surf:#161b22;--surf2:#1c2330;--border:#21262d;

@@ -1849,6 +1849,12 @@ const App: React.FC = () => {
 
   const activeFile = files.find((f) => f.path === selectedPath)
 
+  useEffect(() => {
+    document.title = activeFile?.title
+      ? `BlockForgeMD • ${activeFile.title}`
+      : 'BlockForgeMD'
+  }, [activeFile?.title])
+
   // Tags from sibling tasks in the same board folder — passed to Editor for autocomplete
   const boardTagsForEditor = React.useMemo(() => {
     if (!selectedPath) return []
