@@ -4080,6 +4080,16 @@ export const Editor: React.FC<
   const autosaveDelayRef = useRef(
     autosaveDelay
   );
+  // Same staleness trap applies to onSave/onTitleChange: executeAutoSave is
+  // only ever invoked from that same frozen onUpdate callback, so calling the
+  // props directly would keep using whatever onSave closure existed at mount
+  // time (e.g. App.tsx's handleSaveFile with the front matter string as it was
+  // when the file was first opened) — silently reverting any front-matter-only
+  // change (tags, status, cover, ...) made afterward on the very next autosave.
+  const onSaveRef = useRef(onSave);
+  const onTitleChangeRef = useRef(
+    onTitleChange
+  );
 
   // Version history states
   const [historyOpen, setHistoryOpen] =
@@ -5206,6 +5216,9 @@ export const Editor: React.FC<
 
     autosaveDelayRef.current =
       autosaveDelay;
+    onSaveRef.current = onSave;
+    onTitleChangeRef.current =
+      onTitleChange;
   });
 
   useEffect(() => {
@@ -6224,7 +6237,7 @@ export const Editor: React.FC<
     const markdown =
       turndownService.turndown(html);
     try {
-      await onSave(markdown);
+      await onSaveRef.current(markdown);
       lastSavedContentRef.current =
         markdown;
       setSaveStatus("saved");
@@ -6234,7 +6247,7 @@ export const Editor: React.FC<
       // (not during typing) to avoid a race between the save and the rename.
       // We detect both H1 and plain paragraph nodes so that users who cleared
       // the page and started typing still get their title synced.
-      if (onTitleChange && editor) {
+      if (onTitleChangeRef.current && editor) {
         const json = editor.getJSON();
         const firstNode =
           json.content?.[0];
@@ -6262,7 +6275,7 @@ export const Editor: React.FC<
           ) {
             lastSyncedTitleRef.current =
               firstLineText;
-            onTitleChange(
+            onTitleChangeRef.current(
               firstLineText
             );
           }

@@ -1862,24 +1862,20 @@ const App: React.FC = () => {
       : 'BlockForgeMD'
   }, [activeFile?.title])
 
-  // Tags from sibling tasks in the same board folder — passed to Editor for autocomplete
-  const boardTagsForEditor = React.useMemo(() => {
-    if (!selectedPath) return []
-    const slash = selectedPath.lastIndexOf('/')
-    const folder = slash === -1 ? '' : selectedPath.slice(0, slash + 1)
+  // Tags used anywhere in the current workspace — documents, boards, and
+  // tasks alike — so a tag added on a Kanban card is immediately suggested
+  // on documents and vice versa, instead of being scoped to sibling files.
+  const allWorkspaceTags = React.useMemo(() => {
+    const prefix = activeWorkspace ? activeWorkspace + '/' : ''
     const tagSet = new Set<string>()
     files.forEach(f => {
-      if (f.path === selectedPath) return
-      const fSlash = f.path.lastIndexOf('/')
-      const fFolder = fSlash === -1 ? '' : f.path.slice(0, fSlash + 1)
-      if (fFolder !== folder) return
-      if (!(f.type === 'task' || f.frontMatter?.status)) return
+      if (prefix && !f.path.startsWith(prefix)) return
       const raw = f.frontMatter?.tags
       if (!raw) return
       try { (JSON.parse(raw) as string[]).forEach(t => tagSet.add(t)) } catch { /* */ }
     })
     return Array.from(tagSet).sort()
-  }, [files, selectedPath])
+  }, [files, activeWorkspace])
 
   // ── Sidebar drag-and-drop state ──────────────────────────────────────────
   const [dragging, setDragging] = useState<{ path: string; type?: string } | null>(null)
@@ -2953,6 +2949,7 @@ const App: React.FC = () => {
                 initialPropertiesCollapsed={propertiesCollapsed}
                 isMobile={isMobile}
                 autosaveDelay={autosaveDelay}
+                activeWorkspace={activeWorkspace}
               />
             </motion.div>
           ) : selectedPath && activeFile ? (
@@ -2998,7 +2995,7 @@ const App: React.FC = () => {
                     onCreateSubPage={(parentPath, onCreated) => handleCreateFile('document', parentPath, onCreated, ['document'], 'Sub Page')}
                     onSelectFile={fetchFileContent}
                     files={files}
-                    boardTags={boardTagsForEditor}
+                    boardTags={allWorkspaceTags}
                     globalLayoutOverride={globalLayoutOverride}
                     globalColumnWidthOverride={globalColumnWidthOverride}
                     highlightSearchTerm={activeSearchHighlight}

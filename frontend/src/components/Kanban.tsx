@@ -58,6 +58,7 @@ interface KanbanProps {
   initialPropertiesCollapsed?: boolean
   isMobile?: boolean
   autosaveDelay?: number
+  activeWorkspace?: string
 }
 
 const DEFAULT_PRIORITIES: PriorityDef[] = [
@@ -1125,6 +1126,7 @@ const Kanban: React.FC<KanbanProps> = ({
   initialPropertiesCollapsed,
   isMobile,
   autosaveDelay,
+  activeWorkspace,
 }) => {
   const [newCardTitles, setNewCardTitles] = useState<Record<string, string>>({})
   const [editingColumn, setEditingColumn] = useState<string | null>(null)
@@ -1307,11 +1309,18 @@ const Kanban: React.FC<KanbanProps> = ({
     return folder === '' || folder === 'Tasks/'
   }), [files, boardFolder])
 
+  // Tags used anywhere in the workspace — not just this board's own cards —
+  // so a tag added on a document or another board is immediately suggested
+  // here too, and a tag added on this board is suggested everywhere else.
   const allBoardTags = useMemo(() => {
+    const prefix = activeWorkspace ? activeWorkspace + '/' : ''
     const s = new Set<string>()
-    tasks.forEach(t => parseTags(t.frontMatter?.tags).forEach(tag => s.add(tag)))
+    files.forEach(f => {
+      if (prefix && !f.path.startsWith(prefix)) return
+      parseTags(f.frontMatter?.tags).forEach(tag => s.add(tag))
+    })
     return Array.from(s).sort()
-  }, [tasks])
+  }, [files, activeWorkspace])
 
   const allBoardAssignees = useMemo(() => {
     const s = new Set<string>()
