@@ -1,0 +1,20 @@
+services:
+  blockforgemd:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: blockforgemd
+    ports:
+      - "8080:8080"
+    volumes:
+      # Map a folder named 'vault' in the current host directory to /workspace inside the container.
+      # This is where all your flat Markdown files, Kanban tasks, and drawings will reside.
+      - ./vault:/workspace
+    restart: unless-stopped
+    # The entrypoint script runs as root, chowns /workspace to PUID:PGID,
+    # then drops to that user before starting the app.
+    # Set PUID / PGID to match your host user (id -u / id -g) in a .env file.
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=UTC

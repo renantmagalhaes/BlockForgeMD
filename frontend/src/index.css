@@ -1,0 +1,1583 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300..800;1,14..32,300..700&family=Roboto:wght@300;400;500;600;700&family=Open+Sans:wght@300;400;500;600;700&family=Lato:wght@300;400;700;900&family=Poppins:wght@300;400;500;600;700&family=Nunito:wght@300;400;600;700;800&family=Source+Sans+3:wght@300;400;500;600;700&display=swap');
+
+/* ╔═══════════════════════════════════════════════════════════════╗
+   ║           BLOCKFORGEMD — DESIGN SYSTEM & THEME ENGINE        ║
+   ╚═══════════════════════════════════════════════════════════════╝ */
+
+/* ══════════════════════════════════════════════════════
+   THEME TOKENS
+   Applied via [data-theme="..."] on <html>
+══════════════════════════════════════════════════════ */
+
+/* ── Dark (true black) ──────────────────────────────── */
+:root {
+  /* Overridden at runtime (inline style on <html>) based on the app_font
+     setting — see App.tsx. Not theme-dependent, so it lives here once
+     rather than in the light-theme override block below. */
+  --font-ui: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  --bg-app:         #000000;
+  --bg-surface:     #0a0a0a;
+  --bg-elevated:    #111111;
+  --bg-input:       #0a0a0a;
+  --bg-hover:       rgba(255,255,255,0.05);
+  --bg-active:      rgba(255,255,255,0.06);
+
+  --border-0:       rgba(255,255,255,0.05);
+  --border-1:       rgba(255,255,255,0.08);
+  --border-2:       rgba(255,255,255,0.15);
+
+  --txt-1: #f8fafc;
+  --txt-2: #94a3b8;
+  --txt-3: #475569;
+  --txt-4: #334155;
+
+  --accent:         #6366f1;
+  --accent-faint:   rgba(99,102,241,0.1);
+  --accent-border:  rgba(99,102,241,0.35);
+
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.6);
+  --shadow-md: 0 4px 20px rgba(0,0,0,0.7);
+  --shadow-lg: 0 12px 48px rgba(0,0,0,0.8);
+
+  --glow-accent:  none;
+  --glow-card:    none;
+  --glow-active:  none;
+}
+
+
+/* ── Light ───────────────────────────────────────────── */
+[data-theme="light"] {
+  --bg-app:         #f8fafc;
+  --bg-surface:     #ffffff;
+  --bg-elevated:    #f1f5f9;
+  --bg-input:       #f8fafc;
+  --bg-hover:       rgba(0,0,0,0.04);
+  --bg-active:      rgba(99,102,241,0.08);
+
+  --border-0:       rgba(0,0,0,0.06);
+  --border-1:       rgba(0,0,0,0.09);
+  --border-2:       rgba(0,0,0,0.16);
+
+  --txt-1: #0f172a;
+  --txt-2: #334155;
+  --txt-3: #64748b;
+  --txt-4: #94a3b8;
+
+  --accent:         #6366f1;
+  --accent-faint:   rgba(99,102,241,0.08);
+  --accent-border:  rgba(99,102,241,0.3);
+
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.1),  0 2px 6px rgba(0,0,0,0.07);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.12), 0 4px 16px rgba(0,0,0,0.08);
+
+  --glow-accent: none;
+  --glow-card:   none;
+  --glow-active: none;
+}
+
+/* ══════════════════════════════════════════════════════
+   SQUIRCLE — Tighten all Tailwind rounded-* utilities
+   These sit outside @layer so they cascade above utilities.
+══════════════════════════════════════════════════════ */
+.rounded-sm  { border-radius: 2px; }
+.rounded     { border-radius: 3px; }
+.rounded-md  { border-radius: 4px; }
+.rounded-lg  { border-radius: 5px; }
+.rounded-xl  { border-radius: 6px; }
+.rounded-2xl { border-radius: 8px; }
+.rounded-3xl { border-radius: 10px; }
+/* rounded-full stays at 9999px — used for avatar/pill shapes */
+
+/* ══════════════════════════════════════════════════════
+   GLOBAL BASE
+══════════════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  font-family: var(--font-ui);
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  font-size: 13.5px;
+  line-height: 1.6;
+  background-color: var(--bg-app);
+  color: var(--txt-1);
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* ══════════════════════════════════════════════════════
+   SCROLLBARS
+══════════════════════════════════════════════════════ */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: var(--txt-3); }
+
+/* Kanban board's horizontal scroll is a primary way to reach columns that
+   don't fit the screen on desktop — give it a bit more presence than the
+   default thin scrollbar so it reads as a control, not incidental overflow. */
+.bf-kanban-board-scroll { scrollbar-width: auto; }
+.bf-kanban-board-scroll::-webkit-scrollbar { height: 10px; }
+.bf-kanban-board-scroll::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 99px; }
+.bf-kanban-board-scroll::-webkit-scrollbar-thumb:hover { background: var(--txt-3); }
+
+/* ══════════════════════════════════════════════════════
+   STRUCTURAL LAYOUT — THEME-AWARE OVERRIDES
+   These cascade from semantic "bf-*" classes added in JSX.
+══════════════════════════════════════════════════════ */
+
+/* Root app wrapper */
+.bf-root {
+  background-color: var(--bg-app);
+  color: var(--txt-1);
+  /* The root div also carries Tailwind's `font-sans` utility class, which
+     sets font-family to Tailwind's own fixed default stack — completely
+     overriding the --font-ui variable (and the App Font setting) for nearly
+     everything on screen, since almost all UI text inherits from here.
+     This rule is unlayered custom CSS vs. Tailwind's layered utility, so it
+     wins regardless of class order (same trick used for the 100dvh fix). */
+  font-family: var(--font-ui);
+  /* Tailwind's h-screen (100vh) overshoots the real visible area on mobile
+     browsers with a toolbar that shows/hides or docks at the bottom (100vh
+     is sized as if it were hidden) — pushing content like a Kanban column's
+     footer below the reachable viewport. 100dvh tracks the actual visible
+     viewport; the 100vh line above stays as a fallback for older browsers. */
+  height: 100dvh;
+}
+
+/* ── Sidebar ──────────────────────────────────────── */
+/* --sidebar-bg-override / --sidebar-text-override are set as inline
+   styles on <html> by the Settings > Sidebar Colors picker (App.tsx).
+   They are intentionally never declared in this stylesheet — an
+   undeclared custom property lets var()'s fallback kick in, whereas
+   declaring it empty here would NOT fall back (CSS quirk). */
+.bf-sidebar {
+  background-color: var(--sidebar-bg-override, var(--bg-surface)) !important;
+  border-right: 1px solid var(--border-1) !important;
+  color: var(--sidebar-text-override, var(--txt-2));
+}
+
+.bf-sidebar-header {
+  border-bottom: 1px solid var(--border-0) !important;
+}
+
+.bf-logo {
+  box-shadow: var(--glow-accent), 0 4px 12px rgba(99,102,241,0.35);
+}
+[data-theme="light"] .bf-logo {
+  box-shadow: 0 2px 8px rgba(99,102,241,0.2), 0 1px 4px rgba(0,0,0,0.1);
+}
+
+/* Workspace picker */
+.bf-ws-trigger {
+  background-color: var(--bg-input) !important;
+  border-color: var(--border-1) !important;
+  color: var(--txt-2) !important;
+}
+.bf-ws-trigger:hover {
+  border-color: var(--accent-border) !important;
+}
+
+/* Workspace dropdown */
+.bf-ws-dropdown {
+  background-color: var(--bg-elevated) !important;
+  border-color: var(--border-2) !important;
+  box-shadow: var(--shadow-md) !important;
+}
+
+/* Search trigger */
+.bf-search-trigger {
+  background-color: var(--bg-input) !important;
+  border-color: var(--border-1) !important;
+  color: var(--sidebar-text-override, var(--txt-3)) !important;
+}
+.bf-search-trigger:hover {
+  border-color: var(--border-2) !important;
+  color: var(--sidebar-text-override, var(--txt-2)) !important;
+}
+
+/* Sidebar tree items */
+.bf-tree-item {
+  color: var(--sidebar-text-override, var(--txt-2));
+  transition: background-color 0.12s, color 0.12s;
+}
+.bf-tree-item:hover {
+  background-color: var(--bg-hover) !important;
+  color: var(--sidebar-text-override, var(--txt-1)) !important;
+}
+.bf-tree-item.selected {
+  background-color: var(--bg-active) !important;
+  color: var(--accent) !important;
+}
+
+/* Section headings in sidebar */
+.bf-section-label {
+  color: var(--sidebar-text-override, var(--txt-3)) !important;
+}
+.bf-section-label button { color: var(--sidebar-text-override, var(--txt-3)) !important; }
+.bf-section-label button:hover { color: var(--sidebar-text-override, var(--txt-1)) !important; }
+
+/* Sidebar footer */
+.bf-sidebar-footer {
+  background-color: var(--sidebar-bg-override, var(--bg-surface)) !important;
+  border-top: 1px solid var(--border-0) !important;
+}
+.bf-quick-create-btn {
+  background-color: var(--bg-hover) !important;
+  color: var(--sidebar-text-override, var(--txt-2)) !important;
+  border: 1px solid var(--border-1) !important;
+  border-radius: var(--radius-md) !important;
+  transition: background-color 0.12s, color 0.12s, border-color 0.12s !important;
+}
+.bf-quick-create-btn:hover {
+  background-color: var(--bg-active) !important;
+  border-color: var(--accent-border) !important;
+  color: var(--sidebar-text-override, var(--txt-1)) !important;
+}
+
+/* ── Main canvas ──────────────────────────────────── */
+.bf-main {
+  background-color: var(--bg-app) !important;
+}
+
+/* ══════════════════════════════════════════════════════
+   SIDEBAR COLOR PICKER — live preview widget
+   Used inside Settings > Editor Layout > Sidebar Colors.
+   Colors are applied via inline style props from App.tsx
+   state, so this mirrors the real .bf-sidebar look without
+   needing the actual sidebar to be visible behind the modal.
+══════════════════════════════════════════════════════ */
+.bf-sidebar-preview {
+  border: 1px solid var(--border-1);
+  border-radius: 8px;
+  overflow: hidden;
+  transition: background-color 0.15s, color 0.15s;
+}
+.bf-sidebar-preview-header {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.6;
+  padding: 10px 12px 4px;
+}
+.bf-sidebar-preview-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.bf-sidebar-preview-item svg { opacity: 0.75; flex-shrink: 0; }
+.bf-sidebar-preview-item.active {
+  background-color: var(--bg-active);
+  color: var(--accent) !important;
+}
+
+/* ── Theme switcher pill ──────────────────────────── */
+.bf-theme-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid var(--border-1);
+  background: var(--bg-input);
+  color: var(--txt-3);
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.bf-theme-btn:hover {
+  border-color: var(--accent-border);
+  color: var(--accent);
+  background: var(--accent-faint);
+}
+.bf-theme-btn.active {
+  border-color: var(--accent-border);
+  color: var(--accent);
+  background: var(--accent-faint);
+  box-shadow: var(--glow-active);
+}
+
+/* ══════════════════════════════════════════════════════
+   EDITOR CONTAINER
+══════════════════════════════════════════════════════ */
+.editor-root-container {
+  background-color: var(--bg-surface) !important;
+  border-color: var(--border-1) !important;
+  box-shadow: var(--shadow-lg) !important;
+}
+/* Editor toolbar */
+.bf-toolbar {
+  background-color: var(--bg-surface) !important;
+  border-bottom-color: var(--border-0) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* Properties panel */
+.bf-properties {
+  background-color: color-mix(in srgb, var(--bg-elevated) 60%, transparent) !important;
+  border-color: var(--border-0) !important;
+}
+/* ── bf-properties form fields ───────────────────────
+   All inputs/selects inside the Page Attributes panel
+   must use CSS-variable backgrounds regardless of
+   the Tailwind utility that was inlined on them.       */
+.bf-properties select,
+.bf-properties input:not([type="file"]):not([type="checkbox"]) {
+  background-color: var(--bg-input) !important;
+  border-color: var(--border-1) !important;
+  color: var(--txt-1) !important;
+}
+.bf-properties select:hover,
+.bf-properties input:not([type="file"]):not([type="checkbox"]):hover {
+  background-color: var(--bg-elevated) !important;
+  border-color: var(--border-2) !important;
+}
+.bf-properties select:focus,
+.bf-properties input:not([type="file"]):not([type="checkbox"]):focus {
+  border-color: var(--accent-border) !important;
+  background-color: var(--bg-elevated) !important;
+}
+.bf-properties input::placeholder { color: var(--txt-4) !important; }
+
+/* Field labels + section text in bf-properties */
+.bf-properties .text-slate-500 { color: var(--txt-3) !important; }
+.bf-properties .text-slate-400 { color: var(--txt-3) !important; }
+.bf-properties .text-slate-300 { color: var(--txt-2) !important; }
+.bf-properties .text-slate-200 { color: var(--txt-1) !important; }
+.bf-properties .text-slate-600 { color: var(--txt-4) !important; }
+
+/* Dividers inside bf-properties */
+.bf-properties [class*="border-t"],
+.bf-properties [class*="border-slate"] { border-color: var(--border-1) !important; }
+
+/* Buttons inside bf-properties (add-tag, add-file, etc.) */
+.bf-properties button.bg-slate-800,
+.bf-properties button[class*="bg-slate-8"] {
+  background-color: var(--bg-elevated) !important;
+  color: var(--txt-3) !important;
+  border-color: var(--border-1) !important;
+}
+.bf-properties button[class*="bg-slate-8"]:hover,
+.bf-properties button[class*="hover:bg-slate-7"]:hover {
+  background-color: var(--bg-hover) !important;
+  color: var(--txt-2) !important;
+}
+
+/* Attachment file list items */
+.bf-properties [class*="bg-slate-9"] {
+  background-color: var(--bg-input) !important;
+}
+
+/* Tag autocomplete dropdown inside bf-properties (the absolute-positioned div) */
+.bf-properties div[class*="absolute"] {
+  background-color: var(--bg-elevated) !important;
+  border-color: var(--border-2) !important;
+  box-shadow: var(--shadow-md) !important;
+}
+.bf-properties div[class*="absolute"] button {
+  color: var(--txt-2) !important;
+}
+.bf-properties div[class*="absolute"] button:hover {
+  background-color: var(--bg-hover) !important;
+  color: var(--txt-1) !important;
+}
+
+/* ── Editor toolbar buttons ──────────────────────────
+   .bf-toolbar already gets the right background.
+   The individual buttons use text-slate-* and
+   hover:bg-slate-800 which need adapting.             */
+.bf-toolbar button { color: var(--txt-3); }
+.bf-toolbar button:hover {
+  background-color: var(--bg-hover) !important;
+  color: var(--txt-1) !important;
+}
+.bf-toolbar [class*="text-slate-400"] { color: var(--txt-3) !important; }
+.bf-toolbar [class*="text-slate-300"] { color: var(--txt-2) !important; }
+.bf-toolbar [class*="text-slate-500"] { color: var(--txt-3) !important; }
+.bf-toolbar [class*="border-slate"]   { border-color: var(--border-1) !important; }
+
+/* Active toolbar buttons (bold/italic in active state keep their violet) */
+.bf-toolbar [class*="bg-violet-6"] { background-color: var(--accent-faint) !important; }
+.bf-toolbar [class*="text-violet-4"] { color: var(--accent) !important; }
+.bf-toolbar [class*="border-violet-5"] { border-color: var(--accent-border) !important; }
+
+/* Color/highlight picker dropdowns in the toolbar
+   (the absolute-positioned div that has data-color-picker) */
+[data-color-picker][class*="absolute"] {
+  background-color: var(--bg-elevated) !important;
+  border-color: var(--border-2) !important;
+  box-shadow: var(--shadow-md) !important;
+}
+[data-color-picker][class*="absolute"] button:hover {
+  background-color: var(--bg-hover) !important;
+}
+[data-color-picker][class*="absolute"] div { color: var(--txt-3) !important; }
+
+/* Toolbar divider */
+.bf-toolbar [class*="border-slate-7"] { border-color: var(--border-1) !important; }
+.bf-toolbar [class*="bg-slate-8"]     { background-color: var(--bg-elevated) !important; }
+
+/* ── Breadcrumb / path bar (bf-main children) ──────── */
+.bf-main .text-slate-400 { color: var(--txt-3) !important; }
+.bf-main .text-slate-500 { color: var(--txt-3) !important; }
+.bf-main .text-slate-300 { color: var(--txt-2) !important; }
+/* "Home" breadcrumb link hover */
+.bf-main button[class*="hover:text-violet"]:hover { color: var(--accent) !important; }
+
+/* ── Sidebar text colors (section labels, icons, tree item utilities) */
+.bf-sidebar .text-slate-500 { color: var(--sidebar-text-override, var(--txt-3)) !important; }
+.bf-sidebar .text-slate-400 { color: var(--sidebar-text-override, var(--txt-3)) !important; }
+.bf-sidebar .text-slate-300 { color: var(--sidebar-text-override, var(--txt-2)) !important; }
+.bf-sidebar .text-slate-600 { color: var(--sidebar-text-override, var(--txt-4)) !important; }
+.bf-sidebar [class*="border-slate"] { border-color: var(--border-1) !important; }
+
+/* Sidebar utility icon buttons (small +/edit/move buttons near tree items) */
+.bf-sidebar button[class*="hover:bg-slate"]:hover {
+  background-color: var(--bg-hover) !important;
+}
+.bf-sidebar button[class*="hover:text-white"]:hover  { color: var(--sidebar-text-override, var(--txt-1))  !important; }
+.bf-sidebar button[class*="hover:text-slate"]:hover  { color: var(--sidebar-text-override, var(--txt-1))  !important; }
+
+/* Workspace dropdown items */
+.bf-ws-dropdown button[class*="text-slate"] { color: var(--txt-2) !important; }
+.bf-ws-dropdown button[class*="hover:bg-slate"]:hover { background-color: var(--bg-hover) !important; }
+.bf-ws-dropdown [class*="border-slate"] { border-color: var(--border-1) !important; }
+.bf-ws-dropdown button[class*="hover:text-violet"]:hover { color: var(--accent) !important; }
+
+/* Ctrl+K badge and other bg-[#161b22] inline elements in sidebar */
+.bf-sidebar span[class*="bg-\["] {
+  background-color: var(--bg-elevated) !important;
+  border-color: var(--border-1) !important;
+  color: var(--txt-3) !important;
+}
+.bf-sidebar div[class*="bg-\[#161"]:not(.bf-sidebar):not(.bf-sidebar-header) {
+  background-color: var(--bg-elevated) !important;
+}
+
+/* ══════════════════════════════════════════════════════
+   POPOVERS & DROPDOWNS (bf-popover class)
+══════════════════════════════════════════════════════ */
+.bf-popover {
+  background-color: var(--bg-elevated) !important;
+  border-color: var(--border-2) !important;
+  box-shadow: var(--shadow-md) !important;
+}
+
+/* ══════════════════════════════════════════════════════
+   PROSEMIRROR — PREMIUM DOCUMENT TYPOGRAPHY
+══════════════════════════════════════════════════════ */
+.ProseMirror {
+  outline: none;
+  min-height: 250px;
+  padding: 1rem 0;
+  font-family: 'Georgia', 'Palatino Linotype', 'Book Antiqua', Palatino, serif;
+  font-size: 15.5px;
+  line-height: 1.8;
+  color: var(--txt-1);
+}
+
+/* Placeholder */
+.ProseMirror.is-editor-empty p:first-child::before,
+.ProseMirror p.is-empty:first-of-type::before {
+  content: attr(data-placeholder);
+  color: var(--txt-3);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  font-style: italic;
+  font-family: var(--font-ui);
+  font-size: 0.92em;
+}
+
+.ProseMirror p {
+  margin-bottom: 1rem;
+  line-height: 1.8;
+  color: var(--txt-1);
+}
+
+.ProseMirror h1 {
+  font-family: var(--font-ui);
+  font-size: 2rem;
+  font-weight: 800;
+  margin-top: 2rem;
+  margin-bottom: 1rem;
+  color: var(--txt-1);
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+
+.ProseMirror h2 {
+  font-family: var(--font-ui);
+  font-size: 1.35rem;
+  font-weight: 700;
+  margin-top: 1.75rem;
+  margin-bottom: 0.7rem;
+  color: var(--txt-1);
+  letter-spacing: -0.018em;
+  line-height: 1.25;
+}
+
+.ProseMirror h3 {
+  font-family: var(--font-ui);
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+  color: var(--txt-1);
+  letter-spacing: -0.01em;
+}
+
+.ProseMirror ul {
+  list-style-type: disc;
+  padding-left: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.ProseMirror ol {
+  list-style-type: decimal;
+  padding-left: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.ProseMirror li { line-height: 1.7; }
+
+.ProseMirror blockquote {
+  border-left: 3px solid var(--accent);
+  padding-left: 1.25rem;
+  font-style: italic;
+  color: var(--txt-3);
+  margin: 1.25rem 0 1.25rem 0;
+  opacity: 0.9;
+}
+
+.ProseMirror code {
+  background-color: var(--bg-elevated);
+  color: #f87171;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82em;
+  border: 1px solid var(--border-1);
+}
+
+.ProseMirror pre {
+  background-color: var(--bg-elevated);
+  padding: 1.25rem 1.5rem;
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  margin-bottom: 1.25rem;
+  border: 1px solid var(--border-1);
+  box-shadow: var(--shadow-sm);
+}
+
+.ProseMirror pre code {
+  background-color: transparent;
+  color: #e6edf3;
+  padding: 0;
+  border-radius: 0;
+  border: none;
+  font-size: 0.88em;
+}
+
+/* Task lists */
+.ProseMirror ul[data-type="taskList"] { list-style: none; padding: 0; }
+.ProseMirror ul[data-type="taskList"] li { display: flex; align-items: flex-start; margin-bottom: 0.3rem; }
+.ProseMirror ul[data-type="taskList"] li > label { margin-right: 0.5rem; user-select: none; display: flex; align-items: center; height: 1.5rem; }
+.ProseMirror ul[data-type="taskList"] li > div { flex: 1; }
+.ProseMirror ul[data-type="taskList"] input[type="checkbox"] { cursor: pointer; width: 1.1em; height: 1.1em; accent-color: var(--accent); }
+.ProseMirror ul[data-type="taskList"] li[data-checked="true"] > div { text-decoration: line-through; color: var(--txt-3); }
+
+/* Tables */
+.ProseMirror table { border-collapse: collapse; table-layout: fixed; width: 100%; margin: 0; overflow: hidden; }
+.ProseMirror td, .ProseMirror th {
+  min-width: 1em;
+  border: 1px solid var(--border-1) !important;
+  padding: 9px 14px !important;
+  vertical-align: top;
+  box-sizing: border-box;
+  position: relative;
+}
+.ProseMirror th {
+  font-family: var(--font-ui);
+  font-weight: 600;
+  font-size: 0.82em;
+  text-align: left;
+  background-color: var(--bg-elevated);
+  color: var(--txt-2);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.ProseMirror .selectedCell:after {
+  z-index: 2;
+  position: absolute;
+  content: "";
+  left: 0; right: 0; top: 0; bottom: 0;
+  background: var(--accent-faint);
+  pointer-events: none;
+}
+
+
+
+/* ── Light theme — ProseMirror ─────────────────────── */
+[data-theme="light"] .ProseMirror code {
+  color: #7c3aed;
+  background: rgba(124,58,237,0.06);
+  border-color: rgba(124,58,237,0.15);
+}
+[data-theme="light"] .ProseMirror pre { background-color: #f1f5f9; border-color: rgba(0,0,0,0.08); }
+[data-theme="light"] .ProseMirror pre code { color: #1e293b; background: transparent; border: none; }
+
+/* Column layout on light bg */
+[data-theme="light"] .ProseMirror [data-column] {
+  border-color: rgba(0,0,0,0.1);
+  background: rgba(0,0,0,0.02);
+}
+[data-theme="light"] .ProseMirror [data-columns]:focus-within [data-column] {
+  border-color: rgba(99,102,241,0.35);
+  background: rgba(99,102,241,0.04);
+}
+
+/* Striped table rows on light bg */
+[data-theme="light"] .ProseMirror table tbody tr:nth-child(even) td {
+  background: rgba(0,0,0,0.025);
+}
+
+/* KaTeX on light bg */
+[data-theme="light"] .ProseMirror .tiptap-mathematics-render .katex,
+[data-theme="light"] .ProseMirror .tiptap-mathematics-render .katex * {
+  color: #0f172a !important;
+  fill: #0f172a !important;
+  stroke: #0f172a !important;
+  -webkit-text-fill-color: #0f172a !important;
+}
+
+/* Syntax highlighting — GitHub Light palette (readable on #f1f5f9) */
+[data-theme="light"] .hljs-string,
+[data-theme="light"] .hljs-regexp,
+[data-theme="light"] .hljs-addition,
+[data-theme="light"] .hljs-attribute,
+[data-theme="light"] .hljs-meta .hljs-string { color: #22863a; }
+[data-theme="light"] .hljs-built_in,
+[data-theme="light"] .hljs-class .hljs-title,
+[data-theme="light"] .hljs-title.class_ { color: #b08800; }
+[data-theme="light"] .hljs-symbol,
+[data-theme="light"] .hljs-bullet,
+[data-theme="light"] .hljs-link,
+[data-theme="light"] .hljs-meta .hljs-keyword,
+[data-theme="light"] .hljs-selector-pseudo { color: #0366d6; }
+[data-theme="light"] .hljs-comment,
+[data-theme="light"] .hljs-quote { color: #6a737d; }
+
+/* ══════════════════════════════════════════════════════
+   MISC COMPONENTS
+══════════════════════════════════════════════════════ */
+
+/* Excalidraw */
+.excalidraw-container { height: 100%; width: 100%; }
+.excalidraw { --theme-filter: invert(93%) hue-rotate(180deg); }
+
+/* Callout type switcher hover */
+.group:hover .callout-type-btn { opacity: 1 !important; }
+
+/* ══════════════════════════════════════════════════════
+   SYNTAX HIGHLIGHTING (One Dark palette)
+══════════════════════════════════════════════════════ */
+.hljs-comment, .hljs-quote { color: #5c6370; font-style: italic; }
+.hljs-doctag, .hljs-keyword, .hljs-formula { color: #c678dd; }
+.hljs-section, .hljs-name, .hljs-selector-tag, .hljs-deletion, .hljs-subst { color: #e06c75; }
+.hljs-literal { color: #56b6c2; }
+.hljs-string, .hljs-regexp, .hljs-addition, .hljs-attribute, .hljs-meta .hljs-string { color: #98c379; }
+.hljs-built_in, .hljs-class .hljs-title, .hljs-title.class_ { color: #e5c07b; }
+.hljs-attr, .hljs-variable, .hljs-template-variable, .hljs-type,
+.hljs-selector-class, .hljs-selector-id, .hljs-selector-attr,
+.hljs-number, .hljs-meta { color: #d19a66; }
+.hljs-symbol, .hljs-bullet, .hljs-link, .hljs-meta .hljs-keyword, .hljs-selector-pseudo { color: #61afef; }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: bold; }
+
+/* ══════════════════════════════════════════════════════
+   PRINT
+══════════════════════════════════════════════════════ */
+@media print {
+  .no-print { display: none !important; }
+  @page { margin: 1.5cm !important; }
+
+  html, body, #root, .app-layout-root, .main-content-pane, .editor-root-container {
+    background: white !important; color: black !important; display: block !important;
+    height: auto !important; min-height: 0 !important; overflow: visible !important;
+    margin: 0 !important; padding: 0 !important; width: 100% !important;
+    border: none !important; box-shadow: none !important;
+  }
+
+  .print-document-container {
+    background: white !important; color: black !important; padding: 0 !important;
+    margin: 0 !important; width: 100% !important; max-width: 100% !important;
+    box-sizing: border-box !important; display: block !important;
+    height: auto !important; min-height: 0 !important; overflow: visible !important;
+  }
+
+  .print-document-container input[type="text"] {
+    font-size: 16pt !important; font-weight: 700 !important; margin-bottom: 0.3cm !important;
+    padding: 0 !important; border: none !important; background: transparent !important;
+    color: black !important; width: 100% !important;
+  }
+
+  .print-document-container h1 { font-size: 14pt !important; margin-top: 0.5cm !important; margin-bottom: 0.25cm !important; font-weight: 700 !important; }
+  .print-document-container h2 { font-size: 12pt !important; margin-top: 0.4cm !important; margin-bottom: 0.2cm !important; font-weight: 600 !important; }
+  .print-document-container h3 { font-size: 11pt !important; margin-top: 0.3cm !important; margin-bottom: 0.15cm !important; font-weight: 600 !important; }
+
+  .print-document-container p,
+  .print-document-container li,
+  .print-document-container span,
+  .print-document-container div {
+    font-size: 9.5pt !important;
+    line-height: 1.4 !important;
+    color: #222 !important;
+  }
+
+  .print-document-container p { margin-bottom: 0.2cm !important; }
+  .ProseMirror { min-height: 0 !important; height: auto !important; }
+
+  .print-document-container pre,
+  .print-document-container code,
+  .print-document-container select,
+  .print-document-container input {
+    background: #f6f8fa !important;
+    color: #24292f !important;
+    border-color: #d0d7de !important;
+  }
+
+  .ProseMirror table, .code-block-container, .callout-box { page-break-inside: avoid; }
+}
+
+/* ══════════════════════════════════════════════════════
+   MIND MAP CANVAS
+══════════════════════════════════════════════════════ */
+.bf-mindmap-canvas {
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border-1);
+}
+[data-theme="light"] .bf-mindmap-canvas {
+  background-color: #e8eef4;
+}
+/* ══════════════════════════════════════════════════════
+   KANBAN BOARD — THEME-AWARE OVERRIDES
+══════════════════════════════════════════════════════ */
+
+/* Board wrapper */
+.bf-kanban {
+  background-color: var(--bg-app);
+  border: 1px solid var(--border-1);
+  box-shadow: var(--shadow-lg);
+  color: var(--txt-1);
+}
+
+/* Board heading and hints */
+.bf-kanban-title { color: var(--txt-1); }
+.bf-kanban-hint  { color: var(--txt-3); }
+
+/* ── Column ─────────────────────────────────────────── */
+.bf-kanban-col {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-1);
+  box-shadow: var(--shadow-sm);
+}
+.bf-kanban-col[data-over="true"] {
+  border-color: var(--accent-border);
+  box-shadow: var(--shadow-md), 0 0 0 1px var(--accent-border);
+}
+
+.bf-kanban-col-header {
+  background-color: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-0);
+}
+.bf-kanban-col-footer {
+  border-top: 1px solid var(--border-0);
+}
+
+.bf-kanban-col-count     { color: var(--txt-3); }
+.bf-kanban-col-edit-icon { color: var(--txt-4); }
+
+/* ── Card ───────────────────────────────────────────── */
+.bf-kanban-card {
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border-1);
+  box-shadow: var(--shadow-sm);
+}
+.bf-kanban-card:hover {
+  border-color: var(--border-2);
+  box-shadow: var(--shadow-md);
+}
+.bf-kanban-card[data-dragging="true"] {
+  border-color: var(--accent-border);
+  border-style: dashed;
+}
+
+.bf-kanban-card-title {
+  color: var(--txt-1);
+}
+.bf-kanban-card:hover .bf-kanban-card-title {
+  color: var(--txt-1);
+}
+
+/* Date / assignee badges */
+.bf-kanban-meta-badge {
+  background-color: var(--bg-hover);
+  border: 1px solid var(--border-1);
+  color: var(--txt-3);
+}
+
+/* Add-tag button */
+.bf-kanban-tag-btn {
+  color: var(--txt-4);
+  border-color: var(--border-1);
+}
+.bf-kanban-tag-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent-border);
+}
+
+/* ── Buttons ────────────────────────────────────────── */
+.bf-kanban-btn {
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border-1);
+  color: var(--txt-2);
+}
+.bf-kanban-btn:hover {
+  background-color: var(--bg-hover);
+  border-color: var(--border-2);
+  color: var(--txt-1);
+}
+
+.bf-kanban-accent-btn {
+  background-color: var(--accent);
+  color: #ffffff;
+  box-shadow: var(--shadow-sm);
+}
+.bf-kanban-accent-btn:hover { opacity: 0.88; }
+
+/* Icon buttons (col move/delete, modal close, etc.) */
+.bf-kanban-icon-btn {
+  color: var(--txt-3);
+  transition: background-color 0.12s, color 0.12s;
+}
+.bf-kanban-icon-btn:hover {
+  background-color: var(--bg-hover);
+  color: var(--txt-1);
+}
+.bf-kanban-icon-btn--danger:hover {
+  color: #f87171;
+}
+
+/* Quick-create add button */
+.bf-kanban-add-btn {
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border-0);
+  color: var(--txt-3);
+}
+.bf-kanban-add-btn:hover {
+  background-color: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+/* ── Inputs ─────────────────────────────────────────── */
+.bf-kanban-input {
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-1);
+  color: var(--txt-1);
+}
+.bf-kanban-input::placeholder { color: var(--txt-4); }
+.bf-kanban-input:focus {
+  border-color: var(--accent-border);
+  outline: none;
+}
+
+/* ── Popovers (priority picker, color palette, tag autocomplete) ── */
+.bf-kanban-popover {
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border-2);
+  box-shadow: var(--shadow-md);
+}
+
+/* Round "ball" swatch for the native <input type="color"> custom color picker
+   — shared by any color picker in the app (Kanban columns/priorities, callouts, ...) */
+.bf-color-ball {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 2px solid var(--border-2);
+  border-radius: 9999px;
+  cursor: pointer;
+  background: none;
+}
+.bf-color-ball::-webkit-color-swatch-wrapper { padding: 0; border-radius: 9999px; }
+.bf-color-ball::-webkit-color-swatch { border: none; border-radius: 9999px; }
+.bf-color-ball::-moz-color-swatch { border: none; border-radius: 9999px; }
+
+.bf-kanban-popover-item {
+  color: var(--txt-2);
+}
+.bf-kanban-popover-item:hover {
+  background-color: var(--bg-hover);
+  color: var(--txt-1);
+}
+
+/* ── Settings modal ─────────────────────────────────── */
+.bf-kanban-modal {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-2);
+  box-shadow: var(--shadow-lg);
+}
+.bf-kanban-modal-header {
+  border-bottom: 1px solid var(--border-1);
+}
+.bf-kanban-modal-title { color: var(--txt-1); }
+.bf-kanban-modal-text  { color: var(--txt-2); }
+
+/* Section labels and hints inside modal/popovers */
+.bf-kanban-section-label { color: var(--txt-3); }
+.bf-kanban-hint          { color: var(--txt-3); }
+
+/* Dividers inside modal (add-priority separator) */
+.bf-kanban-divider { border-top: 1px solid var(--border-1); }
+
+/* Color swatch border (priority edit/new) */
+.bf-kanban-color-swatch { border-color: var(--border-2); }
+
+/* ══════════════════════════════════════════════════════
+   KANBAN — FILTER BAR
+══════════════════════════════════════════════════════ */
+
+/* Container strip */
+.bf-kanban-filter-bar {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-1);
+}
+
+/* Vertical separator between sections */
+.bf-kanban-filter-sep {
+  background-color: var(--border-1);
+}
+
+/* Mode segmented control track */
+.bf-kanban-filter-mode-track {
+  background-color: var(--bg-app);
+  border: 1px solid var(--border-1);
+}
+
+/* Active segment */
+.bf-kanban-filter-mode-on {
+  background-color: var(--accent);
+  color: #ffffff;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+}
+
+/* Inactive segment */
+.bf-kanban-filter-mode-off {
+  color: var(--txt-4);
+}
+.bf-kanban-filter-mode-off:hover {
+  color: var(--txt-2);
+}
+
+/* Tags button — active state (has selections) */
+.bf-kanban-filter-tag-active {
+  background-color: var(--accent-faint);
+  border: 1px solid var(--accent-border);
+  color: var(--accent);
+}
+.bf-kanban-filter-tag-active:hover {
+  background-color: color-mix(in srgb, var(--accent-faint) 160%, transparent);
+}
+
+/* Tag count badge inside the Tags button */
+.bf-kanban-filter-tag-badge {
+  background-color: var(--accent);
+  color: #ffffff;
+}
+
+/* Clear filters button */
+.bf-kanban-filter-clear {
+  color: var(--txt-3);
+  border-color: var(--border-1);
+  background: transparent;
+}
+.bf-kanban-filter-clear:hover {
+  color: #f87171;
+  border-color: rgba(248,113,113,0.35);
+  background-color: rgba(248,113,113,0.08);
+}
+
+/* ── Card filter states ──────────────────────────────── */
+
+/* Dimmed (non-matching) card in highlight/focus mode */
+.bf-kanban-card[data-filter="dim"] {
+  opacity: 0.2;
+}
+
+/* Matching card in highlight/focus mode */
+.bf-kanban-card[data-filter="match"] {
+  box-shadow: var(--shadow-sm), 0 0 0 1.5px var(--card-accent, var(--accent-border)) !important;
+}
+
+/* ══════════════════════════════════════════════════════
+   KANBAN — URGENT PRIORITY BADGE
+══════════════════════════════════════════════════════ */
+
+/* Expanding ring pulse — like a heartbeat */
+@keyframes bf-urgent-ring {
+  0%   { box-shadow: 0 0 0 0   rgba(239,68,68,0.65); }
+  55%  { box-shadow: 0 0 0 5px rgba(239,68,68,0);    }
+  100% { box-shadow: 0 0 0 0   rgba(239,68,68,0);    }
+}
+
+/* Step-blink for the leading dot */
+@keyframes bf-urgent-dot {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+.bf-kanban-priority-urgent {
+  animation: bf-urgent-ring 1.5s ease-out infinite;
+}
+
+/* Blinking recording-style dot before the label */
+.bf-kanban-priority-urgent::before {
+  content: '●';
+  font-size: 6px;
+  margin-right: 4px;
+  vertical-align: middle;
+  animation: bf-urgent-dot 0.85s step-end infinite;
+}
+
+/* ══════════════════════════════════════════════════════
+   KANBAN — CARD COVER IMAGE
+══════════════════════════════════════════════════════ */
+
+.bf-kanban-card-cover {
+  overflow: hidden;
+  border-top: 1px solid var(--border-0);
+  border-bottom: 1px solid var(--border-0);
+}
+.bf-kanban-card-cover img {
+  display: block;
+  width: 100%;
+  object-fit: cover;
+}
+
+/* ══════════════════════════════════════════════════════
+   EDITOR ENHANCEMENTS
+══════════════════════════════════════════════════════ */
+
+/* Striped table rows */
+.ProseMirror table tbody tr:nth-child(even) td {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* Drag handle — positioning is managed by @tiptap/extension-drag-handle via floating-ui */
+.bf-drag-handle {
+  cursor: grab;
+  padding: 2px 3px;
+  border-radius: 4px;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.1s, color 0.1s;
+  user-select: none;
+  /* Nudge down so the icon visually centres on the first text line.
+     floating-ui aligns the handle top with the block top; body text
+     (line-height 1.8) has its optical centre ~3px below that edge. */
+  transform: translateY(3px);
+}
+.bf-drag-handle:active {
+  cursor: grabbing;
+}
+.bf-drag-handle:hover {
+  background: rgba(148, 163, 184, 0.10);
+  color: #94a3b8;
+}
+.bf-drag-handle svg {
+  display: block;
+}
+
+/* Image caption */
+.image-caption-wrapper figcaption input {
+  display: block;
+  width: 100%;
+  text-align: center;
+  font-size: 0.75rem;
+  color: #64748b;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid transparent;
+  outline: none;
+  padding-bottom: 2px;
+  margin-top: 6px;
+  transition: border-color 0.15s, color 0.15s;
+}
+.image-caption-wrapper figcaption input:focus {
+  border-bottom-color: rgba(100, 116, 139, 0.4);
+  color: #cbd5e1;
+}
+.image-caption-wrapper figcaption input::placeholder {
+  color: #334155;
+}
+
+/* ── Editor font size (S / M / L) ───────────────────────────────── */
+[data-fontsize="sm"] .ProseMirror,
+[data-fontsize="sm"] .ProseMirror p,
+[data-fontsize="sm"] .ProseMirror li {
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+[data-fontsize="lg"] .ProseMirror,
+[data-fontsize="lg"] .ProseMirror p,
+[data-fontsize="lg"] .ProseMirror li {
+  font-size: 1.125rem;
+  line-height: 1.8;
+}
+
+/* ── Multi-column layout ──────────────────────────────────────────── */
+.ProseMirror [data-columns] {
+  display: flex !important;
+  gap: 16px;
+  align-items: flex-start;
+  width: 100%;
+  margin: 12px 0;
+}
+
+.ProseMirror [data-column] {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(100, 116, 139, 0.18);
+  background: rgba(255, 255, 255, 0.015);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.ProseMirror [data-columns]:focus-within [data-column] {
+  border-color: rgba(139, 92, 246, 0.45);
+  background: rgba(139, 92, 246, 0.05);
+}
+
+/* KaTeX dark-mode fix — force formula text/SVG to a visible light color */
+.ProseMirror .tiptap-mathematics-render { display: inline; }
+.ProseMirror .tiptap-mathematics-render .katex,
+.ProseMirror .tiptap-mathematics-render .katex * { color: #e2e8f0 !important; fill: #e2e8f0 !important; stroke: #e2e8f0 !important; -webkit-text-fill-color: #e2e8f0 !important; }
+.ProseMirror .tiptap-mathematics-render.inline-math-error { color: #f87171; }
+
+/* ── Sidebar collapsed hover tooltips ─────────────────────────────── */
+.bf-sidebar-tip {
+  position: fixed;
+  left: 72px;
+  transform: translateY(-50%);
+  z-index: 9999;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  animation: bf-tip-in 150ms ease-out;
+}
+
+.bf-sidebar-tip-label {
+  position: relative;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-2);
+  color: var(--txt-1);
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1;
+  padding: 5px 10px;
+  border-radius: 6px;
+  box-shadow: var(--shadow-md);
+  white-space: nowrap;
+}
+
+.bf-sidebar-tip-label::before {
+  content: '';
+  position: absolute;
+  right: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0; height: 0;
+  border-top: 6px solid transparent;
+  border-bottom: 6px solid transparent;
+  border-right: 7px solid var(--border-2);
+}
+
+.bf-sidebar-tip-label::after {
+  content: '';
+  position: absolute;
+  right: 100%;
+  margin-right: -1px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0; height: 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-right: 6px solid var(--bg-elevated);
+}
+
+@keyframes bf-tip-in {
+  from { opacity: 0; transform: translateY(-50%) scale(0.9); }
+  to   { opacity: 1; transform: translateY(-50%) scale(1); }
+}
+
+
+/* ══════════════════════════════════════════════════════
+   SLIDESHOW MODE
+══════════════════════════════════════════════════════ */
+.bf-slideshow {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 9999;
+  background: var(--bg-app);
+  color: var(--txt-1);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.bf-slideshow-topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  padding: 14px 18px;
+  z-index: 2;
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  pointer-events: none;
+}
+
+.bf-slideshow-topbar.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.bf-slideshow-title {
+  margin-right: auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--txt-3);
+  letter-spacing: 0.02em;
+}
+
+.bf-slideshow-counter {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--txt-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.bf-slideshow-exit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--border-1);
+  background: var(--bg-elevated);
+  color: var(--txt-2);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.bf-slideshow-exit:hover {
+  background: var(--bg-hover);
+  color: var(--txt-1);
+}
+
+.bf-slideshow-nav {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 72px;
+  display: flex;
+  align-items: center;
+  border: none;
+  background: transparent;
+  color: var(--txt-2);
+  cursor: pointer;
+  z-index: 2;
+  opacity: 0;
+  transition: opacity 0.25s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.bf-slideshow-nav.is-visible {
+  opacity: 1;
+}
+
+.bf-slideshow-nav:disabled {
+  opacity: 0 !important;
+  cursor: default;
+  pointer-events: none;
+}
+
+.bf-slideshow-nav:hover {
+  color: var(--txt-1);
+  background: linear-gradient(90deg, var(--bg-hover), transparent);
+}
+
+.bf-slideshow-nav-left {
+  left: 0;
+  justify-content: flex-start;
+  padding-left: 14px;
+}
+
+.bf-slideshow-nav-right {
+  right: 0;
+  justify-content: flex-end;
+  padding-right: 14px;
+  background: transparent;
+}
+
+.bf-slideshow-nav-right:hover {
+  background: linear-gradient(270deg, var(--bg-hover), transparent);
+}
+
+.bf-slideshow-stage {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8vh 12vw;
+  overflow: auto;
+}
+
+.bf-slideshow-slide {
+  width: 100%;
+  max-width: 980px;
+  font-size: clamp(16px, 2.4vw, 26px);
+  line-height: 1.6;
+}
+
+.bf-slideshow-slide h1,
+.bf-slideshow-slide h2,
+.bf-slideshow-slide h3 {
+  color: var(--txt-1);
+  font-weight: 700;
+  line-height: 1.25;
+  margin: 0 0 0.6em;
+}
+
+.bf-slideshow-slide h1 { font-size: 1.9em; }
+.bf-slideshow-slide h2 { font-size: 1.5em; }
+.bf-slideshow-slide h3 { font-size: 1.2em; }
+
+.bf-slideshow-slide p {
+  margin: 0 0 0.7em;
+  color: var(--txt-1);
+}
+
+.bf-slideshow-slide a { color: var(--accent); }
+
+.bf-slideshow-slide ul,
+.bf-slideshow-slide ol {
+  margin: 0 0 0.7em;
+  padding-left: 1.3em;
+}
+
+.bf-slideshow-slide li { margin-bottom: 0.3em; }
+
+.bf-slideshow-slide blockquote {
+  margin: 0 0 0.7em;
+  padding: 0.2em 1em;
+  border-left: 3px solid var(--accent-border);
+  color: var(--txt-2);
+  font-style: italic;
+}
+
+.bf-slideshow-slide code {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-1);
+  border-radius: 4px;
+  padding: 0.1em 0.4em;
+  font-size: 0.75em;
+}
+
+.bf-slideshow-slide pre {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-1);
+  border-radius: 8px;
+  padding: 0.9em 1.1em;
+  overflow-x: auto;
+  margin: 0 0 0.7em;
+}
+
+.bf-slideshow-slide pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.6em;
+}
+
+.bf-slideshow-slide img {
+  max-width: 100%;
+  max-height: 55vh;
+  border-radius: 8px;
+  margin: 0 auto 0.7em;
+  display: block;
+}
+
+.bf-slideshow-slide table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0 0 0.7em;
+  font-size: 0.7em;
+}
+
+.bf-slideshow-slide th,
+.bf-slideshow-slide td {
+  border: 1px solid var(--border-1);
+  padding: 0.4em 0.7em;
+  text-align: left;
+}
+
+.bf-slideshow-slide th { background: var(--bg-elevated); }
+
+.bf-slideshow-slide hr {
+  border: none;
+  border-top: 1px solid var(--border-1);
+  margin: 1em 0;
+}
+
+.bf-slideshow-slide ul[data-type="taskList"] { list-style: none; padding-left: 0; }
+.bf-slideshow-slide ul[data-type="taskList"] li { display: flex; align-items: flex-start; gap: 0.5em; }
+.bf-slideshow-slide ul[data-type="taskList"] li > label { display: flex; align-items: center; height: 1.4em; }
+.bf-slideshow-slide ul[data-type="taskList"] input[type="checkbox"] { width: 1em; height: 1em; accent-color: var(--accent); }
+.bf-slideshow-slide ul[data-type="taskList"] li > div p { margin: 0; }
+.bf-slideshow-slide ul[data-type="taskList"] li[data-checked="true"] > div { text-decoration: line-through; color: var(--txt-3); }
+
+.bf-slideshow-slide [data-columns] {
+  display: flex;
+  gap: 2em;
+  align-items: flex-start;
+  margin: 0 0 0.7em;
+}
+
+.bf-slideshow-slide [data-column] {
+  flex: 1;
+  min-width: 0;
+}
+
+.bf-slideshow-slide [data-column] > *:last-child { margin-bottom: 0; }
+
+.bf-slideshow-callout {
+  border-left: 4px solid var(--accent);
+  border-radius: 0 8px 8px 0;
+  padding: 0.6em 1em;
+  margin: 0 0 0.7em;
+  text-align: left;
+}
+
+.bf-slideshow-callout-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  font-weight: 700;
+  font-size: 0.55em;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-bottom: 0.5em;
+}
+
+.bf-slideshow-callout-body { color: var(--txt-2); font-size: 0.85em; }
+.bf-slideshow-callout-body > *:last-child { margin-bottom: 0; }
+
+.bf-slideshow-embed-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2em;
+  border: 1px solid var(--border-1);
+  background: var(--bg-elevated);
+  border-radius: 8px;
+  padding: 0.7em 1em;
+  margin: 0 0 0.7em;
+  font-size: 0.6em;
+  color: var(--txt-2);
+  text-decoration: none;
+}
+
+.bf-slideshow-embed-card strong { color: var(--txt-1); font-size: 1.1em; }
+a.bf-slideshow-embed-card:hover { border-color: var(--accent-border); }
+
+.bf-slideshow-canvas-embed {
+  position: relative;
+  width: 100%;
+  height: 55vh;
+  border: 1px solid var(--border-1);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--bg-elevated);
+  margin: 0 0 0.7em;
+}
+
+.bf-slideshow-canvas-frame {
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: block;
+}
+
+.bf-slideshow-canvas-loading {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--txt-3);
+  font-size: 0.55em;
+}
+
+.bf-slideshow-canvas-open {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-1);
+  color: var(--txt-2);
+  text-decoration: none;
+  box-shadow: var(--shadow-sm);
+  transition: background 0.15s, color 0.15s;
+}
+
+.bf-slideshow-canvas-open:hover {
+  background: var(--bg-hover);
+  color: var(--txt-1);
+}
+
