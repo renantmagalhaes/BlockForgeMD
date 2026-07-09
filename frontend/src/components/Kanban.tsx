@@ -1371,6 +1371,33 @@ const Kanban: React.FC<KanbanProps> = ({
     return folder === '' || folder === 'Tasks/'
   }), [files, boardFolder])
 
+  // ── "More cards below" scroll hint per column ───────────────────────────────
+  // Shows a subtle fade + down-arrow at the bottom of a column's card list
+  // whenever it's scrolled somewhere short of its end, so a long column
+  // doesn't look complete when there are actually more cards to scroll to.
+  const [columnsWithOverflow, setColumnsWithOverflow] = useState<Set<string>>(new Set())
+  const columnScrollRefs = useRef<Map<string, HTMLDivElement>>(new Map())
+  const checkColumnOverflow = (col: string) => {
+    const el = columnScrollRefs.current.get(col)
+    if (!el) return
+    const hasMore = el.scrollHeight - el.scrollTop - el.clientHeight > 8
+    setColumnsWithOverflow(prev => {
+      const has = prev.has(col)
+      if (hasMore === has) return prev
+      const next = new Set(prev)
+      hasMore ? next.add(col) : next.delete(col)
+      return next
+    })
+  }
+  useEffect(() => {
+    boardColumns.forEach(checkColumnOverflow)
+  }, [tasks, boardColumns])
+  useEffect(() => {
+    const handler = () => boardColumns.forEach(checkColumnOverflow)
+    window.addEventListener('resize', handler)
+    return () => window.removeEventListener('resize', handler)
+  }, [boardColumns])
+
   // Tags used anywhere in the workspace — not just this board's own cards —
   // so a tag added on a document or another board is immediately suggested
   // here too, and a tag added on this board is suggested everywhere else.
@@ -1829,9 +1856,15 @@ const Kanban: React.FC<KanbanProps> = ({
               {/* Cards */}
               <Droppable droppableId={col}>
                 {(dropProvided, dropSnapshot) => (
+                <div className="relative flex-1 min-h-0 flex flex-col">
                 <div
-                  ref={dropProvided.innerRef}
+                  ref={el => {
+                    dropProvided.innerRef(el)
+                    if (el) columnScrollRefs.current.set(col, el)
+                    else columnScrollRefs.current.delete(col)
+                  }}
                   {...dropProvided.droppableProps}
+                  onScroll={() => checkColumnOverflow(col)}
                   className="flex-1 min-h-0 p-2 space-y-2 overflow-y-visible md:overflow-y-auto no-scrollbar transition-colors duration-150"
                   style={{ background: dropSnapshot.isDraggingOver ? `${accent}0d` : undefined }}
                 >
@@ -2030,6 +2063,15 @@ const Kanban: React.FC<KanbanProps> = ({
                   )
                 })}
                 {dropProvided.placeholder}
+                </div>
+                {columnsWithOverflow.has(col) && (
+                  <div
+                    className="absolute bottom-0 left-0 right-0 h-8 flex items-end justify-center pb-1 pointer-events-none"
+                    style={{ background: `linear-gradient(to bottom, transparent, color-mix(in srgb, ${accent} 16%, var(--bg-surface)) 70%)` }}
+                  >
+                    <ChevronDown size={14} style={{ color: accent, opacity: 0.7 }} />
+                  </div>
+                )}
                 </div>
                 )}
               </Droppable>
