@@ -1670,6 +1670,35 @@ const App: React.FC = () => {
     }
   }
 
+  // Moving a card to a different board is a real file move (its folder changes
+  // to the target board's), unlike handleMoveCard above which only patches
+  // `status` for a same-board column change.
+  const handleMoveCardToBoard = async (cardPath: string, targetBoardPath: string, targetColumn: string) => {
+    const filename = cardPath.slice(cardPath.lastIndexOf('/') + 1)
+    const targetFolder = targetBoardPath.endsWith('.board.md')
+      ? targetBoardPath.slice(0, -'.board.md'.length) + '/'
+      : targetBoardPath.slice(0, targetBoardPath.lastIndexOf('/') + 1)
+    const newPath = targetFolder + filename
+    try {
+      const moveRes = await fetch(`${API_BASE}/api/file/move`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: cardPath, to: newPath }),
+      })
+      if (!moveRes.ok) throw new Error('Failed to move card to target board')
+      await fetch(`${API_BASE}/api/file/front-matter`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: newPath, updates: { status: targetColumn } }),
+      })
+      await fetchFiles()
+    } catch (e) {
+      console.error('Error moving card to another board', e)
+      alertDialog('Failed to move card to the selected board.')
+      fetchFiles()
+    }
+  }
+
   const handleUpdateFrontMatter = async (path: string, updates: Record<string, any>) => {
     try {
       await fetch(`${API_BASE}/api/file/front-matter`, {
@@ -2906,6 +2935,7 @@ const App: React.FC = () => {
               <Kanban
                 files={files}
                 onMoveCard={handleMoveCard}
+                onMoveCardToBoard={handleMoveCardToBoard}
                 onSelectFile={fetchFileContent}
                 onCreateTaskInColumn={handleCreateTaskWithStatus}
                 boardPath={selectedPath ?? null}

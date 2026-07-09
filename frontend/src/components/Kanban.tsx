@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react'
 import {
   Calendar, User, Plus, Trash2, Edit3, X, Check,
   ChevronLeft, ChevronRight, Settings, Palette,
-  Tag, ChevronDown, Search, ChevronsLeft, Copy, ArrowRight, GripVertical, ListChecks,
+  Tag, ChevronDown, Search, ChevronsLeft, Copy, ArrowRight, GripVertical, ListChecks, Layers,
 } from 'lucide-react'
 import { Editor } from './Editor'
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd'
@@ -41,6 +41,7 @@ interface PriorityDef {
 interface KanbanProps {
   files: FileRecord[]
   onMoveCard: (path: string, newStatus: string) => Promise<void>
+  onMoveCardToBoard?: (cardPath: string, targetBoardPath: string, targetColumn: string) => Promise<void>
   onSelectFile: (path: string) => void
   onCreateTaskInColumn: (title: string, status: string) => Promise<void>
   boardPath: string | null
@@ -674,8 +675,11 @@ const CardContextMenu: React.FC<{
   onSetPriority: (name: string) => void
   onSetDueDate: (date: string) => void
   onDelete?: () => void
-}> = ({ x, y, task, currentCol, columns, priorities, onClose, onOpen, onMove, onSetPriority, onSetDueDate, onDelete }) => {
-  const [sub, setSub] = useState<'move' | 'priority' | 'date' | null>(null)
+  otherBoards?: { path: string; title: string; columns: string[] }[]
+  onMoveToBoard?: (boardPath: string, column: string) => void
+}> = ({ x, y, task, currentCol, columns, priorities, onClose, onOpen, onMove, onSetPriority, onSetDueDate, onDelete, otherBoards = [], onMoveToBoard }) => {
+  const [sub, setSub] = useState<'move' | 'priority' | 'date' | 'moveBoard' | null>(null)
+  const [moveBoardTarget, setMoveBoardTarget] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ x, y })
@@ -687,7 +691,7 @@ const CardContextMenu: React.FC<{
       x: Math.min(x, window.innerWidth  - r.width  - 8),
       y: Math.min(y, window.innerHeight - r.height - 8),
     })
-  }, [x, y, sub])
+  }, [x, y, sub, moveBoardTarget])
 
   useEffect(() => {
     const down = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onClose() }
@@ -749,6 +753,49 @@ const CardContextMenu: React.FC<{
               </button>
             ))}
           </div>
+        )}
+
+        {/* Move to another board */}
+        {onMoveToBoard && otherBoards.length > 0 && (
+          <>
+            <Row
+              icon={<Layers size={13} />}
+              label="Move to another board"
+              active={sub === 'moveBoard'}
+              expand
+              onClick={() => { setSub(sub === 'moveBoard' ? null : 'moveBoard'); setMoveBoardTarget(null) }}
+            />
+            {sub === 'moveBoard' && (
+              <div className="mx-2 mb-1 flex flex-col gap-0.5">
+                {otherBoards.map(board => (
+                  <div key={board.path}>
+                    <button
+                      onClick={() => setMoveBoardTarget(moveBoardTarget === board.path ? null : board.path)}
+                      className="flex items-center gap-2 w-full px-2.5 py-1.5 text-left text-[11px] rounded-lg bf-kanban-popover-item transition cursor-pointer bf-kanban-modal-text"
+                    >
+                      <span className="flex-1 truncate">{board.title}</span>
+                      <ChevronDown size={10} className={`opacity-40 shrink-0 transition-transform ${moveBoardTarget === board.path ? 'rotate-180' : ''}`} />
+                    </button>
+                    {moveBoardTarget === board.path && (
+                      <div className="ml-3 mt-0.5 flex flex-col gap-0.5 border-l border-[var(--border-0)] pl-2">
+                        {board.columns.length === 0 ? (
+                          <span className="px-2.5 py-1.5 text-[10px] opacity-50">No columns on this board</span>
+                        ) : board.columns.map(col => (
+                          <button
+                            key={col}
+                            onClick={() => { onMoveToBoard(board.path, col); onClose() }}
+                            className="flex items-center gap-2 w-full px-2.5 py-1.5 text-left text-[11px] rounded-lg bf-kanban-popover-item transition cursor-pointer bf-kanban-modal-text"
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full bg-current opacity-50 shrink-0" />{col}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         )}
 
         {/* Set priority */}
@@ -1110,6 +1157,7 @@ const CardDetailPanel: React.FC<{
 const Kanban: React.FC<KanbanProps> = ({
   files,
   onMoveCard,
+  onMoveCardToBoard,
   onDeleteCard,
   onCreateTaskInColumn,
   boardPath,
@@ -1321,6 +1369,20 @@ const Kanban: React.FC<KanbanProps> = ({
     })
     return Array.from(s).sort()
   }, [files, activeWorkspace])
+
+  // Other Kanban boards in this workspace — used by the card context menu's
+  // "Move to another board" submenu. Excludes the board currently open.
+  const otherBoards = useMemo(() => {
+    const prefix = activeWorkspace ? activeWorkspace + '/' : ''
+    return files
+      .filter(f => f.type === 'board' && f.path !== boardPath && (!prefix || f.path.startsWith(prefix)))
+      .map(f => {
+        let columns: string[] = []
+        try { columns = JSON.parse(f.frontMatter?.columns || '[]') } catch { /* */ }
+        return { path: f.path, title: f.title, columns }
+      })
+      .sort((a, b) => a.title.localeCompare(b.title))
+  }, [files, activeWorkspace, boardPath])
 
   const allBoardAssignees = useMemo(() => {
     const s = new Set<string>()
@@ -2049,6 +2111,8 @@ const Kanban: React.FC<KanbanProps> = ({
           onSetPriority={name => handleSetCardPriority(cardCtxMenu.task.path, name)}
           onSetDueDate={date => onUpdateTaskFrontMatter?.(cardCtxMenu.task.path, { dueDate: date })}
           onDelete={onDeleteCard ? () => onDeleteCard(cardCtxMenu.task.path) : undefined}
+          otherBoards={otherBoards}
+          onMoveToBoard={onMoveCardToBoard ? (boardPath, col) => onMoveCardToBoard(cardCtxMenu.task.path, boardPath, col) : undefined}
         />
       )}
 
