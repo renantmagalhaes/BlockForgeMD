@@ -1960,7 +1960,7 @@ const Kanban: React.FC<KanbanProps> = ({
                           </button>
 
                           {dueDate && (
-                            <div className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] ${duePast ? 'bg-red-500/15 text-red-400 border border-red-500/25' : 'bf-kanban-meta-badge'}`}>
+                            <div className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] ${duePast && !isCompleted ? 'bg-red-500/15 text-red-400 border border-red-500/25' : 'bf-kanban-meta-badge'}`}>
                               <Calendar size={9} /><span>{dueDate}</span>
                             </div>
                           )}
