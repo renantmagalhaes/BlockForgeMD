@@ -998,6 +998,8 @@ const App: React.FC = () => {
   const [propertiesCollapsed, setPropertiesCollapsed] = useState(false)
   const [autosaveDelay, setAutosaveDelay] = useState(1500)
   const [autosaveDelayInput, setAutosaveDelayInput] = useState('1500')
+  const [uploadLimitMB, setUploadLimitMB] = useState(100)
+  const [uploadLimitMBInput, setUploadLimitMBInput] = useState('100')
   const [historyInterval, setHistoryInterval] = useState(0)
   const [historyIntervalInput, setHistoryIntervalInput] = useState('0')
   const selectedPathRef = useRef<string | null>(null)
@@ -1285,6 +1287,10 @@ const App: React.FC = () => {
           setAppFont(data.app_font)
           localStorage.setItem('blockforge_app_font', data.app_font)
         }
+        if (typeof data?.upload_limit_mb === 'number' && data.upload_limit_mb > 0) {
+          setUploadLimitMB(data.upload_limit_mb)
+          setUploadLimitMBInput(data.upload_limit_mb.toString())
+        }
       }
     } catch (e) {
       console.error('Failed to fetch settings', e)
@@ -1337,6 +1343,17 @@ const App: React.FC = () => {
         body: JSON.stringify({ autosave_delay: ms }),
       })
     } catch (e) { console.error('Failed to save autosave_delay', e) }
+  }
+
+  const saveUploadLimitMB = async (mb: number) => {
+    setUploadLimitMB(mb)
+    try {
+      await fetch(`${API_BASE}/api/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ upload_limit_mb: mb }),
+      })
+    } catch (e) { console.error('Failed to save upload_limit_mb', e) }
   }
 
   const saveKanbanCardViewMode = async (mode: 'modal' | 'sidebar' | 'fullscreen') => {
@@ -3438,6 +3455,38 @@ const App: React.FC = () => {
                           <span className="text-xs text-slate-400">ms</span>
                           <span className="text-[11px] text-slate-500 ml-1">
                             {autosaveDelay < 500 ? '⚡ very fast' : autosaveDelay <= 1000 ? '· fast' : autosaveDelay <= 2000 ? '· default' : '· slow'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Upload limit */}
+                      <div className="space-y-2 pt-2 border-t border-slate-800">
+                        <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
+                          Upload Limit
+                        </label>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Maximum file size for cover images, attachments, and pasted/dropped images. Default 100 MB.
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            min={1}
+                            step={10}
+                            value={uploadLimitMBInput}
+                            onChange={e => setUploadLimitMBInput(e.target.value)}
+                            onBlur={() => {
+                              const v = Math.max(1, parseInt(uploadLimitMBInput) || 100)
+                              setUploadLimitMBInput(v.toString())
+                              saveUploadLimitMB(v)
+                            }}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                            }}
+                            className="w-28 bg-[#0d1220] border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 outline-none focus:border-violet-500"
+                          />
+                          <span className="text-xs text-slate-400">MB</span>
+                          <span className="text-[11px] text-slate-500 ml-1">
+                            {uploadLimitMB < 20 ? '· small' : uploadLimitMB <= 100 ? '· default' : uploadLimitMB <= 500 ? '· large' : '· very large'}
                           </span>
                         </div>
                       </div>

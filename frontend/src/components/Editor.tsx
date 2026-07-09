@@ -6612,26 +6612,41 @@ export const Editor: React.FC<
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
+  // Shared upload call for cover/attachment/pasted images — extracts the
+  // server's specific error (e.g. the configured size limit) instead of
+  // always surfacing a generic "Upload failed" regardless of the cause.
+  const uploadFile = async (
+    file: File
+  ): Promise<{ url: string; originalUrl?: string }> => {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch(
+      `${API_BASE}/api/upload?notePath=${encodeURIComponent(filePath)}`,
+      {
+        method: "POST",
+        body: formData
+      }
+    );
+    if (!res.ok) {
+      let message = "Upload failed.";
+      try {
+        const data = await res.json();
+        if (data?.error) message = data.error;
+      } catch {
+        // Response wasn't JSON — keep the generic message.
+      }
+      throw new Error(message);
+    }
+    return res.json();
+  };
+
   const uploadAttachment = async (
     file: File
   ) => {
     if (!onUpdateFrontMatter) return;
     setAttachmentUploading(true);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const res = await fetch(
-        `${API_BASE}/api/upload?notePath=${encodeURIComponent(filePath)}`,
-        {
-          method: "POST",
-          body: formData
-        }
-      );
-      if (!res.ok)
-        throw new Error(
-          "Upload failed"
-        );
-      const data = await res.json();
+      const data = await uploadFile(file);
       const existing =
         parseAttachments();
       const updated = [
@@ -6652,7 +6667,9 @@ export const Editor: React.FC<
         e
       );
       alertDialog(
-        "Failed to upload attachment."
+        e instanceof Error
+          ? e.message
+          : "Failed to upload attachment."
       );
     } finally {
       setAttachmentUploading(false);
@@ -6664,20 +6681,7 @@ export const Editor: React.FC<
   ) => {
     if (!onUpdateFrontMatter) return;
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const res = await fetch(
-        `${API_BASE}/api/upload?notePath=${encodeURIComponent(filePath)}`,
-        {
-          method: "POST",
-          body: formData
-        }
-      );
-      if (!res.ok)
-        throw new Error(
-          "Upload failed"
-        );
-      const data = await res.json();
+      const data = await uploadFile(file);
       if (data.url)
         onUpdateFrontMatter({
           cover: data.url
@@ -6686,6 +6690,11 @@ export const Editor: React.FC<
       console.error(
         "Failed to upload cover",
         e
+      );
+      alertDialog(
+        e instanceof Error
+          ? e.message
+          : "Failed to upload cover."
       );
     }
   };
@@ -6797,22 +6806,8 @@ export const Editor: React.FC<
   const uploadImageAndInsert = async (
     file: File
   ) => {
-    const formData = new FormData();
-    formData.append("file", file);
-
     try {
-      const res = await fetch(
-        `${API_BASE}/api/upload?notePath=${encodeURIComponent(filePath)}`,
-        {
-          method: "POST",
-          body: formData
-        }
-      );
-      if (!res.ok)
-        throw new Error(
-          "Upload failed"
-        );
-      const data = await res.json();
+      const data = await uploadFile(file);
       if (data.url && editor) {
         editor
           .chain()
@@ -6826,7 +6821,9 @@ export const Editor: React.FC<
         e
       );
       alertDialog(
-        "Failed to upload image to assets directory."
+        e instanceof Error
+          ? e.message
+          : "Failed to upload image to assets directory."
       );
     }
   };

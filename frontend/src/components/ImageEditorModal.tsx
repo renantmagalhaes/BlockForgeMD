@@ -524,7 +524,14 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
       try {
         const cleanSrc = src.split('?')[0]
         const res  = await fetch(`${apiBase}/api/upload?overwritePath=${encodeURIComponent(cleanSrc)}`, { method: 'POST', body: formData })
-        if (!res.ok) throw new Error('Failed to overwrite image asset')
+        if (!res.ok) {
+          let message = 'Failed to save edited image on the backend.'
+          try {
+            const errData = await res.json()
+            if (errData?.error) message = errData.error
+          } catch { /* response wasn't JSON */ }
+          throw new Error(message)
+        }
         const data = await res.json()
         // If the backend created (or already had) an original backup, remember it
         if (data.originalUrl) setPersistentOriginalUrl(`${apiBase}${data.originalUrl}`)
@@ -532,7 +539,7 @@ export const ImageEditorModal: React.FC<ImageEditorModalProps> = ({
         onClose()
       } catch (e) {
         console.error('Error saving image modifications', e)
-        alertDialog('Failed to save edited image on the backend.')
+        alertDialog(e instanceof Error ? e.message : 'Failed to save edited image on the backend.')
       } finally {
         setIsSaving(false)
       }

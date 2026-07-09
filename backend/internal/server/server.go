@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -737,9 +738,34 @@ func (s *Server) noteAssetBase(notePath string) (assetsDir, urlBase, subDir stri
 }
 
 func (s *Server) handleUploadAsset(w http.ResponseWriter, r *http.Request) {
-	// Max upload size: 20MB
-	if err := r.ParseMultipartForm(20 << 20); err != nil {
-		http.Error(w, "Upload size limit exceeded", http.StatusBadRequest)
+	limitMB := defaultUploadLimitMB
+	if v, err := s.db.GetSetting("upload_limit_mb", ""); err == nil && v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			limitMB = parsed
+		}
+	}
+	limitBytes := int64(limitMB) * 1024 * 1024
+
+	// http.MaxBytesReader actually enforces the cap (unlike the maxMemory
+	// argument to ParseMultipartForm below, which only controls the
+	// memory/disk split for parsed parts and never rejects large uploads —
+	// without this, a file of any size would still succeed, just spilling to
+	// temp disk beyond that threshold).
+	r.Body = http.MaxBytesReader(w, r.Body, limitBytes)
+
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		var mbErr *http.MaxBytesError
+		if errors.As(err, &mbErr) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"error":   fmt.Sprintf("File exceeds the %d MB upload limit configured in Settings.", limitMB),
+				"code":    "upload_limit_exceeded",
+				"limitMB": limitMB,
+			})
+			return
+		}
+		http.Error(w, "Failed to parse upload: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -1142,6 +1168,11 @@ func (s *Server) handleGetFileHistoryContent(w http.ResponseWriter, r *http.Requ
 
 var hexColorRe = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 
+// defaultUploadLimitMB is used when the "upload_limit_mb" setting has never
+// been saved. Configurable in Settings; validated to [1, maxUploadLimitMB].
+const defaultUploadLimitMB = 100
+const maxUploadLimitMB = 10000 // 10GB ceiling — sanity bound, not a recommendation
+
 var validAppFonts = map[string]bool{
 	"inter":         true,
 	"system":        true,
@@ -1200,6 +1231,11 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	globalLayoutOverride, _ := s.db.GetSetting("global_layout_override", "per-page")
 	globalColumnWidthOverride, _ := s.db.GetSetting("global_column_width_override", "per-page")
 	appFont, _ := s.db.GetSetting("app_font", "inter")
+	uploadLimitStr, _ := s.db.GetSetting("upload_limit_mb", strconv.Itoa(defaultUploadLimitMB))
+	uploadLimitMB, err5 := strconv.Atoi(uploadLimitStr)
+	if err5 != nil || uploadLimitMB <= 0 || uploadLimitMB > maxUploadLimitMB {
+		uploadLimitMB = defaultUploadLimitMB
+	}
 	respondJSON(w, map[string]interface{}{
 		"history_limit":                limit,
 		"theme":                        theme,
@@ -1216,6 +1252,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"global_layout_override":       globalLayoutOverride,
 		"global_column_width_override": globalColumnWidthOverride,
 		"app_font":                     appFont,
+		"upload_limit_mb":              uploadLimitMB,
 	})
 }
 
@@ -1236,6 +1273,7 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		GlobalLayoutOverride      string  `json:"global_layout_override"`
 		GlobalColumnWidthOverride string  `json:"global_column_width_override"`
 		AppFont                   string  `json:"app_font"`
+		UploadLimitMB             *int    `json:"upload_limit_mb"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -1367,6 +1405,17 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	if validAppFonts[req.AppFont] {
 		if err := s.db.SetSetting("app_font", req.AppFont); err != nil {
 			http.Error(w, fmt.Sprintf("failed to save app_font: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if req.UploadLimitMB != nil {
+		if *req.UploadLimitMB <= 0 || *req.UploadLimitMB > maxUploadLimitMB {
+			http.Error(w, fmt.Sprintf("invalid upload_limit_mb value (must be between 1 and %d)", maxUploadLimitMB), http.StatusBadRequest)
+			return
+		}
+		if err := s.db.SetSetting("upload_limit_mb", strconv.Itoa(*req.UploadLimitMB)); err != nil {
+			http.Error(w, fmt.Sprintf("failed to save upload_limit_mb: %v", err), http.StatusInternalServerError)
 			return
 		}
 	}
