@@ -882,6 +882,8 @@ const CardDetailPanel: React.FC<{
   viewMode: CardViewMode
   columns: string[]
   allBoardTags: string[]
+  tagColors?: Record<string, string>
+  onEnsureTagColor?: (tag: string) => void
   files: FileRecord[]
   onClose: () => void
   onSetMode: (mode: CardViewMode) => void
@@ -892,7 +894,7 @@ const CardDetailPanel: React.FC<{
   closing?: boolean
   isMobile?: boolean
   autosaveDelay?: number
-}> = ({ task, viewMode, columns, allBoardTags, files, onClose, onSetMode, onUpdateFrontMatter, onDelete, onCardSaved, initialPropertiesCollapsed, closing, isMobile, autosaveDelay }) => {
+}> = ({ task, viewMode, columns, allBoardTags, tagColors, onEnsureTagColor, files, onClose, onSetMode, onUpdateFrontMatter, onDelete, onCardSaved, initialPropertiesCollapsed, closing, isMobile, autosaveDelay }) => {
   // Modal (80vw/80vh) and Sidebar (fixed 560px) modes don't fit a phone screen —
   // mobile always gets the fullscreen layout regardless of the saved preference.
   const effectiveViewMode: CardViewMode = isMobile ? 'fullscreen' : viewMode
@@ -1107,6 +1109,8 @@ const CardDetailPanel: React.FC<{
         onTitleChange={(newTitle) => syncedUpdateFrontMatter({ title: newTitle })}
         boardColumns={columns}
         boardTags={allBoardTags}
+        tagColors={tagColors}
+        onEnsureTagColor={onEnsureTagColor}
         files={files}
         onSelectFile={() => {}}
         initialPropertiesCollapsed={initialPropertiesCollapsed}
@@ -2191,6 +2195,8 @@ const Kanban: React.FC<KanbanProps> = ({
             viewMode={cardViewMode}
             columns={boardColumns}
             allBoardTags={allBoardTags}
+            tagColors={tagColors}
+            onEnsureTagColor={onEnsureTagColor}
             files={files}
             onClose={closeCardPanel}
             onSetMode={handleCardViewMode}
