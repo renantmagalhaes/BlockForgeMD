@@ -27,11 +27,25 @@ interface FileRecord {
   position?: number
 }
 
-const parseChecklist = (content: string) =>
-  content.split('\n').flatMap(line => {
+// Groups checkbox lines into separate checklists — each contiguous run of
+// `- [ ]` lines (broken by any non-checkbox line: blank, heading, paragraph,
+// ...) becomes its own checklist, shown on the card as its own progress bar
+// and toggle rather than one big list mixing unrelated checklists together.
+const parseChecklistGroups = (content: string): { done: boolean; text: string }[][] => {
+  const groups: { done: boolean; text: string }[][] = []
+  let current: { done: boolean; text: string }[] = []
+  content.split('\n').forEach(line => {
     const m = line.match(/^[\s>-]*\[([x ])\]\s+(.+)/i)
-    return m ? [{ done: m[1].toLowerCase() === 'x', text: m[2].trim() }] : []
+    if (m) {
+      current.push({ done: m[1].toLowerCase() === 'x', text: m[2].trim() })
+    } else if (current.length > 0) {
+      groups.push(current)
+      current = []
+    }
   })
+  if (current.length > 0) groups.push(current)
+  return groups
+}
 
 interface PriorityDef {
   name: string
@@ -1966,23 +1980,22 @@ const Kanban: React.FC<KanbanProps> = ({
                         </div>
                       </div>
 
-                      {/* Checklist progress */}
-                      {(() => {
-                        const items = parseChecklist(task.content || '')
-                        if (items.length === 0) return null
+                      {/* Checklist progress — one bar + toggle per separate checklist */}
+                      {parseChecklistGroups(task.content || '').map((items, groupIdx) => {
                         const done  = items.filter(i => i.done).length
                         const total = items.length
                         const pct   = total ? (done / total) * 100 : 0
                         const allDone = done === total
-                        const isExpanded = expandedChecklists.has(task.path)
+                        const groupKey = `${task.path}::${groupIdx}`
+                        const isExpanded = expandedChecklists.has(groupKey)
                         return (
-                          <div className="mt-2.5 pt-2 border-t border-[var(--border-0)]">
+                          <div key={groupIdx} className={groupIdx === 0 ? 'mt-2.5 pt-2 border-t border-[var(--border-0)]' : 'mt-1.5'}>
                             <button
                               className="flex items-center gap-2 w-full cursor-pointer"
                               onClick={e => {
                                 e.stopPropagation()
                                 setExpandedChecklists(prev => {
-                                  const s = new Set(prev); s.has(task.path) ? s.delete(task.path) : s.add(task.path); return s
+                                  const s = new Set(prev); s.has(groupKey) ? s.delete(groupKey) : s.add(groupKey); return s
                                 })
                               }}
                             >
@@ -2010,7 +2023,7 @@ const Kanban: React.FC<KanbanProps> = ({
                             )}
                           </div>
                         )
-                      })()}
+                      })}
                     </div>
                     )}
                     </Draggable>
