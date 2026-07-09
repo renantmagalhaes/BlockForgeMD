@@ -3207,6 +3207,8 @@ interface EditorProps {
   ) => void;
   boardColumns: string[];
   boardTags?: string[];
+  tagColors?: Record<string, string>;
+  onEnsureTagColor?: (tag: string) => void;
   onCreateSubPage?: (
     parentPath: string,
     onCreated: (
@@ -4031,6 +4033,8 @@ export const Editor: React.FC<
   onTitleChange,
   boardColumns,
   boardTags = [],
+  tagColors = {},
+  onEnsureTagColor,
   onCreateSubPage,
   onSelectFile,
   files,
@@ -7686,6 +7690,7 @@ export const Editor: React.FC<
       onUpdateFrontMatter?.({
         tags: [...currentTags, cleanTag]
       });
+      onEnsureTagColor?.(cleanTag);
     }
     setNewTagInput("");
     setTagAutocompleteOpen(false);
@@ -9661,12 +9666,15 @@ export const Editor: React.FC<
 
                         <div className="flex flex-wrap items-center gap-1.5">
                           {tags.map(
-                            (tag) => (
+                            (tag) => {
+                              const tc = tagColors[tag] || '#8b5cf6';
+                              return (
                               <span
                                 key={
                                   tag
                                 }
-                                className="flex items-center gap-1 px-2 py-0.5 bg-violet-600/15 text-violet-400 border border-violet-500/20 text-[10px] rounded-md font-semibold"
+                                className="flex items-center gap-1 px-2 py-0.5 text-[10px] rounded-md font-semibold border"
+                                style={{ background: tc + '18', borderColor: tc + '44', color: tc }}
                               >
                                 {tag}
                                 <button
@@ -9681,7 +9689,8 @@ export const Editor: React.FC<
                                   ×
                                 </button>
                               </span>
-                            )
+                              )
+                            }
                           )}
 
                           <form

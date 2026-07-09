@@ -42,7 +42,7 @@ import {
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import Editor from './components/Editor'
-import Kanban from './components/Kanban'
+import Kanban, { COLOR_PALETTE } from './components/Kanban'
 import Canvas from './components/Canvas'
 import Diagram from './components/Diagram'
 import MindMap from './components/MindMap'
@@ -923,6 +923,54 @@ const App: React.FC = () => {
       .catch(err => { if (err.name !== 'AbortError') setFavorites([]) })
     return () => controller.abort()
   }, [activeWorkspace]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Tag colors ─────────────────────────────────────────────────────────────
+  // Tags are global across the workspace, so their colors are too: assigned
+  // randomly the first time a tag is used anywhere (a board card or a
+  // document's page properties) and shared everywhere that tag appears.
+  const [tagColors, setTagColors] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    if (!activeWorkspace) return
+    const controller = new AbortController()
+    fetch(`${API_BASE}/api/tag-colors?workspace=${encodeURIComponent(activeWorkspace)}`, {
+      signal: controller.signal,
+    })
+      .then(r => r.ok ? r.json() : { tagColors: {} })
+      .then(data => setTagColors(data.tagColors || {}))
+      .catch(err => { if (err.name !== 'AbortError') setTagColors({}) })
+    return () => controller.abort()
+  }, [activeWorkspace]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const persistTagColors = (next: Record<string, string>) => {
+    fetch(`${API_BASE}/api/tag-colors`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspace: activeWorkspace, tagColors: next }),
+    }).catch(e => console.error('Failed to save tag color', e))
+  }
+
+  // Assigns a random color to a tag the first time it's used; a no-op if the
+  // tag already has one. Excludes the neutral gray, which is reserved for
+  // muting completed-column cards.
+  const ensureTagColor = (tag: string) => {
+    setTagColors(prev => {
+      if (prev[tag]) return prev
+      const palette = COLOR_PALETTE.filter(c => c !== '#64748b')
+      const color = palette[Math.floor(Math.random() * palette.length)]
+      const next = { ...prev, [tag]: color }
+      persistTagColors(next)
+      return next
+    })
+  }
+
+  const setTagColorManual = (tag: string, color: string) => {
+    setTagColors(prev => {
+      const next = { ...prev, [tag]: color }
+      persistTagColors(next)
+      return next
+    })
+  }
 
   // W(section) → workspace-qualified section root path
   const W = (section: string) => activeWorkspace ? `${activeWorkspace}/${section}` : section
@@ -2990,6 +3038,9 @@ const App: React.FC = () => {
                 isMobile={isMobile}
                 autosaveDelay={autosaveDelay}
                 activeWorkspace={activeWorkspace}
+                tagColors={tagColors}
+                onEnsureTagColor={ensureTagColor}
+                onSetGlobalTagColor={setTagColorManual}
               />
             </motion.div>
           ) : selectedPath && activeFile ? (
@@ -3036,6 +3087,8 @@ const App: React.FC = () => {
                     onSelectFile={fetchFileContent}
                     files={files}
                     boardTags={allWorkspaceTags}
+                    tagColors={tagColors}
+                    onEnsureTagColor={ensureTagColor}
                     globalLayoutOverride={globalLayoutOverride}
                     globalColumnWidthOverride={globalColumnWidthOverride}
                     highlightSearchTerm={activeSearchHighlight}

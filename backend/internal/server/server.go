@@ -109,6 +109,8 @@ func (s *Server) setupRoutes() {
 		r.Post("/settings", s.handleSaveSettings)
 		r.Get("/favorites", s.handleGetFavorites)
 		r.Post("/favorites", s.handleSetFavorites)
+		r.Get("/tag-colors", s.handleGetTagColors)
+		r.Post("/tag-colors", s.handleSetTagColors)
 		r.Get("/workspaces", s.handleListWorkspaces)
 		r.Post("/workspaces", s.handleCreateWorkspace)
 		r.Post("/workspaces/rename", s.handleRenameWorkspace)
@@ -1445,6 +1447,33 @@ func (s *Server) handleSetFavorites(w http.ResponseWriter, r *http.Request) {
 	data, _ := json.Marshal(req.Favorites)
 	if err := s.db.SetSetting("favorites_"+req.Workspace, string(data)); err != nil {
 		http.Error(w, "failed to save favorites", http.StatusInternalServerError)
+		return
+	}
+	respondJSON(w, map[string]string{"status": "success"})
+}
+
+func (s *Server) handleGetTagColors(w http.ResponseWriter, r *http.Request) {
+	workspace := r.URL.Query().Get("workspace")
+	val, _ := s.db.GetSetting("tag_colors_"+workspace, "{}")
+	var tagColors map[string]string
+	if err := json.Unmarshal([]byte(val), &tagColors); err != nil {
+		tagColors = map[string]string{}
+	}
+	respondJSON(w, map[string]interface{}{"tagColors": tagColors})
+}
+
+func (s *Server) handleSetTagColors(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Workspace string            `json:"workspace"`
+		TagColors map[string]string `json:"tagColors"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	data, _ := json.Marshal(req.TagColors)
+	if err := s.db.SetSetting("tag_colors_"+req.Workspace, string(data)); err != nil {
+		http.Error(w, "failed to save tag colors", http.StatusInternalServerError)
 		return
 	}
 	respondJSON(w, map[string]string{"status": "success"})

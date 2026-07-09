@@ -74,6 +74,9 @@ interface KanbanProps {
   isMobile?: boolean
   autosaveDelay?: number
   activeWorkspace?: string
+  tagColors?: Record<string, string>
+  onEnsureTagColor?: (tag: string) => void
+  onSetGlobalTagColor?: (tag: string, color: string) => void
 }
 
 const DEFAULT_PRIORITIES: PriorityDef[] = [
@@ -83,7 +86,7 @@ const DEFAULT_PRIORITIES: PriorityDef[] = [
   { name: 'Low',    color: '#94a3b8' },
 ]
 
-const COLOR_PALETTE = [
+export const COLOR_PALETTE = [
   '#ef4444', '#f97316', '#f59e0b', '#eab308',
   '#84cc16', '#22c55e', '#10b981', '#14b8a6',
   '#06b6d4', '#3b82f6', '#6366f1', '#8b5cf6',
@@ -1189,6 +1192,9 @@ const Kanban: React.FC<KanbanProps> = ({
   isMobile,
   autosaveDelay,
   activeWorkspace,
+  tagColors: globalTagColors,
+  onEnsureTagColor,
+  onSetGlobalTagColor,
 }) => {
   const [newCardTitles, setNewCardTitles] = useState<Record<string, string>>({})
   const [editingColumn, setEditingColumn] = useState<string | null>(null)
@@ -1343,10 +1349,9 @@ const Kanban: React.FC<KanbanProps> = ({
     return Array.isArray(p) && p.length > 0 ? p : DEFAULT_PRIORITIES
   }, [boardFrontMatter?.priorities])
 
-  const tagColors = useMemo(
-    () => parseJSON<Record<string, string>>(boardFrontMatter?.tagColors, {}),
-    [boardFrontMatter?.tagColors],
-  )
+  // Tag colors are global across the workspace (assigned randomly on first
+  // use and shared by every board/document) rather than stored per-board.
+  const tagColors = globalTagColors ?? {}
 
   const DONE_NAMES = ['done', 'complete', 'completed', 'finished', 'archive', 'archived', 'closed']
   const completedColumns = useMemo(() => {
@@ -1567,6 +1572,7 @@ const Kanban: React.FC<KanbanProps> = ({
     const t = tag.trim()
     if (!t || current.includes(t)) return
     await onUpdateTaskFrontMatter?.(path, { tags: [...current, t] })
+    onEnsureTagColor?.(t)
     setTagInput(''); setTagEditorCard(null)
   }
 
@@ -1574,7 +1580,7 @@ const Kanban: React.FC<KanbanProps> = ({
     onUpdateTaskFrontMatter?.(path, { tags: current.filter(t => t !== tag) })
 
   const handleSetTagColor = async (tag: string, color: string) =>
-    onUpdateBoardFrontMatter?.({ tagColors: { ...tagColors, [tag]: color } })
+    onSetGlobalTagColor?.(tag, color)
 
   // ── Filter ops ────────────────────────────────────────────────────────────
   const handleTagToggle = (tag: string) =>
