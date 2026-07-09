@@ -28,6 +28,11 @@ import {
   InputRule,
   mergeAttributes
 } from "@tiptap/core";
+import {
+  Plugin,
+  PluginKey,
+  TextSelection
+} from "@tiptap/pm/state";
 import UnderlineExtension from "@tiptap/extension-underline";
 import { DragHandle } from "@tiptap/extension-drag-handle";
 import { Excalidraw } from "@excalidraw/excalidraw";
@@ -154,6 +159,13 @@ import "katex/dist/katex.min.css";
 import { TextStyle } from "@tiptap/extension-text-style";
 import { Color } from "@tiptap/extension-color";
 import Highlight from "@tiptap/extension-highlight";
+import Details, {
+  DetailsSummary,
+  DetailsContent
+} from "@tiptap/extension-details";
+import Typography from "@tiptap/extension-typography";
+import Subscript from "@tiptap/extension-subscript";
+import Superscript from "@tiptap/extension-superscript";
 import TurndownService from "turndown";
 import MindElixir from "mind-elixir";
 import "mind-elixir/style.css";
@@ -162,6 +174,8 @@ import {
   Italic,
   Strikethrough,
   Underline as UnderlineIcon,
+  Subscript as SubscriptIcon,
+  Superscript as SuperscriptIcon,
   Code,
   Heading1,
   Heading2,
@@ -548,6 +562,65 @@ turndownService.addRule(
       `\n\n:::columns\n${content}:::\n\n`
   }
 );
+
+// Toggle blocks: serialize using GitHub's <details><summary> convention so
+// the markdown round-trips as plain text and reads sensibly outside the app.
+// Summary/content are wrapped in unique marker strings because Turndown hands
+// the wrapper rule one concatenated string with no way to tell them apart.
+const DETAILS_SUMMARY_START = "@@details-summary-start@@";
+const DETAILS_SUMMARY_END = "@@details-summary-end@@";
+const DETAILS_CONTENT_START = "@@details-content-start@@";
+const DETAILS_CONTENT_END = "@@details-content-end@@";
+
+turndownService.addRule("detailsSummary", {
+  filter: (node) => node.nodeName === "SUMMARY",
+  replacement: (content) =>
+    `${DETAILS_SUMMARY_START}${content.trim()}${DETAILS_SUMMARY_END}`
+});
+
+turndownService.addRule("detailsContent", {
+  filter: (node) =>
+    node.nodeName === "DIV" &&
+    (node as HTMLElement).getAttribute(
+      "data-type"
+    ) === "detailsContent",
+  replacement: (content) =>
+    `${DETAILS_CONTENT_START}${content.trim()}${DETAILS_CONTENT_END}`
+});
+
+turndownService.addRule("details", {
+  // editor.getHTML() serializes the details node via its schema's
+  // renderHTML (a plain <details> tag), not the editable nodeView's
+  // custom <div data-type="details"> markup — filter on the real tag.
+  filter: (node) => node.nodeName === "DETAILS",
+  replacement: (content) => {
+    const extractBetween = (
+      text: string,
+      startTag: string,
+      endTag: string
+    ) => {
+      const from = text.indexOf(startTag);
+      const to = text.indexOf(endTag);
+      if (from === -1 || to === -1) return null;
+      return text
+        .slice(from + startTag.length, to)
+        .trim();
+    };
+    const summary =
+      extractBetween(
+        content,
+        DETAILS_SUMMARY_START,
+        DETAILS_SUMMARY_END
+      ) || "Toggle";
+    const body =
+      extractBetween(
+        content,
+        DETAILS_CONTENT_START,
+        DETAILS_CONTENT_END
+      ) || "";
+    return `\n\n<details>\n<summary>${summary}</summary>\n\n${body}\n\n</details>\n\n`;
+  }
+});
 
 const TEXT_COLORS = [
   { label: "Default", value: null },
@@ -3297,6 +3370,13 @@ const getCommandIcon = (
           className={cls}
         />
       );
+    case "toggle":
+      return (
+        <ChevronRight
+          size={s}
+          className={cls}
+        />
+      );
     case "table":
       return (
         <Grid
@@ -3833,6 +3913,14 @@ const COMMANDS = [
     shortcut: "> "
   },
   {
+    id: "toggle",
+    label: "Toggle List",
+    desc: "Collapsible block that hides content until clicked",
+    search:
+      "toggle collapse expand details summary dropdown accordion",
+    shortcut: undefined
+  },
+  {
     id: "code",
     label: "Code Block",
     desc: "Monospace fenced code block",
@@ -4020,6 +4108,251 @@ const SingleDollarMath =
       ];
     }
   });
+
+// Bracket/quote pairs that auto-close. Quotes map to their smart-quote glyphs
+// directly (superseding Typography's plain straight-quote conversion for the
+// pairing case) since both open and close use the same physical key.
+const BRACKET_PAIRS: Record<string, string> = {
+  "(": ")",
+  "[": "]",
+  "{": "}"
+};
+const QUOTE_PAIRS: Record<
+  string,
+  [string, string]
+> = {
+  '"': ["“", "”"],
+  "'": ["‘", "’"]
+};
+const PAIR_CLOSERS: Record<string, string> =
+  {
+    ...Object.fromEntries(
+      Object.entries(BRACKET_PAIRS).map(
+        ([open, close]) => [close, open]
+      )
+    ),
+    "”": "“",
+    "’": "‘"
+  };
+
+// Auto-pairing for quotes/brackets: typing an opening character inserts the
+// matching closer with the cursor between them (or wraps a selection); typing
+// a closing character that's already immediately ahead just steps over it
+// instead of inserting a duplicate. Backtick is deliberately excluded since
+// StarterKit's inline-code shortcut relies on typing a real closing backtick.
+const AutoPair = Extension.create({
+  name: "autoPair",
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: new PluginKey("autoPair"),
+        props: {
+          handleTextInput: (
+            view,
+            from,
+            to,
+            text
+          ) => {
+            if (text.length !== 1)
+              return false;
+            const { state } = view;
+            const hasSelection =
+              from !== to;
+            const docSize =
+              state.doc.content.size;
+            const charAfter =
+              to < docSize
+                ? state.doc.textBetween(
+                    to,
+                    to + 1
+                  )
+                : "";
+
+            const wrapOrInsert = (
+              open: string,
+              close: string
+            ) => {
+              let tr = state.tr;
+              if (hasSelection) {
+                tr = tr.insertText(
+                  close,
+                  to,
+                  to
+                );
+                tr = tr.insertText(
+                  open,
+                  from,
+                  from
+                );
+                tr = tr.setSelection(
+                  TextSelection.create(
+                    tr.doc,
+                    from + open.length,
+                    from +
+                      open.length +
+                      (to - from)
+                  )
+                );
+              } else {
+                tr = tr.insertText(
+                  open + close,
+                  from,
+                  from
+                );
+                tr = tr.setSelection(
+                  TextSelection.create(
+                    tr.doc,
+                    from + open.length
+                  )
+                );
+              }
+              view.dispatch(tr);
+              return true;
+            };
+
+            // Step over a closing bracket that's already right there
+            if (
+              !hasSelection &&
+              Object.values(
+                BRACKET_PAIRS
+              ).includes(text) &&
+              charAfter === text
+            ) {
+              view.dispatch(
+                state.tr.setSelection(
+                  TextSelection.create(
+                    state.doc,
+                    to + 1
+                  )
+                )
+              );
+              return true;
+            }
+
+            // Opening bracket — always pair
+            if (BRACKET_PAIRS[text]) {
+              return wrapOrInsert(
+                text,
+                BRACKET_PAIRS[text]
+              );
+            }
+
+            // Quotes: step over an already-adjacent smart closing quote
+            const quotePair =
+              QUOTE_PAIRS[text];
+            if (
+              !hasSelection &&
+              quotePair &&
+              charAfter === quotePair[1]
+            ) {
+              view.dispatch(
+                state.tr.setSelection(
+                  TextSelection.create(
+                    state.doc,
+                    to + 1
+                  )
+                )
+              );
+              return true;
+            }
+
+            // Quotes only auto-pair at a word boundary (start of block, after
+            // whitespace/opening punctuation) or when wrapping a selection.
+            // Mid-word (e.g. the apostrophe in "don't") just converts to the
+            // closing smart-quote glyph in place, no pairing. This extension
+            // owns quote handling end-to-end rather than deferring to
+            // Typography's own quote rules: tiptap always runs the combined
+            // input-rules plugin before any extension's custom
+            // addProseMirrorPlugins, so Typography would otherwise intercept
+            // every quote keystroke before this plugin ever saw it — see the
+            // Typography.configure() call below that turns its quote options
+            // off to avoid the two fighting over the same keystroke.
+            if (quotePair) {
+              if (hasSelection) {
+                return wrapOrInsert(
+                  quotePair[0],
+                  quotePair[1]
+                );
+              }
+              const charBefore =
+                from > 0
+                  ? state.doc.textBetween(
+                      from - 1,
+                      from
+                    )
+                  : "";
+              const atBoundary =
+                charBefore === "" ||
+                /[\s([{<'"‘“]/.test(
+                  charBefore
+                );
+              if (atBoundary) {
+                return wrapOrInsert(
+                  quotePair[0],
+                  quotePair[1]
+                );
+              }
+              view.dispatch(
+                state.tr.insertText(
+                  quotePair[1],
+                  from,
+                  to
+                )
+              );
+              return true;
+            }
+
+            return false;
+          }
+        }
+      })
+    ];
+  },
+  addKeyboardShortcuts() {
+    return {
+      // Deleting between an empty pair removes both characters together
+      // instead of leaving an orphaned opening/closing character behind.
+      Backspace: () => {
+        const { state, view } =
+          this.editor;
+        const dispatch = (
+          tr: typeof state.tr
+        ) => view.dispatch(tr);
+        const { selection } = state;
+        if (!selection.empty)
+          return false;
+        const pos = selection.from;
+        if (
+          pos < 1 ||
+          pos >= state.doc.content.size
+        )
+          return false;
+        const before =
+          state.doc.textBetween(
+            pos - 1,
+            pos
+          );
+        const after =
+          state.doc.textBetween(
+            pos,
+            pos + 1
+          );
+        if (
+          PAIR_CLOSERS[after] === before
+        ) {
+          dispatch(
+            state.tr.delete(
+              pos - 1,
+              pos + 1
+            )
+          );
+          return true;
+        }
+        return false;
+      }
+    };
+  }
+});
 
 export const Editor: React.FC<
   EditorProps
@@ -4800,7 +5133,26 @@ export const Editor: React.FC<
       Highlight.configure({
         multicolor: true
       }),
-      UnderlineExtension
+      UnderlineExtension,
+      Details,
+      DetailsSummary,
+      DetailsContent,
+      // Quote conversion is handled entirely by AutoPair (see its comments) —
+      // disable Typography's own quote rules so the two don't fight over the
+      // same keystroke.
+      Typography.configure({
+        openDoubleQuote: false,
+        closeDoubleQuote: false,
+        openSingleQuote: false,
+        closeSingleQuote: false
+      }),
+      AutoPair,
+      Subscript.extend({
+        excludes: "superscript"
+      }),
+      Superscript.extend({
+        excludes: "subscript"
+      })
     ],
     content: getHTMLFromMarkdown(
       initialContent
@@ -7140,6 +7492,32 @@ export const Editor: React.FC<
           .toggleBlockquote()
           .run();
         break;
+      case "toggle":
+        editor
+          .chain()
+          .focus()
+          .insertContent({
+            type: "details",
+            content: [
+              {
+                type: "detailsSummary",
+                content: [
+                  {
+                    type: "text",
+                    text: "Toggle"
+                  }
+                ]
+              },
+              {
+                type: "detailsContent",
+                content: [
+                  { type: "paragraph" }
+                ]
+              }
+            ]
+          })
+          .run();
+        break;
       case "callout-note":
         editor
           .chain()
@@ -7949,6 +8327,48 @@ export const Editor: React.FC<
                 title="Strikethrough"
               >
                 <Strikethrough
+                  size={16}
+                />
+              </button>
+              <button
+                onClick={() =>
+                  editor
+                    .chain()
+                    .focus()
+                    .toggleSubscript()
+                    .run()
+                }
+                className={`p-2 rounded-lg hover:bg-slate-800 hover:text-white transition ${
+                  editor.isActive(
+                    "subscript"
+                  )
+                    ? "bg-violet-600/20 text-violet-400 border border-violet-500/30"
+                    : "text-slate-400"
+                }`}
+                title="Subscript"
+              >
+                <SubscriptIcon
+                  size={16}
+                />
+              </button>
+              <button
+                onClick={() =>
+                  editor
+                    .chain()
+                    .focus()
+                    .toggleSuperscript()
+                    .run()
+                }
+                className={`p-2 rounded-lg hover:bg-slate-800 hover:text-white transition ${
+                  editor.isActive(
+                    "superscript"
+                  )
+                    ? "bg-violet-600/20 text-violet-400 border border-violet-500/30"
+                    : "text-slate-400"
+                }`}
+                title="Superscript"
+              >
+                <SuperscriptIcon
                   size={16}
                 />
               </button>
@@ -10812,6 +11232,36 @@ export const Editor: React.FC<
                   .chain()
                   .focus()
                   .toggleStrike()
+                  .run()
+            },
+            {
+              mark: "subscript",
+              icon: (
+                <SubscriptIcon
+                  size={13}
+                />
+              ),
+              title: "Subscript",
+              action: () =>
+                editor
+                  .chain()
+                  .focus()
+                  .toggleSubscript()
+                  .run()
+            },
+            {
+              mark: "superscript",
+              icon: (
+                <SuperscriptIcon
+                  size={13}
+                />
+              ),
+              title: "Superscript",
+              action: () =>
+                editor
+                  .chain()
+                  .focus()
+                  .toggleSuperscript()
                   .run()
             },
             {

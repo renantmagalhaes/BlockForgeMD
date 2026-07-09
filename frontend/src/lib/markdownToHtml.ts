@@ -18,6 +18,15 @@ export const markdownToEditorHtml = (markdown: string): string => {
     }).join('')
     return `<div data-columns="true">${colsHtml}</div>`
   })
+  // Pre-process GitHub-style <details><summary>...</summary>...</details> toggle
+  // blocks — render the body's markdown individually, same reasoning as columns
+  md = md.replace(
+    /<details>\n<summary>([^\n]*)<\/summary>\n\n([\s\S]*?)\n<\/details>\n?/g,
+    (_match, summary, body) => {
+      const rendered = marked.parse(body.trim()) as string
+      return `<details><summary>${summary.trim()}</summary><div data-type="detailsContent">${rendered}</div></details>`
+    }
+  )
   let rawHtml = marked.parse(md)
   if (typeof rawHtml !== 'string') rawHtml = ''
   rawHtml = rawHtml

@@ -601,6 +601,50 @@ body {
 .ProseMirror ul[data-type="taskList"] input[type="checkbox"] { cursor: pointer; width: 1.1em; height: 1.1em; accent-color: var(--accent); }
 .ProseMirror ul[data-type="taskList"] li[data-checked="true"] > div { text-decoration: line-through; color: var(--txt-3); }
 
+/* Toggle / details blocks */
+.ProseMirror div[data-type="details"] {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.35rem;
+  margin: 0.5rem 0;
+}
+.ProseMirror div[data-type="details"] > button {
+  flex: none;
+  width: 1.25rem;
+  height: 1.6rem;
+  margin-top: 0.1rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--txt-3);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+.ProseMirror div[data-type="details"] > button:hover { background-color: var(--bg-elevated); color: var(--txt-1); }
+.ProseMirror div[data-type="details"] > button::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 4px 0 4px 6px;
+  border-color: transparent transparent transparent currentColor;
+  display: block;
+  transition: transform 0.15s ease;
+}
+.ProseMirror div[data-type="details"].is-open > button::before { transform: rotate(90deg); }
+.ProseMirror div[data-type="details"] > div { flex: 1; min-width: 0; }
+.ProseMirror div[data-type="details"] summary {
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+  list-style: none;
+}
+.ProseMirror div[data-type="details"] div[data-type="detailsContent"] { margin-top: 0.35rem; }
+.ProseMirror div[data-type="details"] div[data-type="detailsContent"] > *:last-child { margin-bottom: 0; }
+
 /* Tables */
 .ProseMirror table { border-collapse: collapse; table-layout: fixed; width: 100%; margin: 0; overflow: hidden; }
 .ProseMirror td, .ProseMirror th {
