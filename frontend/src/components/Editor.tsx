@@ -4754,7 +4754,8 @@ export const Editor: React.FC<
           dragHandleEl.current,
         onNodeChange: (data: any) => {
           dragNodeRef.current = data;
-        }
+        },
+        nested: true
       }),
       TaskList,
       TaskItem.configure({
