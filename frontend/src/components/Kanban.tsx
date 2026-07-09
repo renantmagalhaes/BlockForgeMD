@@ -1757,26 +1757,37 @@ const Kanban: React.FC<KanbanProps> = ({
           if (isCollapsed) {
             const count = getTasksByColumn(col).length
             return (
-              <div
-                key={col}
-                onClick={() => toggleColCollapse(col)}
-                title={`${col} (${count} cards) — click to expand`}
-                className="flex flex-col items-center justify-start w-12 shrink-0 min-h-[500px] md:min-h-[180px] md:max-h-full rounded-xl bf-kanban-col cursor-pointer hover:opacity-80 transition pt-3 pb-3 gap-3"
-                style={{ borderTop: `3px solid ${accent}`, background: `color-mix(in srgb, ${accent} 7%, var(--bg-surface))` }}
-              >
-                <span
-                  className="text-[10px] font-black rounded-full w-5 h-5 flex items-center justify-center shrink-0"
-                  style={{ background: accent + '22', color: accent, border: `1px solid ${accent}44` }}
-                >
-                  {count}
-                </span>
-                <span
-                  className="text-[11px] font-black uppercase tracking-widest flex-1"
-                  style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', color: accent }}
-                >
-                  {col}
-                </span>
-              </div>
+              <Droppable droppableId={col} key={col}>
+                {(dropProvided, dropSnapshot) => (
+                  <div
+                    ref={dropProvided.innerRef}
+                    {...dropProvided.droppableProps}
+                    onClick={() => toggleColCollapse(col)}
+                    title={`${col} (${count} cards) — click to expand`}
+                    className="flex flex-col items-center justify-start w-12 shrink-0 min-h-[500px] md:min-h-[180px] md:max-h-full rounded-xl bf-kanban-col cursor-pointer hover:opacity-80 transition pt-3 pb-3 gap-3 overflow-hidden"
+                    style={{
+                      borderTop: `3px solid ${accent}`,
+                      background: dropSnapshot.isDraggingOver
+                        ? `color-mix(in srgb, ${accent} 22%, var(--bg-surface))`
+                        : `color-mix(in srgb, ${accent} 7%, var(--bg-surface))`,
+                    }}
+                  >
+                    <span
+                      className="text-[10px] font-black rounded-full w-5 h-5 flex items-center justify-center shrink-0"
+                      style={{ background: accent + '22', color: accent, border: `1px solid ${accent}44` }}
+                    >
+                      {count}
+                    </span>
+                    <span
+                      className="text-[11px] font-black uppercase tracking-widest flex-1"
+                      style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', color: accent }}
+                    >
+                      {col}
+                    </span>
+                    <div className="w-0 h-0 overflow-hidden">{dropProvided.placeholder}</div>
+                  </div>
+                )}
+              </Droppable>
             )
           }
 
