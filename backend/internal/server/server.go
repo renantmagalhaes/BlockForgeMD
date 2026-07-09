@@ -2157,6 +2157,11 @@ func (s *Server) handleMoveFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The file's relative distance to its assets folder just changed — rebase
+	// any relative asset references (cover, attachments, inline images) so
+	// they still resolve correctly at the new location.
+	rebaseAssetPathsInFile(req.From, req.To, toFull)
+
 	// Move the sub-page directory if it exists
 	// e.g. Documents/Note1.md  → sub-dir Documents/Note1/
 	//      Boards/MyBoard.board.md → sub-dir Boards/MyBoard/
@@ -2183,6 +2188,7 @@ func (s *Server) handleMoveFile(w http.ResponseWriter, r *http.Request) {
 			}
 			newRel := filepath.ToSlash(path[len(s.rootPath)+1:])
 			oldRel := fromStemRel + newRel[len(toStemRel):]
+			rebaseAssetPathsInFile(oldRel, newRel, path)
 			_ = s.db.DeleteFile(oldRel)
 			if res, err := parser.ParseFile(s.rootPath, newRel); err == nil {
 				_ = s.db.UpsertFile(res.Record, res.FrontMatter, res.Tasks)
@@ -2193,6 +2199,22 @@ func (s *Server) handleMoveFile(w http.ResponseWriter, r *http.Request) {
 
 	s.broadcastEvent(req.To)
 	respondJSON(w, map[string]string{"status": "moved", "to": req.To})
+}
+
+// rebaseAssetPathsInFile reads the file at fullPath, rewrites any relative
+// asset references so they remain valid now that the note itself has moved
+// from oldRel to newRel, and writes the result back if anything changed.
+// Best-effort: read/write failures are silently ignored, same as the
+// surrounding move logic's other best-effort re-indexing steps.
+func rebaseAssetPathsInFile(oldRel, newRel, fullPath string) {
+	content, err := os.ReadFile(fullPath)
+	if err != nil {
+		return
+	}
+	rebased := parser.RebaseAssetPaths(oldRel, newRel, string(content))
+	if rebased != string(content) {
+		_ = os.WriteFile(fullPath, []byte(rebased), 0644)
+	}
 }
 
 // ─── Workspace Handlers ───────────────────────────────────────────────────────

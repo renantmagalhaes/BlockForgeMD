@@ -61,6 +61,21 @@ func AbsoluteAssetPath(notePath, maybeRel string) string {
 	return "/" + filepath.ToSlash(joined)
 }
 
+// RebaseAssetPaths rewrites a note's relative asset references so they stay
+// valid after the note itself moves from oldPath to newPath — a relative
+// path is only correct as long as the file's own location doesn't change, so
+// every move needs its stored references recomputed for the new location.
+// Already-absolute (old-style) references are left untouched: they're
+// server-rooted, not relative to the file, so a move never affects them.
+func RebaseAssetPaths(oldPath, newPath, content string) string {
+	return RewriteAssetPaths(newPath, content, func(_ string, url string) string {
+		if isAppAssetPath(url) {
+			return url
+		}
+		return RelativeAssetPath(newPath, AbsoluteAssetPath(oldPath, url))
+	})
+}
+
 // RewriteAssetPaths applies convert to every asset reference in a note's raw
 // content: the front matter `cover` field, each `attachments` entry's `url`,
 // and every inline markdown image `![alt](url)` in the body. Used with

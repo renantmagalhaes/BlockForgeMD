@@ -6209,6 +6209,13 @@ export const Editor: React.FC<
     }
     saveTimeoutRef.current = setTimeout(
       () => {
+        // The timer has now fired — clear the ref before anything else so the
+        // unmount-flush check below can tell "nothing pending" (already saved)
+        // apart from "a debounced save is still waiting." Without this, the
+        // ref stays truthy forever after the first autosave, so every later
+        // unmount would flush again — resaving to whatever path this file
+        // had, including a path that a rename/move has since made stale.
+        saveTimeoutRef.current = null;
         executeAutoSave();
       },
       autosaveDelayRef.current
