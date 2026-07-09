@@ -1751,7 +1751,7 @@ const Kanban: React.FC<KanbanProps> = ({
                 key={col}
                 onClick={() => toggleColCollapse(col)}
                 title={`${col} (${count} cards) — click to expand`}
-                className="flex flex-col items-center justify-start w-12 shrink-0 min-h-[500px] rounded-xl bf-kanban-col cursor-pointer hover:opacity-80 transition pt-3 pb-3 gap-3"
+                className="flex flex-col items-center justify-start w-12 shrink-0 min-h-[500px] md:min-h-[180px] md:max-h-full rounded-xl bf-kanban-col cursor-pointer hover:opacity-80 transition pt-3 pb-3 gap-3"
                 style={{ borderTop: `3px solid ${accent}`, background: `color-mix(in srgb, ${accent} 7%, var(--bg-surface))` }}
               >
                 <span
@@ -1777,7 +1777,7 @@ const Kanban: React.FC<KanbanProps> = ({
           return (
             <div
               key={col}
-              className="flex flex-col rounded-xl min-h-[500px] max-h-none md:max-h-full w-[272px] shrink-0 transition-all duration-200 bf-kanban-col"
+              className="flex flex-col rounded-xl min-h-[500px] md:min-h-[180px] max-h-none md:max-h-full w-[272px] shrink-0 transition-all duration-200 bf-kanban-col"
               style={{
                 borderTop: `3px solid ${accent}`,
                 background: `color-mix(in srgb, ${accent} 7%, var(--bg-surface))`,
@@ -2066,7 +2066,11 @@ const Kanban: React.FC<KanbanProps> = ({
                 </div>
                 {columnsWithOverflow.has(col) && (
                   <div
-                    className="absolute bottom-0 left-0 right-0 h-8 flex items-end justify-center pb-1 pointer-events-none"
+                    onClick={() => {
+                      const el = columnScrollRefs.current.get(col)
+                      el?.scrollBy({ top: el.clientHeight * 0.65, behavior: 'smooth' })
+                    }}
+                    className="absolute bottom-0 left-0 right-0 h-8 flex items-end justify-center pb-1 cursor-pointer"
                     style={{ background: `linear-gradient(to bottom, transparent, color-mix(in srgb, ${accent} 16%, var(--bg-surface)) 70%)` }}
                   >
                     <ChevronDown size={14} style={{ color: accent, opacity: 0.7 }} />
