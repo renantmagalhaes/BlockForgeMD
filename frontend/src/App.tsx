@@ -51,6 +51,7 @@ import { GraphView } from './components/GraphView'
 import LoginScreen from './components/LoginScreen'
 import { useIsMobile } from './lib/useIsMobile'
 import { DialogHost, alertDialog, confirmDialog } from './lib/dialog'
+import { splitFrontMatter } from './lib/frontMatter'
 import iconDocument from './assets/icons/document.png'
 import iconTask from './assets/icons/tasks.svg'
 import iconBoard from './assets/icons/kanban-board.svg'
@@ -588,14 +589,6 @@ interface FileRecord {
   content?: string
   frontMatter?: Record<string, string>
   position?: number
-}
-
-const splitFrontMatter = (content: string) => {
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/)
-  if (match) {
-    return { frontMatterStr: match[1], body: match[2].replace(/^\r?\n+/, '') }
-  }
-  return { frontMatterStr: '', body: content }
 }
 
 const API_BASE = ''

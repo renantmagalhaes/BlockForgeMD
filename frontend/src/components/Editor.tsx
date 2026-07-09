@@ -45,6 +45,7 @@ import { ImageEditorModal } from "./ImageEditorModal";
 import { Slideshow } from "./Slideshow";
 import { markdownToEditorHtml } from "../lib/markdownToHtml";
 import { mindmapEmbedTheme } from "../lib/mindmapEmbedTheme";
+import { splitFrontMatter } from "../lib/frontMatter";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import { Table } from "@tiptap/extension-table";
@@ -6332,11 +6333,17 @@ export const Editor: React.FC<
         );
       const data = await res.json();
 
-      const html = getHTMLFromMarkdown(
+      // data.content is the raw file (front matter + body) restored from the
+      // snapshot — strip the front matter before rendering, otherwise it gets
+      // typeset as literal body text (title/tags/attachments JSON and all).
+      const { body } = splitFrontMatter(
         data.content
       );
+      const html = getHTMLFromMarkdown(
+        body
+      );
       lastSavedContentRef.current =
-        data.content;
+        body;
       editor.commands.setContent(html);
       setSaveStatus("saved");
       fetchHistory();
@@ -6548,10 +6555,17 @@ export const Editor: React.FC<
           "Failed to load snapshot content"
         );
       const data = await res.json();
+      // initialContent (the left/current side of the diff) is already
+      // front-matter-stripped body text — split this snapshot the same way
+      // so the diff compares body against body instead of body against the
+      // full raw file (which would show every front-matter field as a
+      // spurious "added" line).
       setPreviewVersion({
         timestamp,
         date,
-        content: data.content || ""
+        content: splitFrontMatter(
+          data.content || ""
+        ).body
       });
     } catch (e) {
       console.error(
