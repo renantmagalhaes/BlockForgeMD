@@ -257,6 +257,11 @@ func UpdateFrontMatterInFile(rootPath, relPath string, updates map[string]interf
 		}
 	}
 
+	// Front-matter updates (e.g. a newly uploaded cover image) always carry
+	// the app's absolute "/Workspace/assets/..." form — store it relative to
+	// this file instead, same as body images, so the vault stays portable.
+	rewriteFrontMatterAssetFields(fm, relPath, RelativeAssetPath)
+
 	// Re-serialize front matter
 	var newFmBytes []byte
 	if len(fm) > 0 {

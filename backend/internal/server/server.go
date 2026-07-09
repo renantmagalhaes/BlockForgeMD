@@ -202,6 +202,12 @@ func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// cover/attachments are indexed as stored on disk (relative, for GitHub
+	// portability) — expand to the app's absolute form for display here since
+	// this list is what card thumbnails and the editor's front matter render.
+	for i := range records {
+		parser.RewriteFrontMatterMapAssetFields(records[i].FrontMatter, records[i].Path, parser.AbsoluteAssetPath)
+	}
 	respondJSON(w, records)
 }
 
@@ -251,9 +257,14 @@ func (s *Server) handleGetFile(w http.ResponseWriter, r *http.Request) {
 
 	tasks, _ := s.db.GetTasksForFile(relPath)
 
+	// Asset references are stored on disk relative to this file (portable for
+	// GitHub etc.) — expand them back to the app's absolute form for display.
+	content := parser.RewriteAssetPaths(relPath, string(contentBytes), parser.AbsoluteAssetPath)
+	parser.RewriteFrontMatterMapAssetFields(meta.FrontMatter, relPath, parser.AbsoluteAssetPath)
+
 	response := map[string]interface{}{
 		"meta":    meta,
-		"content": string(contentBytes),
+		"content": content,
 		"tasks":   tasks,
 	}
 	respondJSON(w, response)
@@ -326,7 +337,13 @@ func (s *Server) handleSaveFile(w http.ResponseWriter, r *http.Request) {
 	s.watcher.LockPath(req.Path)
 	defer s.watcher.UnlockPath(req.Path)
 
-	err := os.WriteFile(fullPath, []byte(req.Content), 0644)
+	// Store asset references (cover, attachments, inline images) as paths
+	// relative to this file rather than the app's absolute "/Workspace/assets/..."
+	// form, so the vault stays viewable (images included) when synced to GitHub
+	// or opened as plain files elsewhere.
+	content := parser.RewriteAssetPaths(req.Path, req.Content, parser.RelativeAssetPath)
+
+	err := os.WriteFile(fullPath, []byte(content), 0644)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to write file: %v", err), http.StatusInternalServerError)
 		return
@@ -673,7 +690,11 @@ func (s *Server) handleRollbackFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.broadcastEvent(req.Path)
-	respondJSON(w, map[string]interface{}{"status": "success", "file": res.Record, "content": string(backupBytes)})
+	// The restored bytes are written to disk verbatim (whatever form that
+	// snapshot was saved in), but the response used to populate the editor
+	// needs asset paths expanded to the app's absolute form for display.
+	displayContent := parser.RewriteAssetPaths(req.Path, string(backupBytes), parser.AbsoluteAssetPath)
+	respondJSON(w, map[string]interface{}{"status": "success", "file": res.Record, "content": displayContent})
 }
 
 // sectionRoots are the standard top-level section directories present in every
@@ -1115,7 +1136,8 @@ func (s *Server) handleGetFileHistoryContent(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	respondJSON(w, map[string]string{"content": string(backupBytes)})
+	content := parser.RewriteAssetPaths(relPath, string(backupBytes), parser.AbsoluteAssetPath)
+	respondJSON(w, map[string]string{"content": content})
 }
 
 var hexColorRe = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
