@@ -5198,6 +5198,63 @@ export const Editor: React.FC<
     }
   });
 
+  // Checking a task item moves it above every unchecked sibling in its list
+  // (top-level or nested), so completed tasks never sit in the middle of an
+  // active list. Listens on the bubble phase so it runs after TaskItem's own
+  // node view has already committed the `checked` attribute change.
+  useEffect(() => {
+    if (!editor) return;
+    const dom = editor.view.dom;
+    const onChange = (event: Event) => {
+      const target = event.target as HTMLElement;
+      if (
+        !(target instanceof HTMLInputElement) ||
+        target.type !== "checkbox"
+      )
+        return;
+      const li = target.closest("li");
+      if (
+        !li ||
+        !dom.contains(li) ||
+        li.parentElement?.getAttribute("data-type") !== "taskList"
+      )
+        return;
+
+      const pos = editor.view.posAtDOM(li, 0);
+      const $pos = editor.state.doc.resolve(pos);
+      // $pos resolves to just inside the taskItem (before its first child
+      // paragraph), so the taskItem is $pos.depth and its taskList parent is
+      // one level up.
+      const listDepth = $pos.depth - 1;
+      if (listDepth < 0) return;
+      const taskList = $pos.node(listDepth);
+      if (taskList.type.name !== "taskList") return;
+      const listPos = $pos.before(listDepth);
+
+      const children: any[] = [];
+      taskList.forEach((child) => children.push(child));
+      const checkedItems = children.filter((c) => c.attrs.checked);
+      const uncheckedItems = children.filter((c) => !c.attrs.checked);
+      const desired = [...checkedItems, ...uncheckedItems];
+      const alreadySorted = desired.every((n, i) => n === children[i]);
+      if (alreadySorted) return;
+
+      const newTaskList = taskList.type.create(
+        taskList.attrs,
+        desired,
+        taskList.marks
+      );
+      const tr = editor.state.tr.replaceWith(
+        listPos,
+        listPos + taskList.nodeSize,
+        newTaskList
+      );
+      editor.view.dispatch(tr);
+    };
+    dom.addEventListener("change", onChange);
+    return () => dom.removeEventListener("change", onChange);
+  }, [editor]);
+
   // Synchronize state values to refs on every render
   useEffect(() => {
     commandActiveRef.current =
