@@ -1871,7 +1871,7 @@ const Kanban: React.FC<KanbanProps> = ({
                 {colTasks.map((task, taskIdx) => {
                   const priority    = task.frontMatter?.priority
                   const pDef        = getPriorityDef(priority)
-                  const pColor      = pDef?.color || '#64748b'
+                  const pColor      = isCompleted ? '#64748b' : (pDef?.color || '#64748b')
                   const assignee    = task.frontMatter?.assignee
                   const dueDate     = task.frontMatter?.dueDate?.split('T')[0]
                   const duePast     = !!task.frontMatter?.dueDate && new Date(task.frontMatter.dueDate) < new Date()
@@ -1953,7 +1953,7 @@ const Kanban: React.FC<KanbanProps> = ({
                                   : { path: task.path, x: r.left, y: r.bottom + 4 }
                               )
                             }}
-                            className={`px-2 py-0.5 text-[10px] font-bold uppercase rounded-md tracking-wider border transition hover:opacity-90 cursor-pointer${priority?.toLowerCase() === 'urgent' ? ' bf-kanban-priority-urgent' : ''}`}
+                            className={`px-2 py-0.5 text-[10px] font-bold uppercase rounded-md tracking-wider border transition hover:opacity-90 cursor-pointer${priority?.toLowerCase() === 'urgent' && !isCompleted ? ' bf-kanban-priority-urgent' : ''}`}
                             style={{ background: pColor + '20', borderColor: pColor + '50', color: pColor }}
                           >
                             {priority || 'No priority'}
@@ -1974,7 +1974,7 @@ const Kanban: React.FC<KanbanProps> = ({
                         {/* Tags */}
                         <div className="flex flex-wrap gap-1 items-center" onClick={e => e.stopPropagation()}>
                           {tags.map(tag => {
-                            const tc = tagColors[tag] || '#8b5cf6'
+                            const tc = isCompleted ? '#64748b' : (tagColors[tag] || '#8b5cf6')
                             return (
                               <span
                                 key={tag}
