@@ -5073,7 +5073,20 @@ export const Editor: React.FC<
         codeBlock: false,
         link: false
       }),
-      Link.configure({
+      // tiptap's Link mark hardcodes inclusive() to mirror the `autolink`
+      // option (see @tiptap/extension-link's source) — since autolink
+      // defaults to true, so does inclusive, meaning the cursor stays
+      // "inside" the mark after a pasted/typed/inserted link: the very next
+      // character (e.g. the space you type to start a new sentence) gets
+      // absorbed into the hyperlink instead of starting plain text. This
+      // overrides just that method so the link mark stops extending past
+      // its own end, without touching autolink/linkOnPaste (typing a raw
+      // URL, or pasting one, still auto-links exactly as before).
+      Link.extend({
+        inclusive() {
+          return false;
+        }
+      }).configure({
         openOnClick: false,
         HTMLAttributes: {
           class:
