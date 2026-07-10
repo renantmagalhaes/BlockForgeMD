@@ -1026,7 +1026,31 @@ const CardDetailPanel: React.FC<{
     const path = resolvePath ? resolvePath(task.path) : task.path
     setIsSaving(true)
     try {
-      const full = fmStr ? `---\n${fmStr}\n---\n\n${content}` : content
+      // fmStr is only a locally-cached snapshot, refreshed solely by
+      // syncedUpdateFrontMatter's own explicit refetch. If the frontmatter
+      // changes through any OTHER path while this card is open — e.g. the
+      // priority/status/tags quick-editors on the board tile behind an
+      // open Modal-mode panel — this component never finds out, and
+      // reconstructing the file from the stale cached fmStr here would
+      // silently revert that change back out from under it the next time
+      // the user so much as types a character. Fetching the current
+      // frontmatter fresh right before every save closes that window at
+      // the cost of one small extra GET per autosave (autosave only fires
+      // after ~1.5s of typing inactivity, so this isn't a hot path).
+      // Falls back to the cached snapshot if the fetch fails for any
+      // reason, matching the previous behavior rather than losing the save.
+      let currentFmStr = fmStr
+      try {
+        const freshRes = await fetch(`${API_BASE}/api/file?path=${encodeURIComponent(path)}`)
+        if (freshRes.ok) {
+          const freshData = await freshRes.json()
+          currentFmStr = splitFrontMatter(freshData.content || '').fmStr
+          setFmStr(currentFmStr)
+        }
+      } catch (e) {
+        console.error('Failed to refresh front matter before save, using cached copy', e)
+      }
+      const full = currentFmStr ? `---\n${currentFmStr}\n---\n\n${content}` : content
       await fetch(`${API_BASE}/api/file`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
