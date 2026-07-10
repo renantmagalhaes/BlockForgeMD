@@ -1051,6 +1051,32 @@ const App: React.FC = () => {
   const [historyInterval, setHistoryInterval] = useState(0)
   const [historyIntervalInput, setHistoryIntervalInput] = useState('0')
   const selectedPathRef = useRef<string | null>(null)
+  // Tracks paths renamed via handleRenameFile (oldPath -> newPath), synchronously
+  // and independent of React's render/effect timing. A debounced autosave
+  // (Editor.tsx) can still be in flight — captured against the pre-rename path
+  // — when a rename completes: it fires handleSaveFile with that stale path,
+  // and without this redirect, the backend's plain MkdirAll+WriteFile happily
+  // recreates the file the rename just moved away from (a resurrected
+  // duplicate card with stale title/content). Waiting for setSelectedPath to
+  // propagate through a re-render isn't fast enough to close this — passive
+  // effects can lag behind a chained autosave's next tick — so this ref is
+  // updated the instant the move succeeds and consulted by handleSaveFile
+  // before every write.
+  const renamedPathMapRef = useRef<Map<string, string>>(new Map())
+  // Follows the redirect chain recorded in renamedPathMapRef, so any caller
+  // about to write to `path` targets wherever it actually ended up after any
+  // renames since — used by both handleSaveFile and CardDetailPanel's own
+  // content autosave (Kanban.tsx), which is a separate closure over its own
+  // task path with the exact same staleness risk.
+  const resolveRenamedPath = (path: string): string => {
+    let resolved = path
+    const seenRedirects = new Set<string>()
+    while (renamedPathMapRef.current.has(resolved) && !seenRedirects.has(resolved)) {
+      seenRedirects.add(resolved)
+      resolved = renamedPathMapRef.current.get(resolved)!
+    }
+    return resolved
+  }
   const [sidebarTooltip, setSidebarTooltip] = useState<{ label: string; y: number } | null>(null)
   const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   function showTooltip(label: string) {
@@ -1692,7 +1718,7 @@ const App: React.FC = () => {
 
   const handleSaveFile = async (content: string) => {
     if (!selectedPath) return
-    const path = selectedPath
+    const path = resolveRenamedPath(selectedPath)
     setIsSaving(true)
     const full = currentFrontMatterStr ? `---\n${currentFrontMatterStr}\n---\n\n${content}` : content
     try {
@@ -2113,13 +2139,27 @@ const App: React.FC = () => {
     }
   }
 
-  const handleRenameFile = async (oldPath: string, newTitle: string) => {
+  // Renames a file to match a new title: updates frontmatter title + H1, and
+  // moves the file on disk to match the new slug. Used by both the main
+  // document editor and Kanban card titles (Kanban.tsx), so a card rename
+  // actually renames the file instead of only patching the frontmatter title.
+  // Resolves to the file's final path (possibly unchanged, if the slug
+  // didn't change), or null on failure — callers that track this path
+  // locally (e.g. Kanban's openCardPath) need this to follow the rename.
+  const handleRenameFile = async (oldPathParam: string, newTitle: string): Promise<string | null> => {
     const trimmed = newTitle.trim()
-    if (!trimmed || !oldPath) return
+    if (!trimmed || !oldPathParam) return null
+    // Resolve through any rename that already completed for this path since
+    // this call was scheduled — see renamedPathMapRef's comment. Without
+    // this, two overlapping title-change cycles (the user kept typing while
+    // an earlier rename's round trip was still in flight) both target the
+    // same pre-rename path: this call would GET/PATCH/re-save the file the
+    // other one already moved away, resurrecting it as a duplicate.
+    const oldPath = resolveRenamedPath(oldPathParam)
     try {
       // Fetch the full file content (frontmatter + body)
       const res = await fetch(`${API_BASE}/api/file?path=${encodeURIComponent(oldPath)}`)
-      if (!res.ok) return
+      if (!res.ok) return null
       const data = await res.json()
       let fullContent: string = data.content || ''
 
@@ -2174,19 +2214,32 @@ const App: React.FC = () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ from: oldPath, to: newPath }),
         })
-        if (!moveRes.ok) { alertDialog('Failed to rename file.'); return }
+        if (!moveRes.ok) { alertDialog('Failed to rename file.'); return null }
+        // Recorded synchronously, before any further await — see
+        // renamedPathMapRef's comment at its declaration.
+        renamedPathMapRef.current.set(oldPath, newPath)
       }
 
-      if (selectedPath === oldPath) {
-        // Optimistically update files so activeFile stays defined during transition (prevents welcome-screen flicker)
-        setFiles(prev => prev.map(f => f.path === oldPath ? { ...f, path: newPath, title: trimmed } : f))
+      // Optimistically update files so any view deriving from it (the main
+      // sidebar/tree, or a Kanban board's card list) reflects the rename
+      // immediately rather than waiting on fetchFiles() below.
+      setFiles(prev => prev.map(f => f.path === oldPath ? { ...f, path: newPath, title: trimmed } : f))
+      // Compared against the always-fresh ref (not the closure-captured
+      // selectedPath) and the resolved oldPath — so this still matches when
+      // an earlier overlapping rename already moved selectedPath/oldPath
+      // forward once since this call was scheduled. Only relevant when this
+      // rename affects the file open in the *main* editor — a Kanban card
+      // rename leaves the main selectedPath (the board) untouched here.
+      if (selectedPathRef.current === oldPath) {
         setSelectedPath(newPath)
         fetchFileContent(newPath)
       }
       fetchFiles()
+      return newPath
     } catch (e) {
       console.error('Error renaming file:', e)
       alertDialog('Failed to rename file.')
+      return null
     }
   }
 
@@ -3017,6 +3070,8 @@ const App: React.FC = () => {
                 boardFrontMatter={activeFile?.frontMatter}
                 onUpdateBoardFrontMatter={selectedPath ? (updates) => handleUpdateFrontMatter(selectedPath, updates) : undefined}
                 onUpdateTaskFrontMatter={(path, updates) => handleUpdateFrontMatter(path, updates)}
+                onRenameTask={(path, newTitle) => handleRenameFile(path, newTitle)}
+                resolvePath={resolveRenamedPath}
                 onReorderCards={handleReorderCards}
                 onDeleteCard={handleDeleteFile}
                 onRenameBoard={selectedPath ? async (newName: string) => {
@@ -3081,7 +3136,7 @@ const App: React.FC = () => {
                     isSaving={isSaving}
                     frontMatter={activeFile?.frontMatter}
                     onUpdateFrontMatter={(updates) => handleUpdateFrontMatter(selectedPath, updates)}
-                    onTitleChange={(newTitle) => handleRenameFile(selectedPath, newTitle)}
+                    onTitleChange={async (newTitle) => { await handleRenameFile(selectedPath, newTitle) }}
                     boardColumns={defaultColumns}
                     onCreateSubPage={(parentPath, onCreated) => handleCreateFile('document', parentPath, onCreated, ['document'], 'Sub Page')}
                     onSelectFile={fetchFileContent}

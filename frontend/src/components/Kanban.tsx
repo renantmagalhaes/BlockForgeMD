@@ -64,6 +64,16 @@ interface KanbanProps {
   boardFrontMatter?: Record<string, string>
   onUpdateBoardFrontMatter?: (updates: Record<string, unknown>) => Promise<void>
   onUpdateTaskFrontMatter?: (path: string, updates: Record<string, unknown>) => Promise<void>
+  // Renames a task's file to match a new title (mirrors the main document
+  // editor's rename-on-title-change behavior). Resolves to the task's final
+  // path, or null on failure.
+  onRenameTask?: (path: string, newTitle: string) => Promise<string | null>
+  // Resolves a path through any rename recorded since it was captured — see
+  // App.tsx's renamedPathMapRef. CardDetailPanel's own content autosave
+  // closes over task.path the same way App.tsx's editor closes over
+  // selectedPath, and needs the same protection against writing to a path
+  // a rename has since moved away from.
+  resolvePath?: (path: string) => string
   onReorderCards?: (updates: { path: string; position: number }[]) => Promise<void>
   onDeleteCard?: (path: string) => void
   onRenameBoard?: (newName: string) => Promise<void>
@@ -888,13 +898,15 @@ const CardDetailPanel: React.FC<{
   onClose: () => void
   onSetMode: (mode: CardViewMode) => void
   onUpdateFrontMatter: (updates: Record<string, any>) => Promise<void>
+  onRenameFile?: (newTitle: string) => void | Promise<void>
+  resolvePath?: (path: string) => string
   onDelete?: () => void
   onCardSaved?: () => void
   initialPropertiesCollapsed?: boolean
   closing?: boolean
   isMobile?: boolean
   autosaveDelay?: number
-}> = ({ task, viewMode, columns, allBoardTags, tagColors, onEnsureTagColor, files, onClose, onSetMode, onUpdateFrontMatter, onDelete, onCardSaved, initialPropertiesCollapsed, closing, isMobile, autosaveDelay }) => {
+}> = ({ task, viewMode, columns, allBoardTags, tagColors, onEnsureTagColor, files, onClose, onSetMode, onUpdateFrontMatter, onRenameFile, resolvePath, onDelete, onCardSaved, initialPropertiesCollapsed, closing, isMobile, autosaveDelay }) => {
   // Modal (80vw/80vh) and Sidebar (fixed 560px) modes don't fit a phone screen —
   // mobile always gets the fullscreen layout regardless of the saved preference.
   const effectiveViewMode: CardViewMode = isMobile ? 'fullscreen' : viewMode
@@ -998,7 +1010,9 @@ const CardDetailPanel: React.FC<{
   }, [onClose])
 
   const handleSave = async (content: string) => {
-    const path = task.path
+    // Resolve through any rename recorded since this closure was created —
+    // see resolvePath's comment at its declaration (Kanban.tsx props).
+    const path = resolvePath ? resolvePath(task.path) : task.path
     setIsSaving(true)
     try {
       const full = fmStr ? `---\n${fmStr}\n---\n\n${content}` : content
@@ -1106,7 +1120,7 @@ const CardDetailPanel: React.FC<{
         isSaving={isSaving}
         frontMatter={task.frontMatter}
         onUpdateFrontMatter={syncedUpdateFrontMatter}
-        onTitleChange={(newTitle) => syncedUpdateFrontMatter({ title: newTitle })}
+        onTitleChange={onRenameFile ?? ((newTitle) => syncedUpdateFrontMatter({ title: newTitle }))}
         boardColumns={columns}
         boardTags={allBoardTags}
         tagColors={tagColors}
@@ -1187,6 +1201,8 @@ const Kanban: React.FC<KanbanProps> = ({
   boardFrontMatter,
   onUpdateBoardFrontMatter,
   onUpdateTaskFrontMatter,
+  onRenameTask,
+  resolvePath,
   onReorderCards,
   onRenameBoard,
   onCardSaved,
@@ -2212,6 +2228,14 @@ const Kanban: React.FC<KanbanProps> = ({
             onClose={closeCardPanel}
             onSetMode={handleCardViewMode}
             onUpdateFrontMatter={updates => onUpdateTaskFrontMatter?.(openCardPath, updates) ?? Promise.resolve()}
+            onRenameFile={onRenameTask ? async (newTitle: string) => {
+              const newPath = await onRenameTask(openCardPath, newTitle)
+              // The modal looks up its task by openCardPath (`tasks.find(...)`
+              // above) — without following the rename here, that lookup goes
+              // stale on the next tasks refresh and the panel would vanish.
+              if (newPath && newPath !== openCardPath) setOpenCardPath(newPath)
+            } : undefined}
+            resolvePath={resolvePath}
             onDelete={onDeleteCard ? () => { onDeleteCard(openCardPath); setOpenCardPath(null) } : undefined}
             onCardSaved={onCardSaved}
             initialPropertiesCollapsed={initialPropertiesCollapsed}

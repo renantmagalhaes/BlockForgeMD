@@ -3277,7 +3277,7 @@ interface EditorProps {
   ) => Promise<void>;
   onTitleChange?: (
     newTitle: string
-  ) => void;
+  ) => void | Promise<void>;
   boardColumns: string[];
   boardTags?: string[];
   tagColors?: Record<string, string>;
@@ -4412,6 +4412,19 @@ export const Editor: React.FC<
   const saveTimeoutRef = useRef<
     any | null
   >(null);
+  // Serializes autosave cycles: a title change makes executeAutoSave await a
+  // rename (save-to-old-path, then move-to-new-path) via onTitleChangeRef —
+  // if the user keeps typing, the debounce below can fire a *second*
+  // executeAutoSave while that rename is still in flight. Without chaining,
+  // that second call still targets the pre-rename path (React hasn't
+  // committed the new selectedPath yet), and the backend's plain
+  // MkdirAll+WriteFile happily recreates the old file the rename just moved
+  // away from — a resurrected duplicate card with stale title/content. Route
+  // every autosave through this chain so the next one can't start until the
+  // previous one's save+rename has fully landed.
+  const saveChainRef = useRef<
+    Promise<void>
+  >(Promise.resolve());
   // useEditor() has no deps array, so its onUpdate callback is captured once at
   // mount and never refreshed — reading autosaveDelay through a ref (kept fresh
   // every render below) instead of the prop directly avoids that stale closure.
@@ -6630,7 +6643,10 @@ export const Editor: React.FC<
         // unmount would flush again — resaving to whatever path this file
         // had, including a path that a rename/move has since made stale.
         saveTimeoutRef.current = null;
-        executeAutoSave();
+        // Chain rather than call directly — see saveChainRef comment above.
+        saveChainRef.current = saveChainRef.current.then(
+          executeAutoSave
+        );
       },
       autosaveDelayRef.current
     );
@@ -6647,7 +6663,11 @@ export const Editor: React.FC<
         // away from (or closed) — flush it immediately instead of silently
         // dropping the edit. This instance is remounted per file (keyed by
         // path), so onSave/executeAutoSave here still target the right file.
-        executeAutoSave();
+        // Still chained: if a previous autosave's rename is mid-flight, this
+        // flush must wait for it rather than racing it.
+        saveChainRef.current = saveChainRef.current.then(
+          executeAutoSave
+        );
       }
     };
   }, []);
@@ -6697,7 +6717,11 @@ export const Editor: React.FC<
           ) {
             lastSyncedTitleRef.current =
               firstLineText;
-            onTitleChangeRef.current(
+            // Awaited so this executeAutoSave (and thus the saveChainRef it's
+            // chained on) doesn't resolve until the rename this triggers has
+            // actually landed — otherwise a same-cycle autosave could still
+            // fire against the pre-rename path. See saveChainRef comment.
+            await onTitleChangeRef.current(
               firstLineText
             );
           }
