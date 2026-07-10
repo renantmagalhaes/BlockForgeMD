@@ -1212,12 +1212,13 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	defaultPage, _ := s.db.GetSetting("default_page", "")
 	sidebarCollapsedStr, _ := s.db.GetSetting("sidebar_collapsed", "false")
 	kanbanCardViewMode, _ := s.db.GetSetting("kanban_card_view_mode", "modal")
-	propertiesCollapsedStr, _ := s.db.GetSetting("properties_collapsed", "false")
-	kanbanPanelWidthStr, _ := s.db.GetSetting("kanban_panel_width", "560")
-	kanbanPanelWidth, err2 := strconv.Atoi(kanbanPanelWidthStr)
-	if err2 != nil || kanbanPanelWidth < 320 {
-		kanbanPanelWidth = 560
+	// Sidebar mode was removed (it was involved in a card data-loss bug) — a
+	// value saved from before that still says "sidebar" falls back to
+	// "modal" here rather than being served forward.
+	if kanbanCardViewMode == "sidebar" {
+		kanbanCardViewMode = "modal"
 	}
+	propertiesCollapsedStr, _ := s.db.GetSetting("properties_collapsed", "false")
 	autosaveDelayStr, _ := s.db.GetSetting("autosave_delay", "1500")
 	autosaveDelay, err3 := strconv.Atoi(autosaveDelayStr)
 	if err3 != nil || autosaveDelay < 100 {
@@ -1246,7 +1247,6 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"sidebar_collapsed":            sidebarCollapsedStr == "true",
 		"kanban_card_view_mode":        kanbanCardViewMode,
 		"properties_collapsed":         propertiesCollapsedStr == "true",
-		"kanban_panel_width":           kanbanPanelWidth,
 		"autosave_delay":               autosaveDelay,
 		"history_interval":             historyInterval,
 		"sidebar_bg_color":             sidebarBgColor,
@@ -1267,7 +1267,6 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		SidebarCollapsed          *bool   `json:"sidebar_collapsed"`
 		KanbanCardViewMode        string  `json:"kanban_card_view_mode"`
 		PropertiesCollapsed       *bool   `json:"properties_collapsed"`
-		KanbanPanelWidth          *int    `json:"kanban_panel_width"`
 		AutosaveDelay             *int    `json:"autosave_delay"`
 		HistoryInterval           *int    `json:"history_interval"`
 		SidebarBgColor            *string `json:"sidebar_bg_color"`
@@ -1329,7 +1328,7 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if req.KanbanCardViewMode == "modal" || req.KanbanCardViewMode == "sidebar" || req.KanbanCardViewMode == "fullscreen" {
+	if req.KanbanCardViewMode == "modal" || req.KanbanCardViewMode == "fullscreen" {
 		if err := s.db.SetSetting("kanban_card_view_mode", req.KanbanCardViewMode); err != nil {
 			http.Error(w, fmt.Sprintf("failed to save kanban_card_view_mode: %v", err), http.StatusInternalServerError)
 			return
@@ -1343,13 +1342,6 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := s.db.SetSetting("properties_collapsed", val); err != nil {
 			http.Error(w, fmt.Sprintf("failed to save properties_collapsed: %v", err), http.StatusInternalServerError)
-			return
-		}
-	}
-
-	if req.KanbanPanelWidth != nil && *req.KanbanPanelWidth >= 320 && *req.KanbanPanelWidth <= 1400 {
-		if err := s.db.SetSetting("kanban_panel_width", strconv.Itoa(*req.KanbanPanelWidth)); err != nil {
-			http.Error(w, fmt.Sprintf("failed to save kanban_panel_width: %v", err), http.StatusInternalServerError)
 			return
 		}
 	}
@@ -2218,6 +2210,21 @@ func (s *Server) handleMoveFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Hard invariant: a move/rename must never silently destroy a different,
+	// existing file at the destination — os.Rename below would otherwise
+	// atomically replace it with no way to recover. This exists specifically
+	// because a frontend race (a title-change-triggered rename overlapping a
+	// card switch) has computed a destination colliding with another card's
+	// real file, and the move happily clobbered it. Disambiguating here
+	// (same suffixing handleSaveFile's createOnly path already uses) is the
+	// last line of defense against data loss regardless of what upstream bug
+	// produces the collision — the move still succeeds, just onto a free
+	// name, instead of eating another card's file.
+	if disambiguated := uniquifyPath(s.rootPath, req.To); disambiguated != req.To {
+		req.To = disambiguated
+		toFull = filepath.Join(s.rootPath, filepath.Clean(req.To))
+	}
+
 	// Ensure destination directory exists
 	if err := os.MkdirAll(filepath.Dir(toFull), 0755); err != nil {
 		http.Error(w, "failed to create destination directory: "+err.Error(), http.StatusInternalServerError)
@@ -2271,9 +2278,16 @@ func (s *Server) handleMoveFile(w http.ResponseWriter, r *http.Request) {
 			if res, err := parser.ParseFile(s.rootPath, newRel); err == nil {
 				_ = s.db.UpsertFile(res.Record, res.FrontMatter, res.Tasks)
 			}
+			s.rewriteBacklinksToMovedFile(oldRel, newRel)
 			return nil
 		})
 	}
+
+	// Any other note (an @-mention inserted before this rename, a manual
+	// [[link]], etc.) that pointed at the old path would otherwise 404
+	// forever the moment this move lands — see rewriteBacklinksToMovedFile's
+	// comment for why this doesn't happen automatically otherwise.
+	s.rewriteBacklinksToMovedFile(req.From, req.To)
 
 	s.broadcastEvent(req.To)
 	respondJSON(w, map[string]string{"status": "moved", "to": req.To})
@@ -2293,6 +2307,68 @@ func rebaseAssetPathsInFile(oldRel, newRel, fullPath string) {
 	if rebased != string(content) {
 		_ = os.WriteFile(fullPath, []byte(rebased), 0644)
 	}
+}
+
+// rewriteBacklinksToMovedFile scans every markdown file under the moved
+// file's workspace and rewrites any [text](path) link pointing at oldRel so
+// it points at newRel instead. Renaming/moving a file only ever touches that
+// file's own content (and, via rebaseAssetPathsInFile, its own outgoing
+// asset references) — nothing previously updated *other* files that link to
+// it, so any @-mention or manual link inserted before a rename went stale
+// and 404'd forever the instant the target moved. Reuses the same
+// link-detection regex as the existing backlinks search (handleGetBacklinks)
+// so "what links here" and "what gets rewritten here" stay consistent.
+// Best-effort, matching the surrounding move logic: read/write/index
+// failures for any one file are silently skipped rather than failing the
+// whole move.
+func (s *Server) rewriteBacklinksToMovedFile(oldRel, newRel string) {
+	oldRel = filepath.ToSlash(oldRel)
+	newRel = filepath.ToSlash(newRel)
+	workspace := strings.SplitN(oldRel, "/", 2)[0]
+	searchRoot := filepath.Join(s.rootPath, workspace)
+
+	_ = filepath.WalkDir(searchRoot, func(absPath string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil || d.IsDir() || !strings.HasSuffix(absPath, ".md") {
+			return nil
+		}
+		if strings.Contains(absPath, string(os.PathSeparator)+".") {
+			return nil
+		}
+		relPath, err := filepath.Rel(s.rootPath, absPath)
+		if err != nil {
+			return nil
+		}
+		relPath = filepath.ToSlash(relPath)
+		if relPath == newRel {
+			return nil // the moved file itself
+		}
+
+		raw, err := os.ReadFile(absPath)
+		if err != nil {
+			return nil
+		}
+		content := string(raw)
+		changed := false
+		rewritten := mdLinkRe.ReplaceAllStringFunc(content, func(m string) string {
+			sub := mdLinkRe.FindStringSubmatch(m)
+			linkTarget := strings.TrimPrefix(filepath.ToSlash(sub[2]), "/")
+			if linkTarget != oldRel {
+				return m
+			}
+			changed = true
+			return "[" + sub[1] + "](" + newRel + ")"
+		})
+		if !changed {
+			return nil
+		}
+		if err := os.WriteFile(absPath, []byte(rewritten), 0644); err != nil {
+			return nil
+		}
+		if res, err := parser.ParseFile(s.rootPath, relPath); err == nil {
+			_ = s.db.UpsertFile(res.Record, res.FrontMatter, res.Tasks)
+		}
+		return nil
+	})
 }
 
 // ─── Workspace Handlers ───────────────────────────────────────────────────────

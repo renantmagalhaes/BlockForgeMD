@@ -18,7 +18,7 @@ services:
       # "database is locked" errors when /workspace lives on a NAS. This named volume shadows
       # just the .blockforge subfolder with local Docker storage so the cache never touches
       # the network share, while your actual vault files above stay on the NAS.
-      - blockforge-cache:/workspace/.blockforge
+      #- blockforge-cache:/workspace/.blockforge
     restart: unless-stopped
     # The entrypoint script runs as root, chowns /workspace to PUID:PGID,
     # then drops to that user before starting the app.
@@ -28,5 +28,5 @@ services:
       - PGID=${PGID:-1000}
       - TZ=UTC
 
-volumes:
-  blockforge-cache:
+#volumes:
+#blockforge-cache:

@@ -1042,7 +1042,7 @@ const App: React.FC = () => {
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false)
   type SidebarSection = 'favorites' | 'documents' | 'boards' | 'canvas' | 'mindmaps'
   const [activeSidebarSection, setActiveSidebarSection] = useState<SidebarSection>('documents')
-  const [kanbanCardViewMode, setKanbanCardViewMode] = useState<'modal' | 'sidebar' | 'fullscreen'>('modal')
+  const [kanbanCardViewMode, setKanbanCardViewMode] = useState<'modal' | 'fullscreen'>('modal')
   const [propertiesCollapsed, setPropertiesCollapsed] = useState(false)
   const [autosaveDelay, setAutosaveDelay] = useState(1500)
   const [autosaveDelayInput, setAutosaveDelayInput] = useState('1500')
@@ -1327,7 +1327,10 @@ const App: React.FC = () => {
         if (typeof data?.sidebar_collapsed === 'boolean') {
           setSidebarCollapsed(data.sidebar_collapsed)
         }
-        if (data?.kanban_card_view_mode === 'modal' || data?.kanban_card_view_mode === 'sidebar' || data?.kanban_card_view_mode === 'fullscreen') {
+        // Sidebar mode was removed (it was involved in a card data-loss bug) —
+        // a value saved from before that still says "sidebar" falls back to
+        // "modal" rather than being persisted forward.
+        if (data?.kanban_card_view_mode === 'modal' || data?.kanban_card_view_mode === 'fullscreen') {
           setKanbanCardViewMode(data.kanban_card_view_mode)
         }
         if (typeof data?.properties_collapsed === 'boolean') {
@@ -1430,7 +1433,7 @@ const App: React.FC = () => {
     } catch (e) { console.error('Failed to save upload_limit_mb', e) }
   }
 
-  const saveKanbanCardViewMode = async (mode: 'modal' | 'sidebar' | 'fullscreen') => {
+  const saveKanbanCardViewMode = async (mode: 'modal' | 'fullscreen') => {
     setKanbanCardViewMode(mode)
     try {
       await fetch(`${API_BASE}/api/settings`, {
@@ -3091,6 +3094,7 @@ const App: React.FC = () => {
                 onSaveCardViewMode={saveKanbanCardViewMode}
                 initialPropertiesCollapsed={propertiesCollapsed}
                 isMobile={isMobile}
+                sidebarCollapsed={sidebarCollapsed}
                 autosaveDelay={autosaveDelay}
                 activeWorkspace={activeWorkspace}
                 tagColors={tagColors}

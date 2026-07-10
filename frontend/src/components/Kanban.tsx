@@ -78,10 +78,14 @@ interface KanbanProps {
   onDeleteCard?: (path: string) => void
   onRenameBoard?: (newName: string) => Promise<void>
   onCardSaved?: () => void
-  initialCardViewMode?: 'modal' | 'sidebar' | 'fullscreen'
-  onSaveCardViewMode?: (mode: 'modal' | 'sidebar' | 'fullscreen') => void
+  initialCardViewMode?: 'modal' | 'fullscreen'
+  onSaveCardViewMode?: (mode: 'modal' | 'fullscreen') => void
   initialPropertiesCollapsed?: boolean
   isMobile?: boolean
+  // Current width of the app's own left sidebar (App.tsx), so the card
+  // panel's desktop "fullscreen" mode can leave room for it instead of
+  // covering it — see that mode's comment for why this matters.
+  sidebarCollapsed?: boolean
   autosaveDelay?: number
   activeWorkspace?: string
   tagColors?: Record<string, string>
@@ -885,7 +889,7 @@ const CardContextMenu: React.FC<{
 }
 
 // ─── CardDetailPanel ──────────────────────────────────────────────────────────
-type CardViewMode = 'modal' | 'sidebar' | 'fullscreen'
+type CardViewMode = 'modal' | 'fullscreen'
 
 const CardDetailPanel: React.FC<{
   task: FileRecord
@@ -900,21 +904,22 @@ const CardDetailPanel: React.FC<{
   onUpdateFrontMatter: (updates: Record<string, any>) => Promise<void>
   onRenameFile?: (newTitle: string) => void | Promise<void>
   resolvePath?: (path: string) => string
+  onSelectFile?: (path: string) => void
   onDelete?: () => void
   onCardSaved?: () => void
   initialPropertiesCollapsed?: boolean
   closing?: boolean
   isMobile?: boolean
+  sidebarCollapsed?: boolean
   autosaveDelay?: number
-}> = ({ task, viewMode, columns, allBoardTags, tagColors, onEnsureTagColor, files, onClose, onSetMode, onUpdateFrontMatter, onRenameFile, resolvePath, onDelete, onCardSaved, initialPropertiesCollapsed, closing, isMobile, autosaveDelay }) => {
-  // Modal (80vw/80vh) and Sidebar (fixed 560px) modes don't fit a phone screen —
-  // mobile always gets the fullscreen layout regardless of the saved preference.
+}> = ({ task, viewMode, columns, allBoardTags, tagColors, onEnsureTagColor, files, onClose, onSetMode, onUpdateFrontMatter, onRenameFile, resolvePath, onSelectFile, onDelete, onCardSaved, initialPropertiesCollapsed, closing, isMobile, sidebarCollapsed, autosaveDelay }) => {
+  // Modal (80vw/80vh) doesn't fit a phone screen — mobile always gets the
+  // fullscreen layout regardless of the saved preference.
   const effectiveViewMode: CardViewMode = isMobile ? 'fullscreen' : viewMode
   const [body, setBody]           = useState<string | null>(null)
   const [fmStr, setFmStr]         = useState('')
   const [isSaving, setIsSaving]   = useState(false)
   const [loadErr, setLoadErr]     = useState(false)
-  const [sidebarWidth, setSidebarWidth] = useState(560)
   const [mounted, setMounted]     = useState(false)
   const [contentVisible, setContentVisible] = useState(true)
   const prevPathRef = useRef(task.path)
@@ -929,12 +934,11 @@ const CardDetailPanel: React.FC<{
     }).catch(() => {})
   }
 
-  // Fetch saved sidebar width + periodic auto-version interval on mount
+  // Fetch periodic auto-version interval on mount
   useEffect(() => {
     fetch(`${API_BASE}/api/settings`)
       .then(r => r.json())
       .then(d => {
-        if (typeof d?.kanban_panel_width === 'number' && d.kanban_panel_width >= 320) setSidebarWidth(d.kanban_panel_width)
         if (typeof d?.history_interval === 'number' && d.history_interval >= 0) setHistoryIntervalMin(d.history_interval)
       })
       .catch(() => {})
@@ -1055,40 +1059,17 @@ const CardDetailPanel: React.FC<{
     }
   }
 
-  // Drag-to-resize sidebar handle
-  const handleResizeDrag = (e: React.MouseEvent) => {
-    e.preventDefault()
-    const startX = e.clientX
-    const startW = sidebarWidth
-    let finalWidth = startW
-    const onMove = (ev: MouseEvent) => {
-      finalWidth = Math.max(320, Math.min(window.innerWidth * 0.85, startW + (startX - ev.clientX)))
-      setSidebarWidth(finalWidth)
-    }
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove)
-      document.removeEventListener('mouseup', onUp)
-      fetch(`${API_BASE}/api/settings`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kanban_panel_width: Math.round(finalWidth) }),
-      }).catch(() => {})
-    }
-    document.addEventListener('mousemove', onMove)
-    document.addEventListener('mouseup', onUp)
-  }
-
   const toolbar = (
     <div className="flex items-center justify-between px-4 py-2.5 border-b border-[var(--border-1)] shrink-0 bf-kanban-col-header">
       {isMobile ? <div /> : (
         <div className="flex items-center gap-0.5 p-0.5 bf-kanban-filter-mode-track rounded-lg">
-          {(['modal', 'sidebar', 'fullscreen'] as const).map(m => (
+          {(['modal', 'fullscreen'] as const).map(m => (
             <button
               key={m}
               onClick={() => onSetMode(m)}
               className={`px-2.5 py-1 text-[10px] font-semibold rounded-md transition cursor-pointer ${viewMode === m ? 'bf-kanban-filter-mode-on' : 'bf-kanban-filter-mode-off'}`}
             >
-              {m === 'modal' ? 'Modal' : m === 'sidebar' ? 'Sidebar' : 'Fullscreen'}
+              {m === 'modal' ? 'Modal' : 'Fullscreen'}
             </button>
           ))}
         </div>
@@ -1126,7 +1107,7 @@ const CardDetailPanel: React.FC<{
         tagColors={tagColors}
         onEnsureTagColor={onEnsureTagColor}
         files={files}
-        onSelectFile={() => {}}
+        onSelectFile={onSelectFile ?? (() => {})}
         initialPropertiesCollapsed={initialPropertiesCollapsed}
         autosaveDelay={autosaveDelay}
       />
@@ -1135,34 +1116,21 @@ const CardDetailPanel: React.FC<{
 
   const active = mounted && !closing
 
-  // Fullscreen: fills the entire kanban area (app sidebar remains visible)
+  // Fullscreen: fills the entire kanban area (app sidebar remains visible).
+  // `inset-0` here would cover the full viewport, including the app's own
+  // left sidebar — on desktop, offset the left edge to match its current
+  // width (App.tsx's collapsed/expanded w-16/w-80) instead. Mobile has no
+  // persistent sidebar (it's an off-canvas drawer), so it keeps full coverage.
   if (effectiveViewMode === 'fullscreen') {
     return (
       <div
         data-card-detail-panel="true"
-        className="fixed inset-0 z-[200] flex flex-col bf-kanban-modal overflow-hidden transition-opacity duration-200 ease-out"
-        style={{ opacity: active ? 1 : 0 }}
+        className="fixed top-0 right-0 bottom-0 z-[200] flex flex-col bf-kanban-modal overflow-hidden transition-[opacity,left] duration-200 ease-out"
+        style={{
+          opacity: active ? 1 : 0,
+          left: isMobile ? 0 : (sidebarCollapsed ? '4rem' : '20rem'),
+        }}
       >
-        {toolbar}
-        {editorArea}
-      </div>
-    )
-  }
-
-  // Sidebar: fixed right panel, no backdrop, draggable left edge
-  if (effectiveViewMode === 'sidebar') {
-    return (
-      <div
-        data-card-detail-panel="true"
-        className="fixed top-0 right-0 bottom-0 z-[200] flex flex-col bf-kanban-modal shadow-2xl border-l border-[var(--border-1)] transition-transform duration-300 ease-out"
-        style={{ width: sidebarWidth, transform: active ? 'translateX(0)' : 'translateX(100%)' }}
-      >
-        {/* Drag handle */}
-        <div
-          onMouseDown={handleResizeDrag}
-          className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize z-10 hover:bg-violet-500/30 transition-colors"
-          title="Drag to resize"
-        />
         {toolbar}
         {editorArea}
       </div>
@@ -1178,7 +1146,10 @@ const CardDetailPanel: React.FC<{
         style={{
           width: '80vw', height: '80vh',
           opacity: active ? 1 : 0,
-          transform: active ? 'scale(1) translateY(0)' : 'scale(0.96) translateY(12px)',
+          // 'none' once settled — see the sidebar variant's comment above for
+          // why a lingering non-none transform (even a no-op identity one)
+          // breaks position:fixed popups nested in the editor.
+          transform: active ? 'none' : 'scale(0.96) translateY(12px)',
         }}
       >
         {toolbar}
@@ -1193,6 +1164,7 @@ const Kanban: React.FC<KanbanProps> = ({
   files,
   onMoveCard,
   onMoveCardToBoard,
+  onSelectFile,
   onDeleteCard,
   onCreateTaskInColumn,
   boardPath,
@@ -1210,6 +1182,7 @@ const Kanban: React.FC<KanbanProps> = ({
   onSaveCardViewMode,
   initialPropertiesCollapsed,
   isMobile,
+  sidebarCollapsed,
   autosaveDelay,
   activeWorkspace,
   tagColors: globalTagColors,
@@ -1313,14 +1286,56 @@ const Kanban: React.FC<KanbanProps> = ({
   const [closingCard, setClosingCard]     = useState(false)
   const [cardViewMode, setCardViewMode]   = useState<CardViewMode>(initialCardViewMode ?? 'modal')
 
+  // Switching the panel to show a *different* card than whatever's already
+  // open (a board-tile click, right-click "Open", an in-editor link, or the
+  // browser's Back/Forward buttons — anything reachable while a card is
+  // open, which in Modal view is easy since the board stays visible
+  // and clickable alongside the panel) must never just swap openCardPath on
+  // an already-mounted CardDetailPanel: a delayed pending save/rename flush
+  // from the outgoing card can race the incoming card's session and
+  // corrupt/delete a card's file entirely. This was caught happening for
+  // real, twice — once via a direct switch, once via the browser Back
+  // button replaying a switch through a *raw* setOpenCardPath call that
+  // bypassed this same protection. A save meant for the card being switched
+  // away from landed with the *new* card's content, then got moved onto the
+  // new card's path, deleting the original file.
+  //
+  // This is the ONLY place allowed to change openCardPath to a different
+  // card — every caller (openCard, the popstate handler) must route through
+  // it rather than calling setOpenCardPath directly. It always fully closes
+  // the current card first — same as the X button — and only opens the
+  // target once that unmount has actually committed, via a separate
+  // timeout tick (collapsing both into one batched update would skip the
+  // unmount and reproduce the exact same race). Opening a card when none is
+  // open yet has nothing to race against, so that case opens immediately.
+  // `onSettled` runs once the target is actually open — callers that need
+  // to push a browser history entry do it there, not before.
+  const safeSwitchCard = (path: string, onSettled?: () => void) => {
+    if (openCardPath && openCardPath !== path) {
+      setClosingCard(true)
+      setTimeout(() => {
+        setOpenCardPath(null)
+        setClosingCard(false)
+        setTimeout(() => {
+          setOpenCardPath(path)
+          onSettled?.()
+        }, 50)
+      }, 280)
+      return
+    }
+    setOpenCardPath(path)
+    onSettled?.()
+  }
+
   // Opening/switching/closing a card pushes/pops real browser history entries
   // scoped to this board, so the back button steps out one card at a time
   // instead of jumping straight past the board to whatever page was open
   // before it (the card panel used to be pure local state, invisible to
   // history — a single Back press would skip over it entirely).
   const openCard = (path: string) => {
-    setOpenCardPath(path)
-    window.history.pushState({ filePath: boardPath, kanbanCardPath: path }, '', window.location.hash)
+    safeSwitchCard(path, () => {
+      window.history.pushState({ filePath: boardPath, kanbanCardPath: path }, '', window.location.hash)
+    })
   }
 
   // NOTE: this is used directly as an onClick/onClose handler in several
@@ -1341,8 +1356,10 @@ const Kanban: React.FC<KanbanProps> = ({
       if (e.state?.filePath !== boardPath) return  // navigating away from this board entirely
       const cardPath = e.state?.kanbanCardPath as string | undefined
       if (cardPath && cardPath !== openCardPath) {
-        setClosingCard(false)
-        setOpenCardPath(cardPath)
+        // Routed through safeSwitchCard (not a raw setOpenCardPath) — see
+        // its comment for why a raw swap here was the exact bug that
+        // deleted a card's content via the browser Back button.
+        safeSwitchCard(cardPath)
       } else if (!cardPath && openCardPath) {
         // Mirrors closeCardPanel's close animation, but skips the
         // history.back() call — we're already responding to one.
@@ -1395,6 +1412,20 @@ const Kanban: React.FC<KanbanProps> = ({
     if (boardFolder) return folder === boardFolder
     return folder === '' || folder === 'Tasks/'
   }), [files, boardFolder])
+
+  // Clicking an internal [[link]]/@-mention inside the card detail editor
+  // used to be wired to a hardcoded no-op — this is what actually makes it
+  // do something. If the target is another card on this board, it stays in
+  // the Kanban card panel via the (safe — see its own comment) openCard,
+  // rather than falling through to the full document view, which would
+  // otherwise visibly kick the user out of the board.
+  const handleCardLinkSelect = (path: string) => {
+    if (tasks.some(t => t.path === path)) {
+      openCard(path)
+    } else {
+      onSelectFile(path)
+    }
+  }
 
   // ── "More cards below" scroll hint per column ───────────────────────────────
   // Shows a subtle fade + down-arrow at the bottom of a column's card list
@@ -2236,11 +2267,13 @@ const Kanban: React.FC<KanbanProps> = ({
               if (newPath && newPath !== openCardPath) setOpenCardPath(newPath)
             } : undefined}
             resolvePath={resolvePath}
+            onSelectFile={handleCardLinkSelect}
             onDelete={onDeleteCard ? () => { onDeleteCard(openCardPath); setOpenCardPath(null) } : undefined}
             onCardSaved={onCardSaved}
             initialPropertiesCollapsed={initialPropertiesCollapsed}
             closing={closingCard}
             isMobile={isMobile}
+            sidebarCollapsed={sidebarCollapsed}
             autosaveDelay={autosaveDelay}
           />
         )
