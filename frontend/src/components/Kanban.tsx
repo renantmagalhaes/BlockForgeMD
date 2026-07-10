@@ -1353,11 +1353,22 @@ const Kanban: React.FC<KanbanProps> = ({
   // places, so it must not take a meaningful parameter — React would pass
   // the SyntheticEvent as the first argument, silently breaking any
   // boolean flag here (a truthy event object, not `true`/`false`).
+  //
+  // Explicitly closing (Esc, the X button, clicking outside in Modal view)
+  // means "close this card, full stop" — it is NOT the same thing as "go
+  // back one navigation step", so it must not use history.back(). If the
+  // open card had been reached via a link from a *different* card (not
+  // opened directly from the board), the previous history entry is that
+  // other card, not "nothing open" — history.back() would land there and
+  // pop that card back open instead of closing. Pushing a fresh "closed"
+  // marker state instead means closing always closes, regardless of how
+  // the open card was reached; the browser's own Back button still steps
+  // back through this and any earlier open-card entries same as before.
   const closeCardPanel = () => {
     setClosingCard(true)
     setTimeout(() => { setOpenCardPath(null); setClosingCard(false) }, 280)
     if (window.history.state?.kanbanCardPath) {
-      window.history.back()
+      window.history.pushState({ filePath: boardPath, kanbanCardPath: undefined }, '', window.location.hash)
     }
   }
 
