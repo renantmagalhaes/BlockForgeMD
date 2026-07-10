@@ -3100,6 +3100,8 @@ const App: React.FC = () => {
                 tagColors={tagColors}
                 onEnsureTagColor={ensureTagColor}
                 onSetGlobalTagColor={setTagColorManual}
+                globalLayoutOverride={globalLayoutOverride}
+                globalColumnWidthOverride={globalColumnWidthOverride}
               />
             </motion.div>
           ) : selectedPath && activeFile ? (

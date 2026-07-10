@@ -91,6 +91,11 @@ interface KanbanProps {
   tagColors?: Record<string, string>
   onEnsureTagColor?: (tag: string) => void
   onSetGlobalTagColor?: (tag: string, color: string) => void
+  // Settings > Document Layout — passed to the main document editor but,
+  // until now, never threaded through here, so a card opened from a Kanban
+  // board silently ignored both regardless of what was configured.
+  globalLayoutOverride?: string
+  globalColumnWidthOverride?: string
 }
 
 const DEFAULT_PRIORITIES: PriorityDef[] = [
@@ -912,7 +917,9 @@ const CardDetailPanel: React.FC<{
   isMobile?: boolean
   sidebarCollapsed?: boolean
   autosaveDelay?: number
-}> = ({ task, viewMode, columns, allBoardTags, tagColors, onEnsureTagColor, files, onClose, onSetMode, onUpdateFrontMatter, onRenameFile, resolvePath, onSelectFile, onDelete, onCardSaved, initialPropertiesCollapsed, closing, isMobile, sidebarCollapsed, autosaveDelay }) => {
+  globalLayoutOverride?: string
+  globalColumnWidthOverride?: string
+}> = ({ task, viewMode, columns, allBoardTags, tagColors, onEnsureTagColor, files, onClose, onSetMode, onUpdateFrontMatter, onRenameFile, resolvePath, onSelectFile, onDelete, onCardSaved, initialPropertiesCollapsed, closing, isMobile, sidebarCollapsed, autosaveDelay, globalLayoutOverride, globalColumnWidthOverride }) => {
   // Modal (80vw/80vh) doesn't fit a phone screen — mobile always gets the
   // fullscreen layout regardless of the saved preference.
   const effectiveViewMode: CardViewMode = isMobile ? 'fullscreen' : viewMode
@@ -1110,6 +1117,8 @@ const CardDetailPanel: React.FC<{
         onSelectFile={onSelectFile ?? (() => {})}
         initialPropertiesCollapsed={initialPropertiesCollapsed}
         autosaveDelay={autosaveDelay}
+        globalLayoutOverride={globalLayoutOverride}
+        globalColumnWidthOverride={globalColumnWidthOverride}
       />
     </div>
   )
@@ -1188,6 +1197,8 @@ const Kanban: React.FC<KanbanProps> = ({
   tagColors: globalTagColors,
   onEnsureTagColor,
   onSetGlobalTagColor,
+  globalLayoutOverride,
+  globalColumnWidthOverride,
 }) => {
   const [newCardTitles, setNewCardTitles] = useState<Record<string, string>>({})
   const [editingColumn, setEditingColumn] = useState<string | null>(null)
@@ -2275,6 +2286,8 @@ const Kanban: React.FC<KanbanProps> = ({
             isMobile={isMobile}
             sidebarCollapsed={sidebarCollapsed}
             autosaveDelay={autosaveDelay}
+            globalLayoutOverride={globalLayoutOverride}
+            globalColumnWidthOverride={globalColumnWidthOverride}
           />
         )
       })()}
