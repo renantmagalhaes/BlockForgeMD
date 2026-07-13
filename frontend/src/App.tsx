@@ -1051,6 +1051,7 @@ const App: React.FC = () => {
   const [historyInterval, setHistoryInterval] = useState(0)
   const [historyIntervalInput, setHistoryIntervalInput] = useState('0')
   const selectedPathRef = useRef<string | null>(null)
+  const isSavingRef = useRef(false)
   // Tracks paths renamed via handleRenameFile (oldPath -> newPath), synchronously
   // and independent of React's render/effect timing. A debounced autosave
   // (Editor.tsx) can still be in flight — captured against the pre-rename path
@@ -1544,17 +1545,43 @@ const App: React.FC = () => {
     fetchFiles()
     fetchSettings()
     const es = new EventSource(`${API_BASE}/api/sync/events`)
+    // EventSource auto-reconnects and fires onerror on every transient drop
+    // (readyState briefly cycles through CONNECTING) even when the server is
+    // completely healthy — flipping straight to "Offline" on that first event
+    // is what caused the false-positive flashes. Only report Offline if the
+    // connection hasn't recovered within a grace window; a single pending
+    // timer covers repeated onerror firings during one outage.
+    let offlineTimer: ReturnType<typeof setTimeout> | null = null
     es.addEventListener('file_update', (e: any) => {
       fetchFiles()
-      if (selectedPath && selectedPath === e.data && !isSaving) fetchFileContent(selectedPath)
+      if (selectedPathRef.current && selectedPathRef.current === e.data && !isSavingRef.current) {
+        fetchFileContent(selectedPathRef.current)
+      }
     })
-    es.onerror = () => setSyncError(true)
-    es.onopen = () => setSyncError(false)
-    return () => es.close()
-  }, [selectedPath, isSaving, authStatus])
+    es.onerror = () => {
+      if (offlineTimer) return
+      offlineTimer = setTimeout(() => {
+        setSyncError(true)
+        offlineTimer = null
+      }, 8000)
+    }
+    es.onopen = () => {
+      if (offlineTimer) {
+        clearTimeout(offlineTimer)
+        offlineTimer = null
+      }
+      setSyncError(false)
+    }
+    return () => {
+      if (offlineTimer) clearTimeout(offlineTimer)
+      es.close()
+    }
+  }, [authStatus])
 
-  // Keep ref in sync so the interval timer always checkpoints the current file
+  // Keep refs in sync so the SSE connection and interval timer always read
+  // the current file/save state without needing to be recreated on every change
   useEffect(() => { selectedPathRef.current = selectedPath }, [selectedPath])
+  useEffect(() => { isSavingRef.current = isSaving }, [isSaving])
 
   // Periodic version checkpoint (0 = disabled)
   useEffect(() => {

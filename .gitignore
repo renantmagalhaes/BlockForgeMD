@@ -35,3 +35,6 @@ frontend/.pnpm-debug.log*
 *.njsproj
 *.sln
 *.swp
+
+# claude
+.tmp

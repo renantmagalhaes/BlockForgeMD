@@ -187,10 +187,22 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "event: connected\ndata: {}\n\n")
 	flusher.Flush()
 
+	// Reverse proxies, NAS gateways, and browsers routinely reap SSE streams
+	// that sit idle too long between real events, which the frontend then
+	// (mis)reports as "Vault Offline" when the client reconnects. A periodic
+	// comment line keeps the connection alive without ever surfacing as a
+	// dispatched event (SSE comments start with ':' and are ignored by
+	// EventSource per spec).
+	keepalive := time.NewTicker(25 * time.Second)
+	defer keepalive.Stop()
+
 	for {
 		select {
 		case path := <-clientChan:
 			fmt.Fprintf(w, "event: file_update\ndata: %s\n\n", path)
+			flusher.Flush()
+		case <-keepalive.C:
+			fmt.Fprintf(w, ": keepalive\n\n")
 			flusher.Flush()
 		case <-notify:
 			return
