@@ -3498,6 +3498,13 @@ const getCommandIcon = (
           className={cls}
         />
       );
+    case "date-picker":
+      return (
+        <Calendar
+          size={s}
+          className={cls}
+        />
+      );
     default:
       return (
         <Info
@@ -3862,6 +3869,28 @@ const ImageWithCaption = Image.extend({
   }
 });
 
+const toISODateInput = (
+  d: Date
+): string => {
+  const y = d.getFullYear();
+  const m = String(
+    d.getMonth() + 1
+  ).padStart(2, "0");
+  const day = String(
+    d.getDate()
+  ).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
+
+const formatDisplayDate = (
+  d: Date
+): string =>
+  d.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric"
+  });
+
 const COMMANDS = [
   {
     id: "h1",
@@ -4062,6 +4091,14 @@ const COMMANDS = [
     desc: "Split content into three columns",
     search:
       "3 three columns layout split",
+    shortcut: undefined
+  },
+  {
+    id: "date-picker",
+    label: "Pick a Date...",
+    desc: "Choose any date from a calendar",
+    search:
+      "date calendar picker select choose",
     shortcut: undefined
   }
 ];
@@ -4662,6 +4699,35 @@ export const Editor: React.FC<
     mathEditDraft,
     setMathEditDraft
   ] = useState("");
+
+  // "/date" calendar picker popover
+  const [dateEdit, setDateEdit] =
+    useState<{
+      x: number;
+      y: number;
+    } | null>(null);
+  const [
+    dateEditDraft,
+    setDateEditDraft
+  ] = useState("");
+  const dateInputRef =
+    useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!dateEdit) return;
+    const raf = requestAnimationFrame(
+      () => {
+        try {
+          dateInputRef.current?.showPicker?.();
+        } catch {
+          // showPicker() is unsupported/blocked in some browsers —
+          // the input remains usable via a normal click either way.
+        }
+      }
+    );
+    return () =>
+      cancelAnimationFrame(raf);
+  }, [dateEdit]);
+
   _mathClickRef.current = (
     latex: string,
     pos: number
@@ -7980,6 +8046,36 @@ export const Editor: React.FC<
         setSelectedMindmapPath("");
         setEmbedType("url");
         setEmbedModalOpen(true);
+        break;
+      }
+      case "date-picker": {
+        // Open the calendar popover so the user can pick any date before inserting
+        editor.chain().focus().run();
+        const sel =
+          editor.state.selection;
+        const coords =
+          editor.view.coordsAtPos(
+            sel.from
+          );
+        setDateEditDraft(
+          toISODateInput(new Date())
+        );
+        const popoverH = 170;
+        const flipUp =
+          window.innerHeight -
+            coords.bottom <
+          popoverH;
+        setDateEdit({
+          x: coords.left,
+          y: flipUp
+            ? Math.max(
+                4,
+                coords.top -
+                  popoverH -
+                  4
+              )
+            : coords.bottom + 10
+        });
         break;
       }
     }
@@ -12381,6 +12477,99 @@ export const Editor: React.FC<
                 <button
                   onClick={() =>
                     setMathEdit(null)
+                  }
+                  className="text-[11px] px-2 py-1.5 bg-slate-800 text-slate-400 rounded-lg hover:bg-slate-700 transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+
+      {/* "/date" calendar picker popover */}
+      {dateEdit &&
+        (() => {
+          const applyDate = () => {
+            if (!dateEditDraft) {
+              setDateEdit(null);
+              return;
+            }
+            const [y, m, day] =
+              dateEditDraft
+                .split("-")
+                .map(Number);
+            const picked = new Date(
+              y,
+              m - 1,
+              day
+            );
+            editor
+              .chain()
+              .focus()
+              .insertContent(
+                formatDisplayDate(
+                  picked
+                ) + " "
+              )
+              .run();
+            setDateEdit(null);
+          };
+          return (
+            <div
+              style={{
+                position: "fixed",
+                top: `${dateEdit.y}px`,
+                left: `${Math.min(dateEdit.x, window.innerWidth - 260)}px`,
+                zIndex: 10000
+              }}
+              className="w-60 bg-[#161b22] border border-violet-500/40 rounded-xl shadow-2xl p-3 animate-in fade-in zoom-in-95 duration-100"
+              onMouseDown={(e) =>
+                e.stopPropagation()
+              }
+            >
+              <div className="text-[10px] font-semibold text-slate-400 mb-1.5 flex items-center gap-1.5">
+                <Calendar
+                  size={12}
+                  className="text-violet-400"
+                />
+                Pick a date
+              </div>
+              <input
+                ref={dateInputRef}
+                data-testid="slash-date-picker-input"
+                autoFocus
+                type="date"
+                value={dateEditDraft}
+                onChange={(e) =>
+                  setDateEditDraft(
+                    e.target.value
+                  )
+                }
+                onKeyDown={(e) => {
+                  if (
+                    e.key === "Enter"
+                  ) {
+                    e.preventDefault();
+                    applyDate();
+                  }
+                  if (
+                    e.key === "Escape"
+                  )
+                    setDateEdit(null);
+                }}
+                className="w-full bg-[#0d1117] border border-slate-700 rounded-lg px-2.5 py-1.5 text-sm text-slate-200 outline-none focus:border-violet-500 mb-2 [color-scheme:dark]"
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={applyDate}
+                  className="flex-1 text-[11px] px-2 py-1.5 bg-violet-600 text-white rounded-lg hover:bg-violet-500 transition cursor-pointer font-medium"
+                >
+                  Insert (Enter)
+                </button>
+                <button
+                  onClick={() =>
+                    setDateEdit(null)
                   }
                   className="text-[11px] px-2 py-1.5 bg-slate-800 text-slate-400 rounded-lg hover:bg-slate-700 transition cursor-pointer"
                 >
