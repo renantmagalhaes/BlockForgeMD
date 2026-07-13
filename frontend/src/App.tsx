@@ -1068,6 +1068,13 @@ const App: React.FC = () => {
   const [historyIntervalInput, setHistoryIntervalInput] = useState('0')
   const selectedPathRef = useRef<string | null>(null)
   const isSavingRef = useRef(false)
+  // Monotonic sequence number guarding `files` against stale-response races:
+  // a mounted Kanban board triggers fetchFiles() very frequently (every card
+  // save/SSE file_update), so a GET issued before a local optimistic reorder
+  // (sidebar drag, card drag) can resolve AFTER it and clobber the reorder
+  // back to the old order. Bumping this on every local optimistic mutation
+  // invalidates any in-flight fetchFiles() response that predates it.
+  const filesSeqRef = useRef(0)
   // Guards fetchWorkspaces' retry chain against firing after the
   // authenticated session that started it has ended (e.g. logout mid-retry)
   const fetchWorkspacesActiveRef = useRef(false)
@@ -1183,11 +1190,16 @@ const App: React.FC = () => {
   const [activeSearchHighlight, setActiveSearchHighlight] = useState<string | null>(null)
 
   const fetchFiles = async () => {
+    const mySeq = ++filesSeqRef.current
     try {
       setSyncError(false)
       const res = await fetch(`${API_BASE}/api/files`)
       if (!res.ok) throw new Error('Failed to fetch files')
-      setFiles((await res.json()) || [])
+      const data = (await res.json()) || []
+      // Drop this response if a newer fetchFiles() call or a local optimistic
+      // mutation (reorder) has started since this request was issued — it
+      // reflects an order that's already been superseded.
+      if (mySeq === filesSeqRef.current) setFiles(data)
     } catch (e) {
       console.error('Error fetching files', e)
       setSyncError(true)
@@ -2129,6 +2141,7 @@ const App: React.FC = () => {
       const newOrder = [...without.slice(0, insertIdx), fromFile, ...without.slice(insertIdx)]
       const updates = newOrder.map((f, idx) => ({ path: f.path, position: idx + 1 }))
 
+      filesSeqRef.current++
       setFiles(prev => {
         const posMap = new Map(updates.map(u => [u.path, u.position]))
         return [...prev].sort((a, b) => {
@@ -2193,6 +2206,7 @@ const App: React.FC = () => {
 
   const handleReorderCards = async (updates: { path: string; position: number }[]) => {
     // Optimistic update
+    filesSeqRef.current++
     setFiles(prev => {
       const posMap = new Map(updates.map(u => [u.path, u.position]))
       return prev.map(f => posMap.has(f.path) ? { ...f, position: posMap.get(f.path)! } : f)
