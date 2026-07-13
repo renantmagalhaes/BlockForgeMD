@@ -1556,6 +1556,19 @@ const App: React.FC = () => {
     }
   }
 
+  // On mobile the sidebar is an off-canvas drawer, not a collapsible rail —
+  // "collapsing" it there only hides the text labels while the drawer itself
+  // stays open, which reads as broken. So on mobile the logo/toggle button
+  // should just close the drawer instead of toggling the (desktop-only)
+  // collapsed state.
+  const handleToggleSidebarPanel = () => {
+    if (window.innerWidth < 768) {
+      setMobileDrawerOpen(false)
+    } else {
+      saveSidebarCollapsed(!sidebarCollapsed)
+    }
+  }
+
   const savePropertiesCollapsed = async (collapsed: boolean) => {
     setPropertiesCollapsed(collapsed)
     try {
@@ -2527,7 +2540,7 @@ const App: React.FC = () => {
         {/* ── Level 1: icon rail — always visible ─────────────────────────── */}
         <div className="w-16 shrink-0 flex flex-col h-full items-center pt-4 pb-3 gap-1 border-r border-slate-800/60">
           {/* Logo */}
-          <div onClick={() => saveSidebarCollapsed(!sidebarCollapsed)} onMouseEnter={showTooltip(sidebarCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar')} onMouseLeave={hideTooltip} className="h-8 w-8 rounded-lg bg-gradient-to-tr from-violet-600 to-blue-500 flex items-center justify-center font-bold text-white shadow-lg text-xs mb-2 shrink-0 cursor-pointer" title="Toggle sidebar panel">BF</div>
+          <div onClick={handleToggleSidebarPanel} onMouseEnter={showTooltip(sidebarCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar')} onMouseLeave={hideTooltip} className="h-8 w-8 rounded-lg bg-gradient-to-tr from-violet-600 to-blue-500 flex items-center justify-center font-bold text-white shadow-lg text-xs mb-2 shrink-0 cursor-pointer" title="Toggle sidebar panel">BF</div>
 
           {/* Search */}
           <button
@@ -2668,7 +2681,7 @@ const App: React.FC = () => {
 
           {/* Panel toggle */}
           <button
-            onClick={() => saveSidebarCollapsed(!sidebarCollapsed)}
+            onClick={handleToggleSidebarPanel}
             title={sidebarCollapsed ? 'Expand panel' : 'Collapse panel'}
             onMouseEnter={showTooltip(sidebarCollapsed ? 'Expand Panel' : 'Collapse Panel')} onMouseLeave={hideTooltip}
             className="w-9 h-9 flex items-center justify-center rounded-lg text-slate-300 hover:text-white hover:bg-slate-800/60 transition cursor-pointer"
