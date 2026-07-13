@@ -138,6 +138,11 @@ func (s *Server) setupRoutes() {
 		fs := http.StripPrefix(prefix, http.FileServer(http.Dir(filepath.Join(s.rootPath, workspace, "assets"))))
 		fs.ServeHTTP(w, r)
 	}))
+
+	// Serve the no-workspace-context upload fallback (see handleUploadAsset /
+	// noteAssetBase) — rare in practice, but should still resolve rather than
+	// silently 404 if it's ever hit.
+	s.router.Handle("/.assets/*", http.StripPrefix("/.assets", http.FileServer(http.Dir(filepath.Join(s.rootPath, ".assets")))))
 }
 
 // listenForWatcherUpdates streams updates from the watcher to active SSE clients
@@ -749,8 +754,10 @@ func (s *Server) noteAssetBase(notePath string) (assetsDir, urlBase, subDir stri
 			"/" + first + "/assets",
 			rest
 	}
-	// no workspace — legacy root assets dir
-	return filepath.Join(s.rootPath, "assets"), "/assets", dir
+	// notePath had no workspace-prefixed directory component — dot-prefixed
+	// so it can never be mistaken for a workspace directory (see the same
+	// reasoning in handleUploadAsset's no-notePath branch above).
+	return filepath.Join(s.rootPath, ".assets"), "/.assets", dir
 }
 
 func (s *Server) handleUploadAsset(w http.ResponseWriter, r *http.Request) {
@@ -867,8 +874,13 @@ func (s *Server) handleUploadAsset(w http.ResponseWriter, r *http.Request) {
 	if notePath != "" {
 		assetsDir, urlBase, subDir = s.noteAssetBase(notePath)
 	} else {
-		assetsDir = filepath.Join(s.rootPath, "assets")
-		urlBase = "/assets"
+		// No workspace context at all (shouldn't normally happen — every
+		// upload call site scopes notePath to a workspace). Dot-prefixed so
+		// this can never be mistaken for a workspace directory by
+		// handleListWorkspaces or the file browser, unlike the old bare
+		// "assets" folder this replaces.
+		assetsDir = filepath.Join(s.rootPath, ".assets")
+		urlBase = "/.assets"
 		subDir = ""
 	}
 
@@ -2510,7 +2522,15 @@ func (s *Server) rewriteBacklinksToMovedFile(oldRel, newRel string) {
 
 var validWorkspaceNameRe = regexp.MustCompile(`^[\w][\w\s\-]*$`)
 
-// handleListWorkspaces returns all top-level non-hidden directories in the vault.
+// handleListWorkspaces returns all top-level directories in the vault that
+// actually look like workspaces. A name-based denylist (e.g. excluding
+// "assets" or "Trash") would misfire the instant a user names an actual
+// workspace either of those — so instead this checks structure: every real
+// workspace gets Documents/Boards/Canvas/MindMaps created immediately by
+// handleCreateWorkspace, whereas incidental top-level directories (a stray
+// asset-upload folder, the legacy global Trash folder, which stores each
+// trashed item under its own id/_meta.json+content rather than section
+// names) never do, regardless of what they happen to be named.
 func (s *Server) handleListWorkspaces(w http.ResponseWriter, r *http.Request) {
 	entries, err := os.ReadDir(s.rootPath)
 	if err != nil {
@@ -2519,7 +2539,21 @@ func (s *Server) handleListWorkspaces(w http.ResponseWriter, r *http.Request) {
 	}
 	workspaces := []string{}
 	for _, e := range entries {
-		if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		children, err := os.ReadDir(filepath.Join(s.rootPath, e.Name()))
+		if err != nil {
+			continue
+		}
+		hasSection := false
+		for _, c := range children {
+			if c.IsDir() && sectionRoots[c.Name()] {
+				hasSection = true
+				break
+			}
+		}
+		if hasSection {
 			workspaces = append(workspaces, e.Name())
 		}
 	}
