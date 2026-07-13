@@ -4913,6 +4913,13 @@ export const Editor: React.FC<
   useEffect(() => {
     pasteInfoRef.current = pasteInfo;
   }, [pasteInfo]);
+  const [
+    pasteSelectedIndex,
+    setPasteSelectedIndex
+  ] = useState(0);
+  const pasteSelectedIndexRef = useRef(
+    pasteSelectedIndex
+  );
 
   const lastSavedContentRef =
     useRef<string>(
@@ -5072,8 +5079,12 @@ export const Editor: React.FC<
   const handleToastConvert = (
     type: "bookmark" | "embed"
   ) => {
-    if (!pasteInfo || !editor) return;
-    const { url, from, to } = pasteInfo;
+    // Reads pasteInfoRef rather than the pasteInfo closure variable so this
+    // still works when invoked from the editor's handleKeyDown, whose
+    // closure is captured once at mount (see the useEditor() comment below).
+    const info = pasteInfoRef.current;
+    if (!info || !editor) return;
+    const { url, from, to } = info;
     setPasteInfo(null);
 
     const content =
@@ -5328,6 +5339,7 @@ export const Editor: React.FC<
               window.innerHeight -
                 coords.bottom <
               menuH;
+            setPasteSelectedIndex(0);
             setPasteInfo({
               url: pastedText,
               from: selection.from,
@@ -5350,6 +5362,7 @@ export const Editor: React.FC<
                 : coords.bottom + 8
             });
           } catch (e) {
+            setPasteSelectedIndex(0);
             setPasteInfo({
               url: pastedText,
               from: selection.from,
@@ -5470,8 +5483,35 @@ export const Editor: React.FC<
         return false;
       },
       handleKeyDown: (_view, event) => {
-        // If link paste choices popup is open, dismiss it on any content keypress
+        // If link paste choices popup is open, Up/Down cycle through its 3
+        // options (Inline Link / Bookmark Card / Embed) and Enter picks the
+        // highlighted one; any other content keypress dismisses it instead.
         if (pasteInfoRef.current) {
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            setPasteSelectedIndex(
+              (prev) => (prev + 1) % 3
+            );
+            return true;
+          }
+          if (event.key === "ArrowUp") {
+            event.preventDefault();
+            setPasteSelectedIndex(
+              (prev) => (prev + 2) % 3
+            );
+            return true;
+          }
+          if (event.key === "Enter") {
+            event.preventDefault();
+            const idx =
+              pasteSelectedIndexRef.current;
+            if (idx === 1)
+              handleToastConvert("bookmark");
+            else if (idx === 2)
+              handleToastConvert("embed");
+            else setPasteInfo(null);
+            return true;
+          }
           if (
             ![
               "Control",
@@ -5720,6 +5760,9 @@ export const Editor: React.FC<
     emojiSelectedIndexRef.current =
       emojiSelectedIndex;
     emojiQueryRef.current = emojiQuery;
+
+    pasteSelectedIndexRef.current =
+      pasteSelectedIndex;
 
     autosaveDelayRef.current =
       autosaveDelay;
@@ -13140,7 +13183,14 @@ export const Editor: React.FC<
             onClick={() =>
               setPasteInfo(null)
             }
-            className="flex items-center space-x-2 px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-350 hover:text-slate-100 text-left cursor-pointer transition-colors w-full group"
+            onMouseEnter={() =>
+              setPasteSelectedIndex(0)
+            }
+            className={`flex items-center space-x-2 px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-350 hover:text-slate-100 text-left cursor-pointer transition-colors w-full group ${
+              pasteSelectedIndex === 0
+                ? "bg-slate-800 text-slate-100"
+                : ""
+            }`}
           >
             <Link2
               size={13}
@@ -13161,7 +13211,14 @@ export const Editor: React.FC<
                 "bookmark"
               )
             }
-            className="flex items-center space-x-2 px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-350 hover:text-slate-100 text-left cursor-pointer transition-colors w-full group"
+            onMouseEnter={() =>
+              setPasteSelectedIndex(1)
+            }
+            className={`flex items-center space-x-2 px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-350 hover:text-slate-100 text-left cursor-pointer transition-colors w-full group ${
+              pasteSelectedIndex === 1
+                ? "bg-slate-800 text-slate-100"
+                : ""
+            }`}
           >
             <BookMarked
               size={13}
@@ -13182,7 +13239,14 @@ export const Editor: React.FC<
                 "embed"
               )
             }
-            className="flex items-center space-x-2 px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-350 hover:text-slate-100 text-left cursor-pointer transition-colors w-full group"
+            onMouseEnter={() =>
+              setPasteSelectedIndex(2)
+            }
+            className={`flex items-center space-x-2 px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-350 hover:text-slate-100 text-left cursor-pointer transition-colors w-full group ${
+              pasteSelectedIndex === 2
+                ? "bg-slate-800 text-slate-100"
+                : ""
+            }`}
           >
             <MonitorPlay
               size={13}
