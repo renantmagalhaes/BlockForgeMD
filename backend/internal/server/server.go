@@ -104,6 +104,8 @@ func (s *Server) setupRoutes() {
 		r.Post("/upload", s.handleUploadAsset)
 		r.Get("/sync/events", s.handleSSE)
 		r.Get("/link-preview", s.handleLinkPreview)
+		r.Get("/embed-check", s.handleEmbedCheck)
+		r.Get("/screenshot", s.handleScreenshot)
 		r.Get("/search", s.handleSearch)
 		r.Get("/settings", s.handleGetSettings)
 		r.Post("/settings", s.handleSaveSettings)
@@ -963,6 +965,33 @@ var vimeoRegexes = []*regexp.Regexp{
 	regexp.MustCompile(`vimeo\.com/(?:video/)?(\d+)`),
 }
 
+var redditPostRegex = regexp.MustCompile(`(?i)^https?://(?:www\.|old\.|new\.|m\.)?reddit\.com/r/[^/]+/comments/[a-zA-Z0-9]+`)
+
+type redditOEmbedResponse struct {
+	Title        string `json:"title"`
+	ThumbnailURL string `json:"thumbnail_url"`
+}
+
+// fetchRedditOEmbedTitle calls Reddit's public oEmbed endpoint, which returns
+// the real post title even though Reddit's regular HTML pages serve a
+// bot-check interstitial to non-browser requests.
+func fetchRedditOEmbedTitle(pageURL string) (title, thumbnail string) {
+	client := http.Client{Timeout: 4 * time.Second}
+	resp, err := client.Get("https://www.reddit.com/oembed?url=" + url.QueryEscape(pageURL))
+	if err != nil {
+		return "", ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", ""
+	}
+	var data redditOEmbedResponse
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return "", ""
+	}
+	return data.Title, data.ThumbnailURL
+}
+
 func (s *Server) handleLinkPreview(w http.ResponseWriter, r *http.Request) {
 	rawURL := r.URL.Query().Get("url")
 	if rawURL == "" {
@@ -1016,8 +1045,26 @@ func (s *Server) handleLinkPreview(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Special case Reddit — its HTML pages serve a bot-check interstitial
+	// ("Reddit - Please wait for verification") to non-browser requests, so
+	// scraping <title>/og:title would just capture that instead of the real
+	// post title. The public oEmbed endpoint isn't gated the same way and
+	// returns the actual title directly.
+	skipGenericScrape := false
+	if redditPostRegex.MatchString(rawURL) {
+		if title, thumb := fetchRedditOEmbedTitle(rawURL); title != "" {
+			result.Title = title
+			result.SiteName = "Reddit"
+			result.Favicon = "https://www.reddit.com/favicon.ico"
+			if thumb != "" {
+				result.Image = thumb
+			}
+			skipGenericScrape = true
+		}
+	}
+
 	// Fetch page metadata if not fully populated by special embed logic
-	if result.Title == "" || result.Image == "" {
+	if !skipGenericScrape && (result.Title == "" || result.Image == "") {
 		client := http.Client{
 			Timeout: 4 * time.Second,
 		}

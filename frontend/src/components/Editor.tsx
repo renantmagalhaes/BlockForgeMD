@@ -2133,6 +2133,65 @@ const IframeViewerComponent = (
   const [isResizing, setIsResizing] =
     useState(false);
 
+  // Some sites (Reddit among them) send headers that flatly refuse to be
+  // framed — rather than show a blank/broken iframe, check first and fall
+  // back to a server-rendered screenshot when framing is blocked.
+  const [embedStatus, setEmbedStatus] =
+    useState<
+      "checking" | "ok" | "blocked"
+    >("checking");
+  useEffect(() => {
+    setEmbedStatus("checking");
+    if (!src) return;
+    const API_BASE = import.meta.env.DEV
+      ? "http://localhost:8080"
+      : "";
+    let cancelled = false;
+    fetch(
+      `${API_BASE}/api/embed-check?url=${encodeURIComponent(src)}`
+    )
+      .then((res) => {
+        if (!res.ok) throw new Error();
+        return res.json();
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setEmbedStatus(
+          data.embeddable === false
+            ? "blocked"
+            : "ok"
+        );
+      })
+      .catch(() => {
+        // Inconclusive — fail open and let the iframe attempt happen normally.
+        if (!cancelled)
+          setEmbedStatus("ok");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [src]);
+
+  // Screenshot capture itself can fail independently of the embed-check
+  // (site-level bot detection, the headless browser timing out, etc.) — when
+  // that happens, fall back further to just the site's favicon rather than a
+  // broken image.
+  const [
+    screenshotFailed,
+    setScreenshotFailed
+  ] = useState(false);
+  useEffect(() => {
+    setScreenshotFailed(false);
+  }, [src]);
+
+  const srcHostname = (() => {
+    try {
+      return new URL(src).hostname;
+    } catch {
+      return src;
+    }
+  })();
+
   const handleMouseDown = (
     e: React.MouseEvent
   ) => {
@@ -2234,12 +2293,80 @@ const IframeViewerComponent = (
           <div className="absolute inset-0 z-10 bg-transparent" />
         )}
 
-        <iframe
-          src={src}
-          className="w-full h-full border-none"
-          title="Iframe Embed"
-          allowFullScreen
-        />
+        {embedStatus === "checking" && (
+          <div className="w-full h-full flex items-center justify-center text-slate-500 text-xs gap-2">
+            <Loader2 className="animate-spin w-3.5 h-3.5" />
+            <span>Checking embed…</span>
+          </div>
+        )}
+        {embedStatus === "ok" && (
+          <iframe
+            src={src}
+            className="w-full h-full border-none"
+            title="Iframe Embed"
+            allowFullScreen
+          />
+        )}
+        {embedStatus === "blocked" &&
+          !screenshotFailed && (
+            <a
+              href={src}
+              target="_blank"
+              rel="noopener noreferrer"
+              data-embed-screenshot="true"
+              className="relative block w-full h-full bg-[#0d1117] group/screenshot"
+              title="This site blocks embedding — showing a screenshot instead. Click to open the original."
+            >
+              <img
+                src={`${
+                  import.meta.env.DEV
+                    ? "http://localhost:8080"
+                    : ""
+                }/api/screenshot?url=${encodeURIComponent(src)}`}
+                alt={`Screenshot of ${src}`}
+                className="w-full h-full object-cover object-top"
+                onError={() =>
+                  setScreenshotFailed(
+                    true
+                  )
+                }
+              />
+              <span className="absolute bottom-2 right-2 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-black/70 group-hover/screenshot:bg-black/85 text-[11px] font-semibold text-slate-200 group-hover/screenshot:text-white transition backdrop-blur-sm">
+                <ExternalLink size={12} />
+                Open original
+              </span>
+            </a>
+          )}
+        {embedStatus === "blocked" &&
+          screenshotFailed && (
+            <a
+              href={src}
+              target="_blank"
+              rel="noopener noreferrer"
+              data-embed-screenshot="true"
+              className="flex flex-col items-center justify-center gap-3 w-full h-full bg-[#0d1117] hover:bg-[#12161e] transition"
+              title="Open original"
+            >
+              <img
+                src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(srcHostname)}&sz=64`}
+                alt=""
+                className="w-10 h-10 opacity-90"
+              />
+              <div className="text-center px-4">
+                <div className="text-sm font-semibold text-slate-300">
+                  {srcHostname}
+                </div>
+                <div className="text-xs text-slate-500 mt-0.5">
+                  Can't preview this
+                  site
+                </div>
+              </div>
+              <span className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#1f242c] border border-slate-700/80 text-[11px] font-semibold text-slate-300">
+                <ExternalLink size={12} />
+                Open original
+              </span>
+            </a>
+          )}
 
         {/* Resize handle */}
         <div
@@ -5454,13 +5581,20 @@ export const Editor: React.FC<
           if (
             target.nodeName === "IMG"
           ) {
-            // Skip images inside the emoji picker or callout header
+            // Skip images inside the emoji picker, callout header, or the
+            // blocked-embed screenshot fallback — that last one is a
+            // read-only preview of an external page, not editable content,
+            // and its src is a /api/screenshot?url=... proxy URL that this
+            // modal isn't equipped to handle (it isn't a plain asset URL).
             if (
               target.closest(
                 ".epr-main"
               ) ||
               target.closest(
                 "[data-callout]"
+              ) ||
+              target.closest(
+                "[data-embed-screenshot]"
               )
             ) {
               target =
@@ -13165,7 +13299,13 @@ export const Editor: React.FC<
         )}
 
       {/* Floating Link Paste Option Picker */}
-      {pasteInfo && (
+      {/* Portaled to document.body: .editor-root-container gets a real
+          backdrop-filter in Frosted Glass mode, which makes it the containing
+          block for this popup's position:fixed — combined with the
+          container's own overflow-hidden, that clipped the popup whenever it
+          landed near the bottom of the page. Rendering outside the container
+          (like the Insert Embed modal above) keeps it truly viewport-fixed. */}
+      {pasteInfo && createPortal(
         <div
           id="link-paste-popup"
           style={{
@@ -13262,7 +13402,8 @@ export const Editor: React.FC<
               </span>
             </div>
           </button>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Version History Diff Modal Overlay */}
