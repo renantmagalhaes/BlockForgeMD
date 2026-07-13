@@ -1231,6 +1231,12 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		kanbanCardViewMode = "modal"
 	}
 	propertiesCollapsedStr, _ := s.db.GetSetting("properties_collapsed", "false")
+	glassEnabledStr, _ := s.db.GetSetting("glass_enabled", "false")
+	glassSidebarEnabledStr, _ := s.db.GetSetting("glass_sidebar_enabled", "true")
+	appBgType, _ := s.db.GetSetting("app_bg_type", "color")
+	appBgColor, _ := s.db.GetSetting("app_bg_color", "")
+	appBgImage, _ := s.db.GetSetting("app_bg_image", "")
+	docHeaderTextColor, _ := s.db.GetSetting("doc_header_text_color", "")
 	autosaveDelayStr, _ := s.db.GetSetting("autosave_delay", "1500")
 	autosaveDelay, err3 := strconv.Atoi(autosaveDelayStr)
 	if err3 != nil || autosaveDelay < 100 {
@@ -1259,6 +1265,12 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"sidebar_collapsed":            sidebarCollapsedStr == "true",
 		"kanban_card_view_mode":        kanbanCardViewMode,
 		"properties_collapsed":         propertiesCollapsedStr == "true",
+		"glass_enabled":                glassEnabledStr == "true",
+		"glass_sidebar_enabled":        glassSidebarEnabledStr == "true",
+		"app_bg_type":                  appBgType,
+		"app_bg_color":                 appBgColor,
+		"app_bg_image":                 appBgImage,
+		"doc_header_text_color":        docHeaderTextColor,
 		"autosave_delay":               autosaveDelay,
 		"history_interval":             historyInterval,
 		"sidebar_bg_color":             sidebarBgColor,
@@ -1279,10 +1291,16 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		SidebarCollapsed          *bool   `json:"sidebar_collapsed"`
 		KanbanCardViewMode        string  `json:"kanban_card_view_mode"`
 		PropertiesCollapsed       *bool   `json:"properties_collapsed"`
+		GlassEnabled              *bool   `json:"glass_enabled"`
+		GlassSidebarEnabled       *bool   `json:"glass_sidebar_enabled"`
 		AutosaveDelay             *int    `json:"autosave_delay"`
 		HistoryInterval           *int    `json:"history_interval"`
 		SidebarBgColor            *string `json:"sidebar_bg_color"`
 		SidebarTextColor          *string `json:"sidebar_text_color"`
+		AppBgType                 string  `json:"app_bg_type"`
+		AppBgColor                *string `json:"app_bg_color"`
+		AppBgImage                *string `json:"app_bg_image"`
+		DocHeaderTextColor        *string `json:"doc_header_text_color"`
 		GlobalLayoutOverride      string  `json:"global_layout_override"`
 		GlobalColumnWidthOverride string  `json:"global_column_width_override"`
 		AppFont                   string  `json:"app_font"`
@@ -1358,6 +1376,28 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if req.GlassEnabled != nil {
+		val := "false"
+		if *req.GlassEnabled {
+			val = "true"
+		}
+		if err := s.db.SetSetting("glass_enabled", val); err != nil {
+			http.Error(w, fmt.Sprintf("failed to save glass_enabled: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if req.GlassSidebarEnabled != nil {
+		val := "false"
+		if *req.GlassSidebarEnabled {
+			val = "true"
+		}
+		if err := s.db.SetSetting("glass_sidebar_enabled", val); err != nil {
+			http.Error(w, fmt.Sprintf("failed to save glass_sidebar_enabled: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
 	if req.AutosaveDelay != nil && *req.AutosaveDelay >= 100 {
 		if err := s.db.SetSetting("autosave_delay", strconv.Itoa(*req.AutosaveDelay)); err != nil {
 			http.Error(w, fmt.Sprintf("failed to save autosave_delay: %v", err), http.StatusInternalServerError)
@@ -1390,6 +1430,42 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := s.db.SetSetting("sidebar_text_color", *req.SidebarTextColor); err != nil {
 			http.Error(w, fmt.Sprintf("failed to save sidebar_text_color: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if req.AppBgType == "color" || req.AppBgType == "image" {
+		if err := s.db.SetSetting("app_bg_type", req.AppBgType); err != nil {
+			http.Error(w, fmt.Sprintf("failed to save app_bg_type: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if req.AppBgColor != nil {
+		if *req.AppBgColor != "" && !hexColorRe.MatchString(*req.AppBgColor) {
+			http.Error(w, "invalid app_bg_color value", http.StatusBadRequest)
+			return
+		}
+		if err := s.db.SetSetting("app_bg_color", *req.AppBgColor); err != nil {
+			http.Error(w, fmt.Sprintf("failed to save app_bg_color: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if req.AppBgImage != nil {
+		if err := s.db.SetSetting("app_bg_image", *req.AppBgImage); err != nil {
+			http.Error(w, fmt.Sprintf("failed to save app_bg_image: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if req.DocHeaderTextColor != nil {
+		if *req.DocHeaderTextColor != "" && !hexColorRe.MatchString(*req.DocHeaderTextColor) {
+			http.Error(w, "invalid doc_header_text_color value", http.StatusBadRequest)
+			return
+		}
+		if err := s.db.SetSetting("doc_header_text_color", *req.DocHeaderTextColor); err != nil {
+			http.Error(w, fmt.Sprintf("failed to save doc_header_text_color: %v", err), http.StatusInternalServerError)
 			return
 		}
 	}

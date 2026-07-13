@@ -39,6 +39,10 @@ import {
   Presentation,
   BrainCircuit,
   Menu,
+  Sparkles,
+  Image as ImageIcon,
+  Upload,
+  Palette,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import Editor from './components/Editor'
@@ -846,6 +850,32 @@ const App: React.FC = () => {
     else document.documentElement.style.removeProperty('--sidebar-text-override')
   }, [sidebarTextColor])
 
+  // Document header (Home / file path / Delete) text color — same
+  // override-variable pattern as the sidebar colors above.
+  const [docHeaderTextColor, setDocHeaderTextColorState] = useState<string>(
+    () => localStorage.getItem('bf-doc-header-text') || ''
+  )
+  useEffect(() => {
+    if (docHeaderTextColor) document.documentElement.style.setProperty('--doc-header-text-override', docHeaderTextColor)
+    else document.documentElement.style.removeProperty('--doc-header-text-override')
+  }, [docHeaderTextColor])
+
+  // ── App-wide background (solid color or image) ────────────────────────────
+  // The "wallpaper" the Frosted Glass effect blurs against — without a
+  // distinct background here, blurred panels have nothing visually different
+  // to reveal behind them.
+  const [appBgType, setAppBgTypeState] = useState<'color' | 'image'>(
+    () => (localStorage.getItem('bf-app-bg-type') as 'color' | 'image') || 'color'
+  )
+  const [appBgColor, setAppBgColorState] = useState<string>(
+    () => localStorage.getItem('bf-app-bg-color') || ''
+  )
+  const [appBgImage, setAppBgImageState] = useState<string>(
+    () => localStorage.getItem('bf-app-bg-image') || ''
+  )
+  const [appBgUploading, setAppBgUploading] = useState(false)
+  const appBgFileInputRef = useRef<HTMLInputElement>(null)
+
   // ── App font ──────────────────────────────────────────────────────────────
   const [appFont, setAppFont] = useState<string>(() => {
     return localStorage.getItem('blockforge_app_font') || 'inter'
@@ -883,6 +913,70 @@ const App: React.FC = () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sidebar_text_color: c }),
     }).catch(e => console.error('Failed to save sidebar_text_color', e))
+  }
+
+  const handleSetAppBgType = (t: 'color' | 'image') => {
+    setAppBgTypeState(t)
+    localStorage.setItem('bf-app-bg-type', t)
+    fetch(`${API_BASE}/api/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ app_bg_type: t }),
+    }).catch(e => console.error('Failed to save app_bg_type', e))
+  }
+
+  const handleSetAppBgColor = (c: string) => {
+    setAppBgColorState(c)
+    localStorage.setItem('bf-app-bg-color', c)
+    fetch(`${API_BASE}/api/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ app_bg_color: c }),
+    }).catch(e => console.error('Failed to save app_bg_color', e))
+  }
+
+  const handleSetAppBgImage = (url: string) => {
+    setAppBgImageState(url)
+    localStorage.setItem('bf-app-bg-image', url)
+    fetch(`${API_BASE}/api/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ app_bg_image: url }),
+    }).catch(e => console.error('Failed to save app_bg_image', e))
+  }
+
+  const handleUploadAppBgImage = async (file: File) => {
+    setAppBgUploading(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      // The backend only registers a static-file route for workspace-scoped
+      // assets (/{workspace}/assets/*) — omitting notePath entirely lands the
+      // upload in a root-level /assets folder that nothing actually serves,
+      // so the image 404s. Passing a synthetic notePath scoped to the active
+      // workspace steers it into the same, already-routable assets folder
+      // every other upload (covers, attachments) uses.
+      const notePath = activeWorkspace ? `${activeWorkspace}/_appearance` : ''
+      const url = notePath
+        ? `${API_BASE}/api/upload?notePath=${encodeURIComponent(notePath)}`
+        : `${API_BASE}/api/upload`
+      const res = await fetch(url, { method: 'POST', body: formData })
+      if (!res.ok) {
+        let message = 'Upload failed.'
+        try {
+          const data = await res.json()
+          if (data?.error) message = data.error
+        } catch { /* response wasn't JSON */ }
+        throw new Error(message)
+      }
+      const data = await res.json()
+      if (data.url) handleSetAppBgImage(data.url)
+    } catch (e) {
+      console.error('Failed to upload app background image', e)
+      alertDialog(e instanceof Error ? e.message : 'Failed to upload image.')
+    } finally {
+      setAppBgUploading(false)
+    }
   }
 
   const [files, setFiles] = useState<FileRecord[]>([])
@@ -1060,6 +1154,8 @@ const App: React.FC = () => {
   const [activeSidebarSection, setActiveSidebarSection] = useState<SidebarSection>('documents')
   const [kanbanCardViewMode, setKanbanCardViewMode] = useState<'modal' | 'fullscreen'>('modal')
   const [propertiesCollapsed, setPropertiesCollapsed] = useState(false)
+  const [glassEnabled, setGlassEnabled] = useState(false)
+  const [glassSidebarEnabled, setGlassSidebarEnabled] = useState(true)
   const [autosaveDelay, setAutosaveDelay] = useState(1500)
   const [autosaveDelayInput, setAutosaveDelayInput] = useState('1500')
   const [uploadLimitMB, setUploadLimitMB] = useState(100)
@@ -1387,6 +1483,28 @@ const App: React.FC = () => {
         if (typeof data?.properties_collapsed === 'boolean') {
           setPropertiesCollapsed(data.properties_collapsed)
         }
+        if (typeof data?.glass_enabled === 'boolean') {
+          setGlassEnabled(data.glass_enabled)
+        }
+        if (typeof data?.glass_sidebar_enabled === 'boolean') {
+          setGlassSidebarEnabled(data.glass_sidebar_enabled)
+        }
+        if (data?.app_bg_type === 'color' || data?.app_bg_type === 'image') {
+          setAppBgTypeState(data.app_bg_type)
+          localStorage.setItem('bf-app-bg-type', data.app_bg_type)
+        }
+        if (typeof data?.app_bg_color === 'string') {
+          setAppBgColorState(data.app_bg_color)
+          localStorage.setItem('bf-app-bg-color', data.app_bg_color)
+        }
+        if (typeof data?.app_bg_image === 'string') {
+          setAppBgImageState(data.app_bg_image)
+          localStorage.setItem('bf-app-bg-image', data.app_bg_image)
+        }
+        if (typeof data?.doc_header_text_color === 'string') {
+          setDocHeaderTextColorState(data.doc_header_text_color)
+          localStorage.setItem('bf-doc-header-text', data.doc_header_text_color)
+        }
         if (typeof data?.autosave_delay === 'number' && data.autosave_delay >= 100) {
           setAutosaveDelay(data.autosave_delay)
           setAutosaveDelayInput(data.autosave_delay.toString())
@@ -1449,6 +1567,42 @@ const App: React.FC = () => {
     } catch (e) {
       console.error('Failed to save properties_collapsed', e)
     }
+  }
+
+  const saveGlassEnabled = async (enabled: boolean) => {
+    setGlassEnabled(enabled)
+    try {
+      await fetch(`${API_BASE}/api/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ glass_enabled: enabled }),
+      })
+    } catch (e) {
+      console.error('Failed to save glass_enabled', e)
+    }
+  }
+
+  const saveGlassSidebarEnabled = async (enabled: boolean) => {
+    setGlassSidebarEnabled(enabled)
+    try {
+      await fetch(`${API_BASE}/api/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ glass_sidebar_enabled: enabled }),
+      })
+    } catch (e) {
+      console.error('Failed to save glass_sidebar_enabled', e)
+    }
+  }
+
+  const handleSetDocHeaderTextColor = (c: string) => {
+    setDocHeaderTextColorState(c)
+    localStorage.setItem('bf-doc-header-text', c)
+    fetch(`${API_BASE}/api/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ doc_header_text_color: c }),
+    }).catch(e => console.error('Failed to save doc_header_text_color', e))
   }
 
   const saveHistoryInterval = async (minutes: number) => {
@@ -2345,8 +2499,18 @@ const App: React.FC = () => {
     return <LoginScreen onLoggedIn={user => { setCurrentUser(user); setAuthStatus('authenticated') }} />
   }
 
+  const appBgStyle: React.CSSProperties =
+    appBgType === 'image' && appBgImage
+      ? { backgroundImage: `url("${appBgImage}")`, backgroundSize: 'cover', backgroundPosition: 'center' }
+      : appBgType === 'color' && appBgColor
+      ? { backgroundColor: appBgColor }
+      : {}
+
   return (
-    <div className="flex h-screen bg-[#0d1117] text-slate-100 font-sans overflow-hidden app-layout-root bf-root">
+    <div
+      className={`flex h-screen bg-[#0d1117] text-slate-100 font-sans overflow-hidden app-layout-root bf-root${glassEnabled ? ' bf-glass' : ''}${glassEnabled && glassSidebarEnabled ? ' bf-glass-sidebar' : ''}`}
+      style={appBgStyle}
+    >
       {/* ── Mobile drawer backdrop ───────────────────────────────────────── */}
       {mobileDrawerOpen && (
         <div
@@ -3026,7 +3190,7 @@ const App: React.FC = () => {
           </AnimatePresence>
           </div>
 
-          <div className="p-4 border-t border-slate-800 bg-[#161b22]/50 space-y-3 bf-sidebar-footer">
+          <div className="p-4 border-t border-slate-800 space-y-3 bf-sidebar-footer">
           <div className="grid grid-cols-4 gap-2">
             <button
               onClick={() => handleCreateFile('document', W('Documents'), undefined, ['document'])}
@@ -3194,7 +3358,7 @@ const App: React.FC = () => {
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.14, ease: 'easeOut' }}
             >
-              <div className="flex justify-between items-center mb-4 no-print">
+              <div className="flex justify-between items-center mb-4 no-print bf-doc-header">
                 <div className="flex items-center gap-1.5 text-xs text-slate-400">
                   <button onClick={() => { setSelectedPath(null); setSelectedContent(''); setCurrentFrontMatterStr(''); setActiveView('editor') }} className="hover:text-violet-400 hover:underline transition">Home</button>
                   <ChevronRight size={12} />
@@ -3796,6 +3960,145 @@ const App: React.FC = () => {
                         </div>
                       </div>
 
+                      {/* App Background */}
+                      <div className="space-y-2 pt-2 border-t border-slate-800">
+                        <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
+                          App Background
+                        </label>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Replace the app's background with a solid color or an image — this is what Frosted Glass blurs behind floating panels, so it's what makes that effect actually visible.
+                        </p>
+                        <div className="flex gap-2">
+                          {([
+                            { id: 'color' as const, label: 'Solid Color', icon: <Palette size={14} /> },
+                            { id: 'image' as const, label: 'Image', icon: <ImageIcon size={14} /> },
+                          ]).map(t => (
+                            <button
+                              key={t.id}
+                              onClick={() => handleSetAppBgType(t.id)}
+                              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold border transition cursor-pointer ${
+                                appBgType === t.id
+                                  ? 'bg-violet-600/15 border-violet-500/40 text-violet-300'
+                                  : 'bg-[#1f242c] border-slate-700/80 text-slate-400 hover:text-slate-200 hover:border-slate-600'
+                              }`}
+                            >
+                              {t.icon}
+                              {t.label}
+                            </button>
+                          ))}
+                        </div>
+
+                        {appBgType === 'color' ? (
+                          <div className="flex items-center gap-2 pt-1">
+                            <input
+                              type="color"
+                              value={appBgColor || '#0d1117'}
+                              onChange={e => handleSetAppBgColor(e.target.value)}
+                              className="w-8 h-8 rounded-lg border border-slate-700 bg-transparent cursor-pointer p-0 shrink-0"
+                              title="App background color"
+                            />
+                            <input
+                              type="text"
+                              value={appBgColor}
+                              placeholder="Default"
+                              onChange={e => {
+                                const v = e.target.value
+                                if (v === '' || /^#[0-9a-fA-F]{6}$/.test(v)) handleSetAppBgColor(v)
+                                else setAppBgColorState(v)
+                              }}
+                              className="w-full bg-[#0d1220] border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-violet-500 placeholder-slate-600 font-mono"
+                            />
+                            {appBgColor && (
+                              <button
+                                onClick={() => handleSetAppBgColor('')}
+                                className="text-[10px] text-slate-500 hover:text-slate-300 transition cursor-pointer whitespace-nowrap"
+                                title="Reset to theme default"
+                              >
+                                Reset
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-3 pt-1">
+                            <input
+                              ref={appBgFileInputRef}
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={e => {
+                                const f = e.target.files?.[0]
+                                if (f) handleUploadAppBgImage(f)
+                                e.target.value = ''
+                              }}
+                            />
+                            {appBgImage && (
+                              <div
+                                className="w-14 h-10 rounded-lg border border-slate-700 bg-cover bg-center shrink-0"
+                                style={{ backgroundImage: `url("${appBgImage}")` }}
+                              />
+                            )}
+                            <button
+                              onClick={() => appBgFileInputRef.current?.click()}
+                              disabled={appBgUploading}
+                              className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold border border-slate-700/80 bg-[#1f242c] text-slate-300 hover:text-white hover:border-slate-600 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              <Upload size={14} />
+                              {appBgUploading ? 'Uploading…' : appBgImage ? 'Replace Image' : 'Upload Image'}
+                            </button>
+                            {appBgImage && (
+                              <button
+                                onClick={() => handleSetAppBgImage('')}
+                                className="text-[10px] text-slate-500 hover:text-slate-300 transition cursor-pointer whitespace-nowrap"
+                                title="Remove background image"
+                              >
+                                Remove
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Frosted Glass */}
+                      <div className="space-y-2 pt-2 border-t border-slate-800">
+                        <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
+                          Frosted Glass
+                        </label>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Blurred, semi-transparent panels for the Kanban card view and the document editor — a frosted-glass look, similar to blur effects in Linux compositor rices.
+                        </p>
+                        <div className="flex gap-2">
+                          {([
+                            { id: false, label: 'Off' },
+                            { id: true, label: 'On' },
+                          ]).map(t => (
+                            <button
+                              key={String(t.id)}
+                              onClick={() => saveGlassEnabled(t.id)}
+                              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold border transition cursor-pointer ${
+                                glassEnabled === t.id
+                                  ? 'bg-violet-600/15 border-violet-500/40 text-violet-300'
+                                  : 'bg-[#1f242c] border-slate-700/80 text-slate-400 hover:text-slate-200 hover:border-slate-600'
+                              }`}
+                            >
+                              <Sparkles size={14} />
+                              {t.label}
+                            </button>
+                          ))}
+                        </div>
+
+                        {glassEnabled && (
+                          <label className="flex items-center gap-2 pt-1 cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={glassSidebarEnabled}
+                              onChange={e => saveGlassSidebarEnabled(e.target.checked)}
+                              className="cursor-pointer"
+                            />
+                            <span className="text-xs text-slate-300">Apply to sidebar</span>
+                          </label>
+                        )}
+                      </div>
+
                       {/* App Font */}
                       <div className="space-y-2 pt-2 border-t border-slate-800">
                         <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
@@ -3930,6 +4233,45 @@ const App: React.FC = () => {
                               <span>Canvas</span>
                             </div>
                           </div>
+                        </div>
+                      </div>
+
+                      {/* Document Header Text Color */}
+                      <div className="space-y-2 pt-2 border-t border-slate-800">
+                        <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
+                          Document Header Text
+                        </label>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Override the color of the Home / file path / Delete row above each document — useful for contrast against a busy App Background, with or without Frosted Glass.
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="color"
+                            value={docHeaderTextColor || '#94a3b8'}
+                            onChange={e => handleSetDocHeaderTextColor(e.target.value)}
+                            className="w-8 h-8 rounded-lg border border-slate-700 bg-transparent cursor-pointer p-0 shrink-0"
+                            title="Document header text color"
+                          />
+                          <input
+                            type="text"
+                            value={docHeaderTextColor}
+                            placeholder="Default"
+                            onChange={e => {
+                              const v = e.target.value
+                              if (v === '' || /^#[0-9a-fA-F]{6}$/.test(v)) handleSetDocHeaderTextColor(v)
+                              else setDocHeaderTextColorState(v)
+                            }}
+                            className="w-full bg-[#0d1220] border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-violet-500 placeholder-slate-600 font-mono"
+                          />
+                          {docHeaderTextColor && (
+                            <button
+                              onClick={() => handleSetDocHeaderTextColor('')}
+                              className="text-[10px] text-slate-500 hover:text-slate-300 transition cursor-pointer whitespace-nowrap"
+                              title="Reset to theme default"
+                            >
+                              Reset
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>

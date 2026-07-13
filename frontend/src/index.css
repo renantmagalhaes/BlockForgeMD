@@ -1625,3 +1625,166 @@ a.bf-slideshow-embed-card:hover { border-color: var(--accent-border); }
   color: var(--txt-1);
 }
 
+/* ══════════════════════════════════════════════════════
+   FROSTED GLASS EFFECT (Settings → Appearance toggle)
+   Hyprland-dotfiles-style blur on elevated surfaces — the
+   Kanban card modal/fullscreen panel, the document editor,
+   and Kanban popovers all share these classes already, so
+   scoping the blur under .bf-glass on the app root covers
+   them without touching each component individually.
+══════════════════════════════════════════════════════ */
+.bf-glass .bf-kanban-modal {
+  background-color: color-mix(in srgb, var(--bg-surface) 72%, transparent);
+  backdrop-filter: blur(24px) saturate(160%);
+}
+
+/* Board Settings reuses .bf-kanban-modal for its shape/base styling, but it's
+   a small functional dialog (priorities/tags/columns), not a floating glass
+   panel — giving it the same translucent+blurred treatment as the card
+   detail modal hurts readability without adding anything useful. Keep it
+   fully opaque regardless of glass mode. */
+.bf-glass .bf-board-settings-modal {
+  background-color: var(--bg-surface) !important;
+  backdrop-filter: none !important;
+}
+
+.bf-glass .editor-root-container {
+  background-color: color-mix(in srgb, var(--bg-surface) 72%, transparent) !important;
+  backdrop-filter: blur(24px) saturate(160%);
+}
+
+.bf-glass .bf-kanban-popover {
+  background-color: color-mix(in srgb, var(--bg-elevated) 78%, transparent);
+  backdrop-filter: blur(18px) saturate(160%);
+}
+
+/* The Kanban card panel embeds the same <Editor> used standalone, which
+   brings its own .editor-root-container — nested directly inside
+   .bf-kanban-modal, that's a SECOND ~72%-opaque blurred layer stacked right
+   on top of the first, compounding toward ~92% opacity and reading as
+   plain black rather than glass. The modal already provides the one glass
+   surface here, so the embedded editor should just be transparent. */
+.bf-glass .bf-kanban-modal .editor-root-container {
+  background-color: transparent !important;
+  backdrop-filter: none !important;
+}
+
+/* The document header (Home / file path / Delete) sits directly on
+   .bf-main, which .bf-glass makes fully transparent — without its own
+   backdrop, this already-dim breadcrumb text has no guaranteed contrast
+   against an arbitrary, potentially busy wallpaper image. */
+.bf-glass .bf-doc-header {
+  background-color: color-mix(in srgb, var(--bg-surface) 65%, transparent);
+  backdrop-filter: blur(16px) saturate(160%);
+  border-radius: 10px;
+  padding: 6px 10px;
+}
+
+/* Document header text color override (Settings → Appearance) — same
+   override-variable pattern as the Sidebar Colors picker. Applies whether
+   or not Frosted Glass is on, since the default grey can be hard to read
+   against any custom App Background, glass or not. --doc-header-text-override
+   is intentionally never declared here (see the Sidebar Colors comment
+   above for why an undeclared custom property is required for var()'s
+   fallback to work). */
+.bf-doc-header .text-slate-400,
+.bf-doc-header .text-slate-500 {
+  color: var(--doc-header-text-override, var(--txt-3)) !important;
+}
+
+/* Base panes (the Kanban board itself, and the sidebar) are opaque by
+   default — without these, the App Background is completely hidden behind
+   them everywhere except inside the floating panels above, which defeats
+   the point of a custom wallpaper. Under .bf-glass they become translucent
+   and blurred too, so the wallpaper reads through the whole app, with the
+   floating panels above reading as a further, more blurred layer on top.
+
+   backdrop-filter is applied via a ::before pseudo-element rather than
+   directly on these classes: backdrop-filter (like transform/filter)
+   makes the element a new containing block for any position:fixed
+   descendant, resolving that descendant's fixed coordinates against THIS
+   box instead of the viewport. .bf-kanban specifically contains the Kanban
+   card detail panel (Modal/Fullscreen), which is position:fixed and must
+   stay anchored to the real viewport — putting backdrop-filter on a
+   ::before sibling-layer instead achieves the same visual blur without
+   .bf-kanban itself becoming that containing block. */
+/* .bf-main is a plain opaque Tailwind-colored wrapper sitting directly
+   behind the board/editor content — without clearing it, .bf-kanban's own
+   blur layer only ever blurs THAT solid color, never the wallpaper
+   underneath, no matter how transparent .bf-kanban itself is made. */
+.bf-glass .bf-main {
+  background-color: transparent !important;
+}
+
+.bf-glass .bf-kanban {
+  background-color: transparent;
+  position: relative;
+}
+.bf-glass .bf-kanban::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  backdrop-filter: blur(20px) saturate(160%);
+  background-color: color-mix(in srgb, var(--bg-app) 70%, transparent);
+}
+/* Excludes any fixed-position overlay that's a direct child of .bf-kanban —
+   the card detail panel (Modal/Fullscreen), its outer centering wrapper, and
+   the Board Settings modal's backdrop (all carry data-card-detail-panel):
+   they set their own position:fixed via a Tailwind utility class with no
+   !important, and this selector's specificity would otherwise win the
+   cascade and silently force them back to position:relative — collapsing
+   the panel into normal flow instead of covering the viewport. */
+.bf-glass .bf-kanban > *:not([data-card-detail-panel]) {
+  position: relative;
+  z-index: 1;
+}
+
+/* Sidebar glass has its own on/off toggle (Settings → Appearance →
+   Frosted Glass → Apply to Sidebar), independent of the main Frosted Glass
+   toggle — .bf-glass-sidebar is only added to the root when both are on.
+
+   Scoped to desktop (matches Tailwind's md: 768px breakpoint) only: on
+   mobile, .bf-sidebar IS the off-canvas drawer and relies on its own
+   position:fixed (shown/hidden via transform: translateX) — this rule's
+   `position: relative` has higher specificity than Tailwind's plain .fixed
+   utility and would otherwise silently win the cascade, breaking the
+   drawer's fixed positioning and dislocating the entire mobile layout. */
+@media (min-width: 768px) {
+  .bf-glass-sidebar .bf-sidebar {
+    background-color: transparent !important;
+    position: relative;
+  }
+  .bf-glass-sidebar .bf-sidebar::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    backdrop-filter: blur(20px) saturate(160%);
+    background-color: color-mix(in srgb, var(--sidebar-bg-override, var(--bg-surface)) 70%, transparent);
+  }
+  .bf-glass-sidebar .bf-sidebar > * {
+    position: relative;
+    z-index: 1;
+  }
+}
+
+/* The footer is nested INSIDE .bf-sidebar, which already provides the one
+   glass layer for the whole sidebar — giving the footer its own second
+   translucent+blurred layer on top would compound two ~70%-opaque layers
+   into something visually near-solid again, right where the Doc/Board/
+   Canvas/Map buttons and sign-out row live. Scoped to desktop to match
+   .bf-sidebar itself above — .bf-sidebar stays fully opaque on mobile, so
+   suppressing the footer's own background there would instead punch a
+   transparent hole through an otherwise-solid mobile drawer. */
+@media (min-width: 768px) {
+  .bf-glass-sidebar .bf-sidebar-footer {
+    background-color: transparent !important;
+    backdrop-filter: none !important;
+  }
+}
+

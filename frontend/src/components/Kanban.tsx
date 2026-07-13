@@ -299,9 +299,9 @@ const BoardSettingsModal: React.FC<{
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+    <div data-card-detail-panel="true" className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="bf-kanban-modal rounded-2xl w-full max-w-md mx-4 overflow-hidden"
+        className="bf-kanban-modal bf-board-settings-modal rounded-2xl w-full max-w-md mx-4 overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
         <div className="flex justify-between items-center px-5 py-4 bf-kanban-modal-header">
@@ -1170,14 +1170,14 @@ const CardDetailPanel: React.FC<{
     )
   }
 
-  // Modal: centered, 80% screen, no backdrop — outer wrapper passes clicks through
+  // Modal: centered, 90% screen, no backdrop — outer wrapper passes clicks through
   return (
-    <div className="fixed inset-0 z-[200] pointer-events-none flex items-center justify-center">
+    <div data-card-detail-panel="true" className="fixed inset-0 z-[200] pointer-events-none flex items-center justify-center">
       <div
         data-card-detail-panel="true"
         className="pointer-events-auto bf-kanban-modal rounded-2xl flex flex-col overflow-hidden shadow-2xl border border-[var(--border-1)] transition-all duration-250 ease-out"
         style={{
-          width: '80vw', height: '80vh',
+          width: '90vw', height: '90vh',
           opacity: active ? 1 : 0,
           // 'none' once settled — see the sidebar variant's comment above for
           // why a lingering non-none transform (even a no-op identity one)
