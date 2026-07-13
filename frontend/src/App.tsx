@@ -933,13 +933,29 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!activeWorkspace) return
     const controller = new AbortController()
-    fetch(`${API_BASE}/api/tag-colors?workspace=${encodeURIComponent(activeWorkspace)}`, {
-      signal: controller.signal,
-    })
-      .then(r => r.ok ? r.json() : { tagColors: {} })
-      .then(data => setTagColors(data.tagColors || {}))
-      .catch(err => { if (err.name !== 'AbortError') setTagColors({}) })
-    return () => controller.abort()
+    let cancelled = false
+    // A single flaky request (far more likely on mobile/NAS connections than
+    // a wired desktop) must not permanently wipe an already-loaded color map
+    // to {} — that's indistinguishable from "no colors were ever assigned"
+    // and every tag falls back to the default purple until a full reload.
+    // Retry instead of giving up, and never clear existing colors on failure.
+    const load = (retriesLeft = 3) => {
+      fetch(`${API_BASE}/api/tag-colors?workspace=${encodeURIComponent(activeWorkspace)}`, {
+        signal: controller.signal,
+        cache: 'no-store',
+      })
+        .then(r => (r.ok ? r.json() : Promise.reject(new Error('tag-colors fetch failed'))))
+        .then(data => { if (!cancelled) setTagColors(data.tagColors || {}) })
+        .catch(err => {
+          if (cancelled || err.name === 'AbortError') return
+          if (retriesLeft > 0) setTimeout(() => load(retriesLeft - 1), 1500)
+        })
+    }
+    load()
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
   }, [activeWorkspace]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const persistTagColors = (next: Record<string, string>) => {
@@ -1179,10 +1195,18 @@ const App: React.FC = () => {
 
   const SECTION_NAMES = new Set(['Documents', 'Boards', 'Canvas', 'MindMaps', 'Tasks'])
 
-  const fetchWorkspaces = async () => {
+  const fetchWorkspaces = async (retriesLeft = 3) => {
     try {
       const res = await fetch(`${API_BASE}/api/workspaces`)
-      if (!res.ok) return
+      if (!res.ok) {
+        // A single flaky request (mobile/NAS connections are far more prone to
+        // this than a wired desktop) must not permanently strand
+        // activeWorkspace at its initial/stale value — every workspace-scoped
+        // fetch (tag colors, favorites, search) silently no-ops while it's
+        // empty, with no other retry path to recover it.
+        if (retriesLeft > 0) setTimeout(() => fetchWorkspaces(retriesLeft - 1), 1500)
+        return
+      }
       const data = await res.json()
       const list: string[] = data.workspaces || []
 
@@ -1228,6 +1252,7 @@ const App: React.FC = () => {
       localStorage.setItem('blockforge_workspace', ws)
     } catch (e) {
       console.error('Error fetching workspaces', e)
+      if (retriesLeft > 0) setTimeout(() => fetchWorkspaces(retriesLeft - 1), 1500)
     }
   }
 
