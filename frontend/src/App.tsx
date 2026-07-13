@@ -1702,6 +1702,17 @@ const App: React.FC = () => {
     if (selectedPath && selectedPath !== path) {
       createCheckpoint(selectedPath)
     }
+    // Every file path is workspace-prefixed ("<workspace>/<section>/...").
+    // Opening a path from a workspace other than the currently active one —
+    // e.g. a deep link restored from the URL hash on a fresh page load, or an
+    // in-app link into another workspace — should bring the sidebar's
+    // workspace switcher along with it rather than silently leaving it
+    // pointed at whatever was last active.
+    const linkedWorkspace = path.includes('/') ? path.split('/')[0] : ''
+    if (linkedWorkspace && linkedWorkspace !== activeWorkspace) {
+      setActiveWorkspace(linkedWorkspace)
+      localStorage.setItem('blockforge_workspace', linkedWorkspace)
+    }
     setActiveSearchHighlight(highlightTerm)
     setMobileDrawerOpen(false)
     try {
