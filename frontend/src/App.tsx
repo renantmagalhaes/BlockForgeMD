@@ -1068,6 +1068,9 @@ const App: React.FC = () => {
   const [historyIntervalInput, setHistoryIntervalInput] = useState('0')
   const selectedPathRef = useRef<string | null>(null)
   const isSavingRef = useRef(false)
+  // Guards fetchWorkspaces' retry chain against firing after the
+  // authenticated session that started it has ended (e.g. logout mid-retry)
+  const fetchWorkspacesActiveRef = useRef(false)
   // Tracks paths renamed via handleRenameFile (oldPath -> newPath), synchronously
   // and independent of React's render/effect timing. A debounced autosave
   // (Editor.tsx) can still be in flight — captured against the pre-rename path
@@ -1196,8 +1199,14 @@ const App: React.FC = () => {
   const SECTION_NAMES = new Set(['Documents', 'Boards', 'Canvas', 'MindMaps', 'Tasks'])
 
   const fetchWorkspaces = async (retriesLeft = 3) => {
+    // The session that started this call (or its retry chain) may have ended
+    // — e.g. logout — before this invocation or its in-flight request
+    // resolves. Bail out rather than schedule another retry or apply stale
+    // data on top of whatever the next login already set up.
+    if (!fetchWorkspacesActiveRef.current) return
     try {
       const res = await fetch(`${API_BASE}/api/workspaces`)
+      if (!fetchWorkspacesActiveRef.current) return
       if (!res.ok) {
         // A single flaky request (mobile/NAS connections are far more prone to
         // this than a wired desktop) must not permanently strand
@@ -1217,6 +1226,7 @@ const App: React.FC = () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: 'Default' }),
         })
+        if (!fetchWorkspacesActiveRef.current) return
         if (migrateRes.ok) {
           const migrateData = await migrateRes.json()
           const ws = migrateData.name as string
@@ -1235,6 +1245,7 @@ const App: React.FC = () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: 'Default' }),
         })
+        if (!fetchWorkspacesActiveRef.current) return
         if (createRes.ok) {
           const createData = await createRes.json()
           const ws = createData.name as string
@@ -1252,7 +1263,9 @@ const App: React.FC = () => {
       localStorage.setItem('blockforge_workspace', ws)
     } catch (e) {
       console.error('Error fetching workspaces', e)
-      if (retriesLeft > 0) setTimeout(() => fetchWorkspaces(retriesLeft - 1), 1500)
+      if (retriesLeft > 0 && fetchWorkspacesActiveRef.current) {
+        setTimeout(() => fetchWorkspaces(retriesLeft - 1), 1500)
+      }
     }
   }
 
@@ -1566,6 +1579,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (authStatus !== 'authenticated') return
+    fetchWorkspacesActiveRef.current = true
     fetchWorkspaces()
     fetchFiles()
     fetchSettings()
@@ -1598,6 +1612,7 @@ const App: React.FC = () => {
       setSyncError(false)
     }
     return () => {
+      fetchWorkspacesActiveRef.current = false
       if (offlineTimer) clearTimeout(offlineTimer)
       es.close()
     }
