@@ -4514,6 +4514,7 @@ const App: React.FC = () => {
             transition={{ duration: 0.1, ease: 'easeOut' }}
             style={{ position: 'fixed', top: `${contextMenu.y}px`, left: `${contextMenu.x}px`, zIndex: 99999 }}
             className="w-52 bg-[#161b22] border border-slate-800 rounded-xl shadow-2xl p-1.5 flex flex-col space-y-0.5 no-scrollbar select-none"
+            onContextMenu={e => e.preventDefault()}
           >
             <div className="px-2.5 py-1 text-[9px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-850/60 mb-1 truncate">
               {contextMenu.path?.split('/').pop()?.replace(/\.(board|excalidraw|drawio|mindmap)\.md$/, '').replace(/\.md$/, '') || contextMenu.path}

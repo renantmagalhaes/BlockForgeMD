@@ -12466,6 +12466,7 @@ export const Editor: React.FC<
       {contextMenu?.open && editor && (
         <div
           data-context-menu
+          onContextMenu={e => e.preventDefault()}
           style={{
             position: "fixed",
             top: `${contextMenu.coords.top}px`,

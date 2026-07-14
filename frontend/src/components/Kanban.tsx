@@ -215,6 +215,7 @@ const ColorPalette: React.FC<{
       className="p-2 bf-kanban-popover rounded-xl w-[176px]"
       style={{ position: 'fixed', zIndex: 9999, ...style }}
       onClick={e => e.stopPropagation()}
+      onContextMenu={e => e.preventDefault()}
     >
       <div className="grid grid-cols-4 gap-1.5">
         {COLOR_PALETTE.map(c => (
@@ -300,7 +301,7 @@ const BoardSettingsModal: React.FC<{
   }
 
   return (
-    <div data-card-detail-panel="true" className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+    <div data-card-detail-panel="true" className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose} onContextMenu={e => e.preventDefault()}>
       <div
         className="bf-kanban-modal bf-board-settings-modal rounded-2xl w-full max-w-md mx-4 overflow-hidden"
         onClick={e => e.stopPropagation()}
@@ -765,6 +766,13 @@ const CardContextMenu: React.FC<{
       className="fixed z-[9999] bf-kanban-popover rounded-xl overflow-hidden shadow-2xl"
       style={{ top: pos.y, left: pos.x, minWidth: 210 }}
       onClick={e => e.stopPropagation()}
+      // This menu can end up covering an adjacent card (it's tall and
+      // positioned at the click point). Without this, a real right-click
+      // that lands on the menu itself — rather than passing through to a
+      // card underneath — falls through to the browser's native context
+      // menu instead of this one, since nothing else here calls
+      // preventDefault on contextmenu. That reads as "right-click broke".
+      onContextMenu={e => e.preventDefault()}
     >
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2.5 border-b border-[var(--border-1)]">
@@ -2228,6 +2236,7 @@ const Kanban: React.FC<KanbanProps> = ({
           className="fixed z-[9999] bf-kanban-popover rounded-xl py-1.5 min-w-[160px]"
           style={{ top: priorityPicker.y, left: priorityPicker.x }}
           onClick={e => e.stopPropagation()}
+          onContextMenu={e => e.preventDefault()}
         >
           <div className="px-3 pb-1 text-[10px] font-semibold bf-kanban-section-label uppercase tracking-wider">Priority</div>
           {priorities.map(p => {
