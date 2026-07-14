@@ -188,6 +188,7 @@ import {
   CheckSquare,
   BookOpen,
   Palette,
+  ChevronDown,
   Undo,
   Redo,
   Save,
@@ -4645,6 +4646,18 @@ export const Editor: React.FC<
   ] = useState(false);
   const [bgColorOpen, setBgColorOpen] =
     useState(false);
+  // Separate open-state from the main toolbar's text/bg color pickers above —
+  // both can be visible on screen at once (the toolbar is pinned above the
+  // document regardless of selection), so sharing state would pop both
+  // dropdowns open together whenever either one's button is clicked.
+  const [
+    bubbleTextColorOpen,
+    setBubbleTextColorOpen
+  ] = useState(false);
+  const [
+    bubbleBgColorOpen,
+    setBubbleBgColorOpen
+  ] = useState(false);
   const [
     attachmentDragOver,
     setAttachmentDragOver
@@ -5108,7 +5121,12 @@ export const Editor: React.FC<
 
   // Close color pickers on outside click
   useEffect(() => {
-    if (!textColorOpen && !bgColorOpen)
+    if (
+      !textColorOpen &&
+      !bgColorOpen &&
+      !bubbleTextColorOpen &&
+      !bubbleBgColorOpen
+    )
       return;
     const close = (e: MouseEvent) => {
       if (
@@ -5120,6 +5138,8 @@ export const Editor: React.FC<
       ) {
         setTextColorOpen(false);
         setBgColorOpen(false);
+        setBubbleTextColorOpen(false);
+        setBubbleBgColorOpen(false);
       }
     };
     document.addEventListener(
@@ -5131,7 +5151,12 @@ export const Editor: React.FC<
         "mousedown",
         close
       );
-  }, [textColorOpen, bgColorOpen]);
+  }, [
+    textColorOpen,
+    bgColorOpen,
+    bubbleTextColorOpen,
+    bubbleBgColorOpen
+  ]);
 
   // Click outside & Escape key to close inline emoji picker
   useEffect(() => {
@@ -6291,7 +6316,7 @@ export const Editor: React.FC<
           return;
         }
 
-        const BUBBLE_W = 310;
+        const BUBBLE_W = 410;
         const BUBBLE_H = 44;
         const centerX =
           rect.left + rect.width / 2;
@@ -11652,6 +11677,248 @@ export const Editor: React.FC<
           >
             <Link2 size={13} />
           </button>
+          <div className="w-px h-4 bg-slate-600/60 mx-0.5" />
+
+          {/* Text color */}
+          <div
+            className="relative"
+            data-color-picker
+          >
+            <button
+              onClick={() => {
+                setBubbleTextColorOpen(
+                  (v) => !v
+                );
+                setBubbleBgColorOpen(
+                  false
+                );
+              }}
+              className={`p-1.5 rounded-lg transition flex items-center gap-0.5 ${
+                bubbleTextColorOpen
+                  ? "bg-violet-600/20 text-violet-400 border border-violet-500/30"
+                  : "text-slate-300 hover:bg-slate-700/60 hover:text-white"
+              }`}
+              title="Text Color"
+            >
+              <span
+                className="font-bold text-[11px] leading-none"
+                style={{
+                  color:
+                    editor.getAttributes(
+                      "textStyle"
+                    ).color ||
+                    "currentColor"
+                }}
+              >
+                A
+              </span>
+              <ChevronDown
+                size={9}
+                className="opacity-60"
+              />
+            </button>
+            {bubbleTextColorOpen && (
+              <div
+                className="absolute top-full left-0 mt-1 bg-[#1a2236] border border-slate-700 rounded-lg shadow-xl py-1.5 z-50 min-w-[160px]"
+                data-color-picker
+              >
+                <div className="text-[10px] text-slate-500 mb-1 font-medium uppercase tracking-wider px-3">
+                  Text color
+                </div>
+                {TEXT_COLORS.map(
+                  (c) => {
+                    const active =
+                      c.value === null
+                        ? !editor.getAttributes(
+                            "textStyle"
+                          ).color
+                        : c.value ===
+                          editor.getAttributes(
+                            "textStyle"
+                          ).color;
+                    return (
+                      <button
+                        key={c.label}
+                        onMouseDown={(
+                          e
+                        ) => {
+                          e.preventDefault();
+                          if (c.value)
+                            editor
+                              .chain()
+                              .focus()
+                              .setColor(
+                                c.value
+                              )
+                              .run();
+                          else
+                            editor
+                              .chain()
+                              .focus()
+                              .unsetColor()
+                              .run();
+                          setBubbleTextColorOpen(
+                            false
+                          );
+                        }}
+                        className={`w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-slate-700/50 transition text-left ${active ? "bg-slate-700/40" : ""}`}
+                      >
+                        <span
+                          className="w-4 h-4 rounded-full border border-slate-600 shrink-0 flex items-center justify-center"
+                          style={{
+                            backgroundColor:
+                              c.value ??
+                              "transparent"
+                          }}
+                        >
+                          {c.value ===
+                            null && (
+                            <span className="text-slate-400 text-[9px]">
+                              ✕
+                            </span>
+                          )}
+                        </span>
+                        <span
+                          className="text-sm"
+                          style={{
+                            color:
+                              c.value ===
+                              "#000000"
+                                ? "#94a3b8"
+                                : (c.value ??
+                                  "#e2e8f0")
+                          }}
+                        >
+                          {c.label}
+                        </span>
+                        {active && (
+                          <span className="ml-auto text-violet-400 text-xs">
+                            ✓
+                          </span>
+                        )}
+                      </button>
+                    );
+                  }
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Background / highlight color */}
+          <div
+            className="relative"
+            data-color-picker
+          >
+            <button
+              onClick={() => {
+                setBubbleBgColorOpen(
+                  (v) => !v
+                );
+                setBubbleTextColorOpen(
+                  false
+                );
+              }}
+              className={`p-1.5 rounded-lg transition flex items-center gap-0.5 ${
+                bubbleBgColorOpen
+                  ? "bg-violet-600/20 text-violet-400 border border-violet-500/30"
+                  : "text-slate-300 hover:bg-slate-700/60 hover:text-white"
+              }`}
+              title="Highlight / Background Color"
+            >
+              <span
+                className="block w-3 h-3 rounded-sm border border-slate-600"
+                style={{
+                  backgroundColor:
+                    editor.getAttributes(
+                      "highlight"
+                    ).color ||
+                    "transparent"
+                }}
+              />
+              <ChevronDown
+                size={9}
+                className="opacity-60"
+              />
+            </button>
+            {bubbleBgColorOpen && (
+              <div
+                className="absolute top-full left-0 mt-1 bg-[#1a2236] border border-slate-700 rounded-lg shadow-xl py-1.5 z-50 min-w-[160px]"
+                data-color-picker
+              >
+                <div className="text-[10px] text-slate-500 mb-1 font-medium uppercase tracking-wider px-3">
+                  Highlight
+                </div>
+                {BG_COLORS.map(
+                  (c) => {
+                    const active =
+                      c.value === null
+                        ? !editor.getAttributes(
+                            "highlight"
+                          ).color
+                        : c.value ===
+                          editor.getAttributes(
+                            "highlight"
+                          ).color;
+                    return (
+                      <button
+                        key={c.label}
+                        onMouseDown={(
+                          e
+                        ) => {
+                          e.preventDefault();
+                          if (c.value)
+                            editor
+                              .chain()
+                              .focus()
+                              .setHighlight(
+                                {
+                                  color:
+                                    c.value
+                                }
+                              )
+                              .run();
+                          else
+                            editor
+                              .chain()
+                              .focus()
+                              .unsetHighlight()
+                              .run();
+                          setBubbleBgColorOpen(
+                            false
+                          );
+                        }}
+                        className={`w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-slate-700/50 transition text-left ${active ? "bg-slate-700/40" : ""}`}
+                      >
+                        <span
+                          className="w-4 h-4 rounded-sm border border-slate-600 shrink-0 flex items-center justify-center"
+                          style={{
+                            backgroundColor:
+                              c.value ??
+                              "transparent"
+                          }}
+                        >
+                          {c.value ===
+                            null && (
+                            <span className="text-slate-400 text-[9px]">
+                              ✕
+                            </span>
+                          )}
+                        </span>
+                        <span className="text-sm text-slate-200">
+                          {c.label}
+                        </span>
+                        {active && (
+                          <span className="ml-auto text-violet-400 text-xs">
+                            ✓
+                          </span>
+                        )}
+                      </button>
+                    );
+                  }
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
