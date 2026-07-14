@@ -211,6 +211,7 @@ const ColorPalette: React.FC<{
 
   return (
     <div
+      data-card-detail-panel="true"
       className="p-2 bf-kanban-popover rounded-xl w-[176px]"
       style={{ position: 'fixed', zIndex: 9999, ...style }}
       onClick={e => e.stopPropagation()}
@@ -760,6 +761,7 @@ const CardContextMenu: React.FC<{
   return (
     <div
       ref={ref}
+      data-card-detail-panel="true"
       className="fixed z-[9999] bf-kanban-popover rounded-xl overflow-hidden shadow-2xl"
       style={{ top: pos.y, left: pos.x, minWidth: 210 }}
       onClick={e => e.stopPropagation()}
@@ -2222,6 +2224,7 @@ const Kanban: React.FC<KanbanProps> = ({
       {/* ── Fixed-position popovers ── */}
       {priorityPicker && (
         <div
+          data-card-detail-panel="true"
           className="fixed z-[9999] bf-kanban-popover rounded-xl py-1.5 min-w-[160px]"
           style={{ top: priorityPicker.y, left: priorityPicker.x }}
           onClick={e => e.stopPropagation()}
