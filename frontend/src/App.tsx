@@ -1264,6 +1264,9 @@ const App: React.FC = () => {
   const [globalColumnWidthOverride, setGlobalColumnWidthOverride] = useState<string>(() => {
     return localStorage.getItem('blockforge_global_column_width_override') || 'per-page'
   })
+  const [dateFormat, setDateFormat] = useState<string>(() => {
+    return localStorage.getItem('blockforge_date_format') || 'long'
+  })
   const [historyLimitInput, setHistoryLimitInput] = useState('50')
   const [trashRetentionDays, setTrashRetentionDays] = useState(30)
   const [trashRetentionInput, setTrashRetentionInput] = useState('30')
@@ -1528,6 +1531,10 @@ const App: React.FC = () => {
         if (typeof data?.global_column_width_override === 'string') {
           setGlobalColumnWidthOverride(data.global_column_width_override)
           localStorage.setItem('blockforge_global_column_width_override', data.global_column_width_override)
+        }
+        if (typeof data?.date_format === 'string') {
+          setDateFormat(data.date_format)
+          localStorage.setItem('blockforge_date_format', data.date_format)
         }
         if (typeof data?.app_font === 'string') {
           setAppFont(data.app_font)
@@ -3371,6 +3378,7 @@ const App: React.FC = () => {
                 onSetGlobalTagColor={setTagColorManual}
                 globalLayoutOverride={globalLayoutOverride}
                 globalColumnWidthOverride={globalColumnWidthOverride}
+                dateFormat={dateFormat}
               />
             </motion.div>
           ) : selectedPath && activeFile ? (
@@ -3421,6 +3429,7 @@ const App: React.FC = () => {
                     onEnsureTagColor={ensureTagColor}
                     globalLayoutOverride={globalLayoutOverride}
                     globalColumnWidthOverride={globalColumnWidthOverride}
+                    dateFormat={dateFormat}
                     highlightSearchTerm={activeSearchHighlight}
                     onClearSearchHighlight={() => setActiveSearchHighlight(null)}
                     initialPropertiesCollapsed={propertiesCollapsed}
@@ -3705,7 +3714,7 @@ const App: React.FC = () => {
                   {[
                     { id: 'general'    as const, label: 'General',           icon: <Home size={14} className="text-emerald-400" /> },
                     { id: 'appearance' as const, label: 'Appearance',        icon: <Sun size={14} className="text-amber-400" /> },
-                    { id: 'editor'     as const, label: 'Document Layout',  icon: <LayoutGrid size={14} className="text-violet-400" /> },
+                    { id: 'editor'     as const, label: 'Editor',           icon: <LayoutGrid size={14} className="text-violet-400" /> },
                     { id: 'history'    as const, label: 'Backups & History', icon: <HistoryIcon size={14} className="text-rose-400" /> },
                     { id: 'users'      as const, label: 'Users',             icon: <Users size={14} className="text-cyan-400" /> },
                     { id: 'access'     as const, label: 'API Keys',          icon: <Key size={14} className="text-yellow-400" /> },
@@ -3941,6 +3950,40 @@ const App: React.FC = () => {
                             <option value="narrow">Force Narrow (Large Margins / 672px)</option>
                             <option value="normal">Force Normal Margins (896px)</option>
                             <option value="wide">Force Wide (Small Margins / 1152px)</option>
+                          </select>
+                          <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-400">
+                            <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+                              <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/>
+                            </svg>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Date Format (used by the "/date" slash command) */}
+                      <div className="space-y-2 pt-2">
+                        <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
+                          Date Format
+                        </label>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Controls how dates inserted via the "/date" command are formatted.
+                        </p>
+                        <div className="relative">
+                          <select
+                            value={dateFormat}
+                            onChange={(e) => {
+                              const val = e.target.value
+                              localStorage.setItem('blockforge_date_format', val)
+                              setDateFormat(val)
+                              fetch(`${API_BASE}/api/settings`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ date_format: val }),
+                              }).catch(e => console.error('Failed to save date_format', e))
+                            }}
+                            className="w-full bg-[#1f242c] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 outline-none focus:border-violet-500 transition cursor-pointer appearance-none font-medium"
+                          >
+                            <option value="long">Month Day, Year (July 17, 2026)</option>
+                            <option value="iso">YYYY-MM-DD (2026-07-17)</option>
                           </select>
                           <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-400">
                             <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">

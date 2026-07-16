@@ -3445,6 +3445,7 @@ interface EditorProps {
   files: FileRecord[];
   globalLayoutOverride?: string;
   globalColumnWidthOverride?: string;
+  dateFormat?: string;
   highlightSearchTerm?: string | null;
   onClearSearchHighlight?: () => void;
   initialPropertiesCollapsed?: boolean;
@@ -4035,13 +4036,16 @@ const toISODateInput = (
 };
 
 const formatDisplayDate = (
-  d: Date
-): string =>
-  d.toLocaleDateString("en-US", {
+  d: Date,
+  format?: string
+): string => {
+  if (format === "iso") return toISODateInput(d);
+  return d.toLocaleDateString("en-US", {
     year: "numeric",
     month: "long",
     day: "numeric"
   });
+};
 
 const COMMANDS = [
   {
@@ -4562,6 +4566,7 @@ export const Editor: React.FC<
   files,
   globalLayoutOverride,
   globalColumnWidthOverride,
+  dateFormat,
   highlightSearchTerm,
   onClearSearchHighlight,
   initialPropertiesCollapsed = false,
@@ -12978,7 +12983,8 @@ export const Editor: React.FC<
               .focus()
               .insertContent(
                 formatDisplayDate(
-                  picked
+                  picked,
+                  dateFormat
                 ) + " "
               )
               .run();

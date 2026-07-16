@@ -1310,6 +1310,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	sidebarTextColor, _ := s.db.GetSetting("sidebar_text_color", "")
 	globalLayoutOverride, _ := s.db.GetSetting("global_layout_override", "per-page")
 	globalColumnWidthOverride, _ := s.db.GetSetting("global_column_width_override", "per-page")
+	dateFormat, _ := s.db.GetSetting("date_format", "long")
 	appFont, _ := s.db.GetSetting("app_font", "inter")
 	uploadLimitStr, _ := s.db.GetSetting("upload_limit_mb", strconv.Itoa(defaultUploadLimitMB))
 	uploadLimitMB, err5 := strconv.Atoi(uploadLimitStr)
@@ -1336,6 +1337,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"sidebar_text_color":           sidebarTextColor,
 		"global_layout_override":       globalLayoutOverride,
 		"global_column_width_override": globalColumnWidthOverride,
+		"date_format":                  dateFormat,
 		"app_font":                     appFont,
 		"upload_limit_mb":              uploadLimitMB,
 	})
@@ -1362,6 +1364,7 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		DocHeaderTextColor        *string `json:"doc_header_text_color"`
 		GlobalLayoutOverride      string  `json:"global_layout_override"`
 		GlobalColumnWidthOverride string  `json:"global_column_width_override"`
+		DateFormat                string  `json:"date_format"`
 		AppFont                   string  `json:"app_font"`
 		UploadLimitMB             *int    `json:"upload_limit_mb"`
 	}
@@ -1539,6 +1542,13 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	if req.GlobalColumnWidthOverride == "per-page" || req.GlobalColumnWidthOverride == "narrow" || req.GlobalColumnWidthOverride == "normal" || req.GlobalColumnWidthOverride == "wide" {
 		if err := s.db.SetSetting("global_column_width_override", req.GlobalColumnWidthOverride); err != nil {
 			http.Error(w, fmt.Sprintf("failed to save global_column_width_override: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if req.DateFormat == "long" || req.DateFormat == "iso" {
+		if err := s.db.SetSetting("date_format", req.DateFormat); err != nil {
+			http.Error(w, fmt.Sprintf("failed to save date_format: %v", err), http.StatusInternalServerError)
 			return
 		}
 	}

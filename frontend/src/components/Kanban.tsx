@@ -96,6 +96,7 @@ interface KanbanProps {
   // board silently ignored both regardless of what was configured.
   globalLayoutOverride?: string
   globalColumnWidthOverride?: string
+  dateFormat?: string
 }
 
 const DEFAULT_PRIORITIES: PriorityDef[] = [
@@ -929,7 +930,8 @@ const CardDetailPanel: React.FC<{
   autosaveDelay?: number
   globalLayoutOverride?: string
   globalColumnWidthOverride?: string
-}> = ({ task, viewMode, columns, allBoardTags, tagColors, onEnsureTagColor, files, onClose, onSetMode, onUpdateFrontMatter, onRenameFile, resolvePath, onSelectFile, onDelete, onCardSaved, initialPropertiesCollapsed, closing, isMobile, sidebarCollapsed, autosaveDelay, globalLayoutOverride, globalColumnWidthOverride }) => {
+  dateFormat?: string
+}> = ({ task, viewMode, columns, allBoardTags, tagColors, onEnsureTagColor, files, onClose, onSetMode, onUpdateFrontMatter, onRenameFile, resolvePath, onSelectFile, onDelete, onCardSaved, initialPropertiesCollapsed, closing, isMobile, sidebarCollapsed, autosaveDelay, globalLayoutOverride, globalColumnWidthOverride, dateFormat }) => {
   // Modal (80vw/80vh) doesn't fit a phone screen — mobile always gets the
   // fullscreen layout regardless of the saved preference.
   const effectiveViewMode: CardViewMode = isMobile ? 'fullscreen' : viewMode
@@ -1153,6 +1155,7 @@ const CardDetailPanel: React.FC<{
         autosaveDelay={autosaveDelay}
         globalLayoutOverride={globalLayoutOverride}
         globalColumnWidthOverride={globalColumnWidthOverride}
+        dateFormat={dateFormat}
       />
     </div>
   )
@@ -1233,6 +1236,7 @@ const Kanban: React.FC<KanbanProps> = ({
   onSetGlobalTagColor,
   globalLayoutOverride,
   globalColumnWidthOverride,
+  dateFormat,
 }) => {
   const [newCardTitles, setNewCardTitles] = useState<Record<string, string>>({})
   const [editingColumn, setEditingColumn] = useState<string | null>(null)
@@ -2335,6 +2339,7 @@ const Kanban: React.FC<KanbanProps> = ({
             autosaveDelay={autosaveDelay}
             globalLayoutOverride={globalLayoutOverride}
             globalColumnWidthOverride={globalColumnWidthOverride}
+            dateFormat={dateFormat}
           />
         )
       })()}
