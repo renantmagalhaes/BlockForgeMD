@@ -280,7 +280,31 @@ turndownService.addRule(
       const status = checked
         ? "[x]"
         : "[ ]";
-      return `- ${status} ${content.trim()}\n`;
+      // content is this item's own text plus, for a parent task, the
+      // already-converted markdown of any nested sub-task-list (since
+      // Turndown processes children first, bottom-up). Nested sibling
+      // <li>s recursively hit this same rule, so indenting every
+      // continuation line here by one level, at each ancestor in turn,
+      // naturally compounds into the right cumulative indent per depth —
+      // without that, every level collapses back to column 0, which is
+      // what made nesting silently vanish on save (and thus on reload).
+      const indented = content
+        .trim()
+        .split("\n")
+        .map((line, i) =>
+          i === 0 || !line
+            ? line
+            : `  ${line}`
+        )
+        .join("\n")
+        // Turndown puts a blank line between this item's own text and a
+        // nested sub-task-list as generic block spacing — but a blank line
+        // before a nested list item makes the whole list "loose" per
+        // CommonMark, which re-materializes as a stray empty paragraph
+        // inside the item next time this file is loaded. Task items should
+        // stay tight.
+        .replace(/\n\n(\s*- \[)/g, "\n$1");
+      return `- ${status} ${indented}\n`;
     }
   }
 );

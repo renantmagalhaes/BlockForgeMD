@@ -47,33 +47,93 @@ export const markdownToEditorHtml = (markdown: string): string => {
       const color = (attrs.match(/color="([^"]*)"/) || [])[1] || '#6366f1'
       return `<div data-callout="true" data-callout-emoji="${emoji}" data-callout-label="${label}" data-callout-color="${color}">${content}</div>`
     })
-    // Convert marked's GFM task list output → TipTap taskList format.
-    // marked produces (tight lists, no blank lines between items):
-    //   <li><input checked="" disabled="" type="checkbox"> text</li>
-    // ...but for LOOSE lists (blank line between items — common in
-    // Obsidian-authored files) marked instead wraps each item's content in
-    // a <p>, moving the <input> inside it:
-    //   <li><p><input checked="" disabled="" type="checkbox"> text</p></li>
-    // The old regexes only matched the tight form, so loose task lists
-    // silently fell through to being parsed as plain bullet lists — losing
-    // all checkbox/completion state on load (and then re-saved as such).
-    // Attribute order isn't hard-coded either, so a "checked" is detected
-    // by inspecting the captured attribute string instead of requiring an
-    // exact match sequence.
-    // TipTap expects:  <li data-type="taskItem" data-checked="true"><label>...</label><div><p>text</p></div></li>
-    .replace(
-      /<li>\s*(?:<p>)?<input\s+([^>]*?)\/?>\s*([\s\S]*?)\s*(?:<\/p>)?\s*<\/li>/gi,
-      (match, attrs: string, text: string) => {
-        if (!/type="checkbox"/i.test(attrs)) return match
-        const checked = /\bchecked(="")?\b/i.test(attrs)
-        return `<li data-type="taskItem" data-checked="${checked}"><label><input type="checkbox"${checked ? ' checked' : ''}></label><div><p>${text}</p></div></li>`
-      }
-    )
-    // Mark any <ul> that contains task items as a taskList
-    .replace(/<ul>([\s\S]*?)<\/ul>/g, (match, inner) =>
-      inner.includes('data-type="taskItem"')
-        ? `<ul data-type="taskList">${inner}</ul>`
-        : match
-    )
+  rawHtml = convertTaskLists(rawHtml)
   return rawHtml
+}
+
+// Convert marked's GFM task list output → TipTap taskList format.
+// marked produces (tight lists, no blank lines between items):
+//   <li><input checked="" disabled="" type="checkbox"> text</li>
+// ...but for LOOSE lists (blank line between items — common in
+// Obsidian-authored files) marked instead wraps each item's content in
+// a <p>, moving the <input> inside it:
+//   <li><p><input checked="" disabled="" type="checkbox"> text</p></li>
+// A nested sub-task-list sits as a further <ul>/<li>... inside the same
+// parent <li>, alongside its own text.
+//
+// This used to be two regexes (one rewriting <li>...</li>, one rewriting
+// <ul>...</ul>) using a lazy [\s\S]*? to reach the closing tag. That's only
+// safe for a FLAT list — a nested task list's own </li>/</ul> is *inside*
+// the parent's, so the lazy match stopped at the child's closing tag
+// instead of the parent's, mangling anything with sub-items. Walking the
+// actual parsed DOM (real nesting, not regex) handles any depth correctly.
+// TipTap expects: <li data-type="taskItem" data-checked="true"><label>...</label><div><p>text</p>[<ul data-type="taskList">...</ul>]</div></li>
+function convertTaskLists(html: string): string {
+  const doc = new DOMParser().parseFromString(html, 'text/html')
+  const items = Array.from(doc.querySelectorAll('li')).filter((li) => {
+    const firstEl = li.firstElementChild
+    if (!firstEl) return false
+    if (firstEl.tagName === 'INPUT') return firstEl.getAttribute('type') === 'checkbox'
+    // Loose-list form: <li><p><input ...> text</p>...</li>
+    if (firstEl.tagName === 'P') {
+      const firstChild = firstEl.firstElementChild
+      return !!firstChild && firstChild.tagName === 'INPUT' && firstChild.getAttribute('type') === 'checkbox'
+    }
+    return false
+  })
+  if (items.length === 0) return html
+
+  for (const li of items) {
+    const wrapperP = li.firstElementChild?.tagName === 'P' ? li.firstElementChild : null
+    const input = (wrapperP ?? li).querySelector(':scope > input[type="checkbox"]') as HTMLInputElement | null
+    if (!input) continue
+    const checked = input.checked || input.hasAttribute('checked')
+
+    li.setAttribute('data-type', 'taskItem')
+    li.setAttribute('data-checked', String(checked))
+
+    const label = doc.createElement('label')
+    const newInput = doc.createElement('input')
+    newInput.setAttribute('type', 'checkbox')
+    if (checked) newInput.setAttribute('checked', '')
+    label.appendChild(newInput)
+
+    const contentDiv = doc.createElement('div')
+    const p = doc.createElement('p')
+    // A nested sub-list is always a direct child of the <li> itself (block
+    // content can't nest inside a <p>) — for both tight lists (no wrapperP)
+    // AND loose lists (wrapperP holds just the item's own inline text; the
+    // nested <ul>/<ol> is wrapperP's next sibling within <li>, not inside
+    // it). So nested lists are read from li's children, while the item's
+    // own text comes from wrapperP's children when present, else li's.
+    const nestedLists = Array.from(li.children).filter((child) =>
+      ['UL', 'OL'].includes(child.tagName)
+    )
+    const textContainer = wrapperP ?? li
+    Array.from(textContainer.childNodes).forEach((child) => {
+      if (child === input) return
+      if (child.nodeType === 1 && ['UL', 'OL'].includes((child as Element).tagName)) return
+      p.appendChild(child)
+    })
+    contentDiv.appendChild(p)
+    nestedLists.forEach((list) => contentDiv.appendChild(list))
+
+    // Clear the <li> and rebuild it explicitly so no stray whitespace-only
+    // text nodes (or the now-relocated nested list) are left behind.
+    while (li.firstChild) li.removeChild(li.firstChild)
+    li.appendChild(label)
+    li.appendChild(contentDiv)
+  }
+
+  // Mark every <ul> that directly contains a converted task item as a
+  // taskList (only its own <li> children — nested sub-lists get marked
+  // independently when the loop reaches them via :scope).
+  doc.querySelectorAll('ul').forEach((ul) => {
+    const hasTaskItemChild = Array.from(ul.children).some(
+      (child) => child.tagName === 'LI' && child.getAttribute('data-type') === 'taskItem'
+    )
+    if (hasTaskItemChild) ul.setAttribute('data-type', 'taskList')
+  })
+
+  return doc.body.innerHTML
 }
