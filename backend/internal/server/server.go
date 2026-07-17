@@ -111,6 +111,8 @@ func (s *Server) setupRoutes() {
 		r.Post("/settings", s.handleSaveSettings)
 		r.Get("/favorites", s.handleGetFavorites)
 		r.Post("/favorites", s.handleSetFavorites)
+		r.Get("/folder-collapse", s.handleGetFolderCollapse)
+		r.Post("/folder-collapse", s.handleSetFolderCollapse)
 		r.Get("/tag-colors", s.handleGetTagColors)
 		r.Post("/tag-colors", s.handleSetTagColors)
 		r.Get("/workspaces", s.handleListWorkspaces)
@@ -1596,6 +1598,42 @@ func (s *Server) handleSetFavorites(w http.ResponseWriter, r *http.Request) {
 	data, _ := json.Marshal(req.Favorites)
 	if err := s.db.SetSetting("favorites_"+req.Workspace, string(data)); err != nil {
 		http.Error(w, "failed to save favorites", http.StatusInternalServerError)
+		return
+	}
+	respondJSON(w, map[string]string{"status": "success"})
+}
+
+// handleGetFolderCollapse and handleSetFolderCollapse persist the sidebar's
+// folder expand/collapse state server-side (rather than localStorage) so it
+// stays consistent across devices/browsers, not just the one that toggled
+// it. Keyed by full (already workspace-prefixed) tree path, one map across
+// all workspaces — same single-blob-of-JSON-in-a-setting approach as
+// favorites/tag colors, just not bucketed per workspace since paths are
+// already globally unique.
+func (s *Server) handleGetFolderCollapse(w http.ResponseWriter, r *http.Request) {
+	val, _ := s.db.GetSetting("folder_collapsed", "{}")
+	var collapsed map[string]bool
+	if err := json.Unmarshal([]byte(val), &collapsed); err != nil {
+		collapsed = map[string]bool{}
+	}
+	respondJSON(w, map[string]interface{}{"collapsed": collapsed})
+}
+
+func (s *Server) handleSetFolderCollapse(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Collapsed map[string]bool `json:"collapsed"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	data, err := json.Marshal(req.Collapsed)
+	if err != nil {
+		http.Error(w, "invalid collapsed map", http.StatusBadRequest)
+		return
+	}
+	if err := s.db.SetSetting("folder_collapsed", string(data)); err != nil {
+		http.Error(w, "failed to save folder collapse state", http.StatusInternalServerError)
 		return
 	}
 	respondJSON(w, map[string]string{"status": "success"})

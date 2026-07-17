@@ -297,7 +297,7 @@ const TreeNodeComponent: React.FC<{
   depth: number
   selectedPath: string | null
   collapsedPaths: Record<string, boolean>
-  onToggleCollapse: (path: string) => void
+  onToggleCollapse: (path: string, node: TreeNode) => void
   onSelectFile: (path: string) => void
   onCreateSubPage: (parentPath: string) => void
   onDeletePath: (path: string) => void
@@ -425,19 +425,19 @@ const TreeNodeComponent: React.FC<{
     const actAsFolder = node.isFolder || node.type === 'folder'
     if (node.hasPage && node.filePath) {
       if (node.type === 'folder') {
-        onToggleCollapse(node.path)
+        onToggleCollapse(node.path, node)
       } else {
         onSelectFile(node.filePath)
-        if (actAsFolder) onToggleCollapse(node.path)
+        if (actAsFolder) onToggleCollapse(node.path, node)
       }
     } else if (actAsFolder) {
-      onToggleCollapse(node.path)
+      onToggleCollapse(node.path, node)
     }
   }
 
   const handleChevronClick = (e: React.MouseEvent) => {
     e.stopPropagation()
-    onToggleCollapse(node.path)
+    onToggleCollapse(node.path, node)
   }
 
   const handleAddClick = (e: React.MouseEvent) => {
@@ -988,6 +988,11 @@ const App: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState(true)
   const [syncError, setSyncError] = useState(false)
   const [collapsedPaths, setCollapsedPaths] = useState<Record<string, boolean>>({})
+  // Server-persisted subset of collapsedPaths (folder nodes only) — kept in
+  // a ref alongside the state so handleToggleCollapse and workspace-switch
+  // resets can read/restore it without an extra round trip. Populated by
+  // the fetch effect below.
+  const persistedFolderCollapseRef = useRef<Record<string, boolean>>({})
 
   // ── Workspace state ────────────────────────────────────────────────────────
   const [workspaces, setWorkspaces] = useState<string[]>([])
@@ -1017,6 +1022,24 @@ const App: React.FC = () => {
       .catch(err => { if (err.name !== 'AbortError') setFavorites([]) })
     return () => controller.abort()
   }, [activeWorkspace]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Folder collapse state ─────────────────────────────────────────────────
+  // Fetched once at startup (not per-workspace — paths are already
+  // workspace-prefixed, so one global map covers every workspace). Server-
+  // backed rather than localStorage so the same folders show
+  // open/closed on any device, not just the one that toggled them.
+  useEffect(() => {
+    const controller = new AbortController()
+    fetch(`${API_BASE}/api/folder-collapse`, { signal: controller.signal })
+      .then(r => r.ok ? r.json() : { collapsed: {} })
+      .then(data => {
+        const collapsed = data.collapsed || {}
+        persistedFolderCollapseRef.current = collapsed
+        setCollapsedPaths(prev => ({ ...collapsed, ...prev }))
+      })
+      .catch(() => {})
+    return () => controller.abort()
+  }, [])
 
   // ── Tag colors ─────────────────────────────────────────────────────────────
   // Tags are global across the workspace, so their colors are too: assigned
@@ -1084,6 +1107,27 @@ const App: React.FC = () => {
 
   // W(section) → workspace-qualified section root path
   const W = (section: string) => activeWorkspace ? `${activeWorkspace}/${section}` : section
+
+  // Toggles a tree node's expand/collapse state. Only real folder nodes get
+  // that choice remembered across reloads/devices (persisted server-side via
+  // /api/folder-collapse) — a document or board merely happens to render the
+  // same collapse chevron when it has sub-pages, but its expand state stays
+  // session-only.
+  const handleToggleCollapse = (path: string, node: TreeNode) => {
+    setCollapsedPaths(prev => {
+      const nextVal = !prev[path]
+      if (node.type === 'folder') {
+        const persisted = { ...persistedFolderCollapseRef.current, [path]: nextVal }
+        persistedFolderCollapseRef.current = persisted
+        fetch(`${API_BASE}/api/folder-collapse`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ collapsed: persisted }),
+        }).catch(e => console.error('Failed to save folder collapse state', e))
+      }
+      return { ...prev, [path]: nextVal }
+    })
+  }
 
   const revealInSidebar = (filePath: string) => {
     const stem = filePath.endsWith('.board.md') ? filePath.slice(0, -'.board.md'.length)
@@ -1433,7 +1477,10 @@ const App: React.FC = () => {
     localStorage.setItem('blockforge_workspace', ws)
     setWorkspaceDropdownOpen(false)
     setSelectedPath(null)
-    setCollapsedPaths({})
+    // Drop this session's ephemeral (non-folder) expand state, but keep
+    // whatever folder open/closed choices were persisted — paths are
+    // workspace-prefixed, so this naturally scopes correctly per workspace.
+    setCollapsedPaths(persistedFolderCollapseRef.current)
     setActiveView('editor')
   }
 
@@ -2909,7 +2956,7 @@ const App: React.FC = () => {
                       depth={0}
                       selectedPath={selectedPath}
                       collapsedPaths={collapsedPaths}
-                      onToggleCollapse={(path) => setCollapsedPaths((prev) => ({ ...prev, [path]: !prev[path] }))}
+                      onToggleCollapse={handleToggleCollapse}
                       onSelectFile={fetchFileContent}
                       onCreateSubPage={(parentPath) => handleCreateFile('document', parentPath, undefined, ['document'], 'Sub Page')}
                       onDeletePath={handleDeleteFile}
@@ -3002,7 +3049,7 @@ const App: React.FC = () => {
                       depth={0}
                       selectedPath={selectedPath}
                       collapsedPaths={collapsedPaths}
-                      onToggleCollapse={(path) => setCollapsedPaths((prev) => ({ ...prev, [path]: !prev[path] }))}
+                      onToggleCollapse={handleToggleCollapse}
                       onSelectFile={fetchFileContent}
                       onCreateSubPage={(parentPath) => handleCreateFile('task', parentPath, undefined, ['task'])}
                       onDeletePath={handleDeleteFile}
@@ -3095,7 +3142,7 @@ const App: React.FC = () => {
                       depth={0}
                       selectedPath={selectedPath}
                       collapsedPaths={collapsedPaths}
-                      onToggleCollapse={(path) => setCollapsedPaths((prev) => ({ ...prev, [path]: !prev[path] }))}
+                      onToggleCollapse={handleToggleCollapse}
                       onSelectFile={fetchFileContent}
                       onCreateSubPage={(parentPath) => handleCreateFile('canvas', parentPath, undefined, ['canvas', 'diagram'])}
                       onDeletePath={handleDeleteFile}
@@ -3188,7 +3235,7 @@ const App: React.FC = () => {
                       depth={0}
                       selectedPath={selectedPath}
                       collapsedPaths={collapsedPaths}
-                      onToggleCollapse={(path) => setCollapsedPaths((prev) => ({ ...prev, [path]: !prev[path] }))}
+                      onToggleCollapse={handleToggleCollapse}
                       onSelectFile={fetchFileContent}
                       onCreateSubPage={(parentPath) => handleCreateFile('mindmap', parentPath, undefined, ['mindmap'])}
                       onDeletePath={handleDeleteFile}
