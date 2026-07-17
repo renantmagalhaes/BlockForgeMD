@@ -14076,8 +14076,18 @@ export const Editor: React.FC<
           table body — and clicking a grip opens a small menu with
           insert/delete actions for that specific row or column, so
           inserting/deleting in the middle of the table works the same as
-          at the edges. */}
-      {tableGutter && (
+          at the edges.
+
+          Portaled to document.body: .editor-root-container gets a real
+          backdrop-filter in Frosted Glass mode, which makes it the
+          containing block for these buttons' position:fixed — resolving
+          their coordinates against that container's box instead of the
+          viewport, even though they were measured with
+          getBoundingClientRect() (which is always viewport-relative).
+          That mismatch is exactly what shifted the gutters off the table
+          in production. Rendering outside the container (same fix as the
+          Link Paste popup below) keeps them truly viewport-fixed. */}
+      {tableGutter && createPortal(
         <>
           {tableGutter.rows.map((r, i) => (
             <button
@@ -14201,10 +14211,12 @@ export const Editor: React.FC<
           >
             <Plus size={12} />
           </button>
-        </>
+        </>,
+        document.body
       )}
-      {/* Row/column gutter menu — opened by clicking a grip above. */}
-      {tableGutterMenu && (
+      {/* Row/column gutter menu — opened by clicking a grip above.
+          Portaled for the same reason as the gutters themselves above. */}
+      {tableGutterMenu && createPortal(
         <>
           <div
             className="fixed inset-0 z-[9998]"
@@ -14323,13 +14335,17 @@ export const Editor: React.FC<
               </>
             )}
           </div>
-        </>
+        </>,
+        document.body
       )}
       {/* Floating cell background color picker — kept selection-driven
           (activeTableRect), not hover-driven: color needs to apply to
           whatever is actually selected (including a multi-cell
-          drag-selection), which a hover point alone can't tell us. */}
-      {activeTableRect && (
+          drag-selection), which a hover point alone can't tell us.
+
+          Portaled for the same containing-block reason as the gutters
+          above — this is also position:fixed inside .editor-root-container. */}
+      {activeTableRect && createPortal(
         <>
           {/* Cell background color picker */}
           <div
@@ -14416,7 +14432,8 @@ export const Editor: React.FC<
               </>
             )}
           </div>
-        </>
+        </>,
+        document.body
       )}
       {/* Attachment image hover preview bubble */}
       {imgPreviewUrl &&
