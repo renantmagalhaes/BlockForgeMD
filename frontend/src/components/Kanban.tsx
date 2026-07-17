@@ -1200,7 +1200,13 @@ const CardDetailPanel: React.FC<{
     return (
       <div
         data-card-detail-panel="true"
-        className="fixed top-0 right-0 bottom-0 z-[200] flex flex-col bf-kanban-modal overflow-hidden transition-[opacity,left] duration-200 ease-out"
+        // z-[600]: above App.tsx's mobile top bar (z-[500], the persistent
+        // hamburger+title strip) — this used to sit at z-[200], so on mobile
+        // that bar rendered on top of this panel's own toolbar, visually
+        // and functionally hiding its close button entirely. Still below
+        // the mobile drawer (z-[1000]), which closes itself before this
+        // panel opens anyway.
+        className="fixed top-0 right-0 bottom-0 z-[600] flex flex-col bf-kanban-modal overflow-hidden transition-[opacity,left] duration-200 ease-out"
         style={{
           opacity: active ? 1 : 0,
           left: isMobile ? 0 : (sidebarCollapsed ? '4rem' : '20rem'),
@@ -1268,6 +1274,7 @@ const Kanban: React.FC<KanbanProps> = ({
   dateFormat,
 }) => {
   const [newCardTitles, setNewCardTitles] = useState<Record<string, string>>({})
+  const [addingTaskCol, setAddingTaskCol] = useState<string | null>(null)
   const [editingColumn, setEditingColumn] = useState<string | null>(null)
   const [editColVal, setEditColVal]       = useState('')
 
@@ -2311,24 +2318,53 @@ const Kanban: React.FC<KanbanProps> = ({
                 )}
               </Droppable>
 
-              {/* Quick create */}
+              {/* Quick create — collapsed to a plain, background-blended
+                  "+ Add task" hint until clicked, so the column footer
+                  doesn't read as a permanent input+button box. Clicking it
+                  swaps in the real (darker) input, which collapses back once
+                  it's blurred empty or the task is created. */}
               <div className="p-2.5 bf-kanban-col-footer shrink-0">
-                <form onSubmit={e => handleQuickCreate(e, col)} className="flex gap-1.5">
-                  <input
-                    type="text"
-                    required
-                    placeholder="Add task…"
-                    value={newCardTitles[col] || ''}
-                    onChange={e => setNewCardTitles(prev => ({ ...prev, [col]: e.target.value }))}
-                    className="flex-1 bf-kanban-input rounded-lg px-3 py-1.5 text-xs outline-none transition"
-                  />
+                {addingTaskCol === col ? (
+                  <form
+                    onSubmit={e => { handleQuickCreate(e, col); setAddingTaskCol(null) }}
+                    onBlur={e => {
+                      if (!e.currentTarget.contains(e.relatedTarget as Node) && !newCardTitles[col]?.trim()) {
+                        setAddingTaskCol(null)
+                      }
+                    }}
+                    className="flex gap-1.5"
+                  >
+                    <input
+                      autoFocus
+                      type="text"
+                      required
+                      placeholder="Add task…"
+                      value={newCardTitles[col] || ''}
+                      onChange={e => setNewCardTitles(prev => ({ ...prev, [col]: e.target.value }))}
+                      onKeyDown={e => {
+                        if (e.key === 'Escape') {
+                          setNewCardTitles(prev => ({ ...prev, [col]: '' }))
+                          setAddingTaskCol(null)
+                        }
+                      }}
+                      className="flex-1 bf-kanban-input rounded-lg px-3 py-1.5 text-xs outline-none transition"
+                    />
+                    <button
+                      type="submit"
+                      className="flex items-center justify-center w-7 h-7 bf-kanban-add-btn rounded-lg transition cursor-pointer"
+                    >
+                      <Plus size={13} />
+                    </button>
+                  </form>
+                ) : (
                   <button
-                    type="submit"
-                    className="flex items-center justify-center w-7 h-7 bf-kanban-add-btn rounded-lg transition cursor-pointer"
+                    onClick={() => setAddingTaskCol(col)}
+                    className="flex items-center gap-1.5 w-full px-3 py-1.5 rounded-lg text-xs transition cursor-pointer bf-kanban-quick-add-btn"
                   >
                     <Plus size={13} />
+                    Add task…
                   </button>
-                </form>
+                )}
               </div>
             </div>
           )

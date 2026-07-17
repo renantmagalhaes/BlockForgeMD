@@ -1258,9 +1258,19 @@ const App: React.FC = () => {
   }
   // Rail icons are always visible (level 1); clicking one opens/switches the
   // level 2 panel to that section, or collapses it if it's already the one showing.
+  // "Collapses" means the desktop icon-only rail (sidebarCollapsed) — on
+  // mobile the sidebar is an off-canvas drawer, not a collapsible rail (see
+  // handleToggleSidebarPanel's comment), so collapsing there just hid the
+  // level-2 panel's content while its full-width container stayed put,
+  // reading as a stuck, broken half-open drawer. Re-tapping the active
+  // section icon on mobile should just close the drawer outright instead.
   const openSidebarSection = (section: SidebarSection) => {
     if (!sidebarCollapsed && activeSidebarSection === section) {
-      saveSidebarCollapsed(true)
+      if (isMobile) {
+        setMobileDrawerOpen(false)
+      } else {
+        saveSidebarCollapsed(true)
+      }
     } else {
       setActiveSidebarSection(section)
       if (sidebarCollapsed) saveSidebarCollapsed(false)

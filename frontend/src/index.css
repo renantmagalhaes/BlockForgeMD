@@ -939,6 +939,17 @@ body {
   color: #ffffff;
 }
 
+/* Collapsed "+ Add task" hint — blends into the column footer until
+   hovered/clicked, rather than reading as a permanent input+button box. */
+.bf-kanban-quick-add-btn {
+  background-color: transparent;
+  color: var(--txt-4);
+}
+.bf-kanban-quick-add-btn:hover {
+  background-color: var(--bg-hover);
+  color: var(--txt-2);
+}
+
 /* ── Inputs ─────────────────────────────────────────── */
 .bf-kanban-input {
   background-color: var(--bg-input);
