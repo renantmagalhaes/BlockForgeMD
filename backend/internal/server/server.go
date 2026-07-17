@@ -1669,10 +1669,6 @@ type TrashListItem struct {
 	MatchedFiles []string  `json:"matchedFiles,omitempty"` // files whose content matched the search query
 }
 
-// assetURLRe matches root-relative workspace asset URLs embedded in markdown.
-// e.g. /Default/assets/Documents/note-image-123.png
-var assetURLRe = regexp.MustCompile(`(/[^/\s"')]+/assets/[^\s"')>]+)`)
-
 // trashDirForWorkspace returns the Trash directory for a named workspace.
 func (s *Server) trashDirForWorkspace(workspace string) string {
 	if workspace == "" || sectionRoots[workspace] {
@@ -1738,25 +1734,60 @@ func (s *Server) trashRetentionDays() int {
 	return n
 }
 
-// extractAssetURLs returns all unique asset URLs found in markdown content.
-func extractAssetURLs(content string) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, m := range assetURLRe.FindAllString(content, -1) {
-		if !seen[m] {
-			seen[m] = true
-			out = append(out, m)
-		}
-	}
-	return out
+// isAppAssetURL reports whether an already-absolute URL (as returned by
+// parser.AbsoluteAssetPath) points at one of this app's own asset
+// directories, as opposed to an external link or protocol-relative URL.
+func isAppAssetURL(absURL string) bool {
+	return strings.HasPrefix(absURL, "/") && !strings.HasPrefix(absURL, "//")
 }
 
-// rewriteContent performs bulk string replacement (old URL → new URL).
-func rewriteContent(content string, replacements map[string]string) string {
-	for old, neu := range replacements {
-		content = strings.ReplaceAll(content, old, neu)
+// stripURLSuffix trims a trailing "?query" or "#fragment" from a URL. The
+// image editor appends a cache-busting "?t=<timestamp>" to the asset URL it
+// writes back into a note (see Editor.tsx's handleImageSave) so the browser
+// re-fetches the edited image instead of showing a stale cached one — and
+// that suffix gets persisted as part of the note's on-disk asset reference.
+// It must never be treated as part of the file path itself: the real file
+// on disk has no query string in its name, so building a filesystem path
+// from the reference as-is resolves to a file that doesn't exist, and the
+// real asset is silently skipped.
+func stripURLSuffix(url string) string {
+	if i := strings.IndexAny(url, "?#"); i != -1 {
+		return url[:i]
 	}
-	return content
+	return url
+}
+
+// origBackupPath returns the sibling "permanent original" backup path the
+// image editor creates next to an asset the first time it's overwritten
+// (see handleUploadAsset's overwritePath branch) — e.g. "photo.png" ->
+// "photo._orig.png". It's never referenced anywhere in note content —
+// discoverable only by this naming convention — so callers that clean up an
+// asset because a note referenced it must check for this sibling too, or it
+// orphans permanently every time.
+func origBackupPath(assetFull string) string {
+	ext := filepath.Ext(assetFull)
+	return strings.TrimSuffix(assetFull, ext) + "._orig" + ext
+}
+
+// fileExists reports whether path exists and is a regular file (or at least
+// not confirmed absent — any stat error other than "not exist" is treated
+// as "can't tell, don't try to touch it").
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// uniqueAssetName returns filename, or filename with a "_N" suffix inserted
+// before its extension if that name already exists inside dir.
+func uniqueAssetName(dir, filename string) string {
+	destName := filename
+	for i := 1; ; i++ {
+		if _, statErr := os.Stat(filepath.Join(dir, destName)); os.IsNotExist(statErr) {
+			return destName
+		}
+		ext := filepath.Ext(filename)
+		destName = strings.TrimSuffix(filename, ext) + fmt.Sprintf("_%d", i) + ext
+	}
 }
 
 // collectFolderFiles returns the folder .md file itself plus all .md files
@@ -1809,33 +1840,45 @@ func (s *Server) trashFiles(files []string, originalPath, itemType, workspace, i
 			continue
 		}
 		content := string(raw)
-		replacements := map[string]string{}
 
-		for _, assetURL := range extractAssetURLs(content) {
-			assetRel := strings.TrimPrefix(assetURL, "/")
+		// Asset references are stored on disk relative to the note's own
+		// location (see assetlinks.go), not as the app-rooted "/workspace/
+		// assets/..." URLs this used to assume — so every reference has to
+		// go through AbsoluteAssetPath before it can be resolved to a real
+		// file on disk. RewriteAssetPaths already knows where to look for
+		// references (body images, front-matter cover/attachments) and
+		// which raw substring to swap out, so reuse it instead of a
+		// hand-rolled regex that only matched the old absolute form.
+		newContent := parser.RewriteAssetPaths(relPath, content, func(notePath, url string) string {
+			absURL := stripURLSuffix(parser.AbsoluteAssetPath(notePath, url))
+			if !isAppAssetURL(absURL) {
+				return url // external link or non-asset — leave untouched
+			}
+			assetRel := strings.TrimPrefix(absURL, "/")
 			assetFull := filepath.Join(s.rootPath, filepath.FromSlash(assetRel))
 			filename := filepath.Base(assetFull)
-
-			// Resolve name collisions inside the bundle's assets dir.
-			destName := filename
-			for i := 1; ; i++ {
-				if _, statErr := os.Stat(filepath.Join(assetsDir, destName)); os.IsNotExist(statErr) {
-					break
-				}
-				ext := filepath.Ext(filename)
-				destName = strings.TrimSuffix(filename, ext) + fmt.Sprintf("_%d", i) + ext
-			}
+			destName := uniqueAssetName(assetsDir, filename)
 
 			if mvErr := moveFile(assetFull, filepath.Join(assetsDir, destName)); mvErr != nil {
-				continue // asset may not exist or not accessible; skip
+				return url // asset may not exist or not accessible; leave reference as-is
 			}
 			// Include workspace in URL so the asset handler can locate the bundle.
-			newURL := fmt.Sprintf("/api/trash-asset/%s/%s/%s", workspace, id, destName)
-			assetMap[destName] = assetURL
-			replacements[assetURL] = newURL
-		}
+			assetMap[destName] = absURL
 
-		newContent := rewriteContent(content, replacements)
+			// The image editor's permanent-original backup isn't referenced
+			// anywhere in content, so it has to be located and moved
+			// alongside the asset it belongs to rather than found on its
+			// own pass over the note.
+			if origFull := origBackupPath(assetFull); fileExists(origFull) {
+				origFilename := filepath.Base(origFull)
+				origDestName := uniqueAssetName(assetsDir, origFilename)
+				if moveFile(origFull, filepath.Join(assetsDir, origDestName)) == nil {
+					assetMap[origDestName] = origBackupPath(absURL)
+				}
+			}
+
+			return fmt.Sprintf("/api/trash-asset/%s/%s/%s", workspace, id, destName)
+		})
 		contentDest := filepath.Join(contentDir, filepath.FromSlash(relPath))
 		if mkErr := os.MkdirAll(filepath.Dir(contentDest), 0755); mkErr != nil {
 			continue
@@ -1867,10 +1910,22 @@ func (s *Server) permanentlyDeleteFiles(files []string, childrenAbsDir string) {
 	for _, relPath := range files {
 		fullPath := filepath.Join(s.rootPath, filepath.FromSlash(relPath))
 		if raw, err := os.ReadFile(fullPath); err == nil {
-			for _, assetURL := range extractAssetURLs(string(raw)) {
-				assetRel := strings.TrimPrefix(assetURL, "/")
-				_ = os.Remove(filepath.Join(s.rootPath, filepath.FromSlash(assetRel)))
-			}
+			// See trashFiles' comment: references are relative-to-note on
+			// disk, so resolve through AbsoluteAssetPath before removing.
+			parser.RewriteAssetPaths(relPath, string(raw), func(notePath, url string) string {
+				absURL := stripURLSuffix(parser.AbsoluteAssetPath(notePath, url))
+				if isAppAssetURL(absURL) {
+					assetFull := filepath.Join(s.rootPath, filepath.FromSlash(strings.TrimPrefix(absURL, "/")))
+					_ = os.Remove(assetFull)
+					// See trashFiles' comment: the image editor's original
+					// backup isn't referenced in content, only discoverable
+					// by naming convention alongside the asset it belongs to.
+					if origFull := origBackupPath(assetFull); fileExists(origFull) {
+						_ = os.Remove(origFull)
+					}
+				}
+				return url
+			})
 		}
 		_ = os.Remove(fullPath)
 		_ = s.db.DeleteFile(relPath)
@@ -1906,11 +1961,14 @@ func (s *Server) restoreTrashBundle(workspace, id string) error {
 		return fmt.Errorf("parse trash meta: %w", err)
 	}
 
-	// Build reverse replacements: trash URL → original URL
-	reversals := map[string]string{}
+	// Build reverse lookup: trash URL → original absolute asset URL. The
+	// note-relative form to restore into each file depends on that file's
+	// own path, so this is resolved per-file below via RelativeAssetPath
+	// rather than a single global string replacement.
+	trashURLToAbs := map[string]string{}
 	for filename, originalURL := range meta.Assets {
 		trashURL := fmt.Sprintf("/api/trash-asset/%s/%s/%s", workspace, id, filename)
-		reversals[trashURL] = originalURL
+		trashURLToAbs[trashURL] = originalURL
 	}
 
 	contentDir := filepath.Join(bundleDir, "content")
@@ -1950,7 +2008,13 @@ func (s *Server) restoreTrashBundle(workspace, id string) error {
 		if readErr != nil {
 			continue
 		}
-		content := rewriteContent(string(fileRaw), reversals)
+		content := parser.RewriteAssetPaths(relPath, string(fileRaw), func(notePath, url string) string {
+			absURL, ok := trashURLToAbs[url]
+			if !ok {
+				return url
+			}
+			return parser.RelativeAssetPath(notePath, absURL)
+		})
 		if wErr := os.WriteFile(dest, []byte(content), 0644); wErr != nil {
 			continue
 		}

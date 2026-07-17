@@ -108,3 +108,297 @@ func TestSaveFileBackupAndPruning(t *testing.T) {
 		}
 	}
 }
+
+// newTestServer sets up a temp workspace root, DB, and watcher for a test,
+// returning the server plus a cleanup func.
+func newTestServer(t *testing.T) (*Server, string) {
+	t.Helper()
+	tempDir, err := os.MkdirTemp("", "blockforge-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(tempDir) })
+
+	dbPath := filepath.Join(tempDir, "cache.db")
+	database, err := db.NewDB(dbPath)
+	if err != nil {
+		t.Fatalf("failed to init db: %v", err)
+	}
+	t.Cleanup(func() { database.Close() })
+
+	w, err := watcher.NewWatcher(tempDir, database)
+	if err != nil {
+		t.Fatalf("failed to init watcher: %v", err)
+	}
+	t.Cleanup(func() { w.Close() })
+
+	return NewServer(tempDir, database, w), tempDir
+}
+
+// noteWithRelativeAsset writes a note plus a physical asset under it,
+// mirroring how the app actually stores things on disk: the note's body
+// references the asset with a path relative to the note's own directory
+// (e.g. "../../../assets/Boards/Folder/Board/img.png"), not an app-rooted
+// "/workspace/assets/..." URL. This is the on-disk format assetlinks.go
+// documents as the deliberate current behavior (portable when synced to
+// GitHub) — trash/delete asset cleanup has to resolve through it correctly.
+func noteWithRelativeAsset(t *testing.T, rootPath, noteRelPath, assetRelPath string) {
+	t.Helper()
+	noteFull := filepath.Join(rootPath, filepath.FromSlash(noteRelPath))
+	assetFull := filepath.Join(rootPath, filepath.FromSlash(assetRelPath))
+
+	if err := os.MkdirAll(filepath.Dir(noteFull), 0755); err != nil {
+		t.Fatalf("mkdir note dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(assetFull), 0755); err != nil {
+		t.Fatalf("mkdir asset dir: %v", err)
+	}
+	if err := os.WriteFile(assetFull, []byte("fake-png-bytes"), 0644); err != nil {
+		t.Fatalf("write asset: %v", err)
+	}
+
+	noteDir := filepath.Dir(noteRelPath)
+	relRef, err := filepath.Rel(noteDir, assetRelPath)
+	if err != nil {
+		t.Fatalf("compute relative asset ref: %v", err)
+	}
+	relRef = filepath.ToSlash(relRef)
+
+	content := "---\ntitle: Task\ntype: task\n---\n\n![](" + relRef + ")\n"
+	if err := os.WriteFile(noteFull, []byte(content), 0644); err != nil {
+		t.Fatalf("write note: %v", err)
+	}
+}
+
+// Regression test: a card/task embeds its image with a path relative to the
+// note's own location (the app's actual on-disk format). Trashing the note
+// must still locate and move the real physical asset — it previously only
+// recognized old-style app-rooted "/workspace/assets/..." URLs, so a
+// relative reference like "../../../assets/..." was silently ignored and
+// the asset was orphaned on disk forever.
+func TestTrashFilesMovesRelativeAssetReferences(t *testing.T) {
+	s, tempDir := newTestServer(t)
+
+	noteRel := "Default/Boards/Folder/Board/task.md"
+	assetRel := "Default/assets/Boards/Folder/Board/img.png"
+	noteWithRelativeAsset(t, tempDir, noteRel, assetRel)
+
+	if err := s.trashFiles([]string{noteRel}, noteRel, "file", "Default", "testid123"); err != nil {
+		t.Fatalf("trashFiles failed: %v", err)
+	}
+
+	// The note and its asset must both be gone from their original locations.
+	if _, err := os.Stat(filepath.Join(tempDir, filepath.FromSlash(noteRel))); !os.IsNotExist(err) {
+		t.Fatalf("expected note to be removed from original location, stat err: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tempDir, filepath.FromSlash(assetRel))); !os.IsNotExist(err) {
+		t.Fatalf("expected asset to be removed from original location (moved to trash), stat err: %v", err)
+	}
+
+	// The asset must have actually landed inside the trash bundle, not been
+	// silently dropped.
+	bundleAssetsDir := filepath.Join(s.trashDirForWorkspace("Default"), "testid123", "assets")
+	entries, err := os.ReadDir(bundleAssetsDir)
+	if err != nil {
+		t.Fatalf("failed to read trash bundle assets dir: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "img.png" {
+		t.Fatalf("expected exactly one trashed asset named img.png, got %+v", entries)
+	}
+}
+
+// Regression test: same relative-path scenario, but for permanent delete
+// (trash retention set to 0) — the asset must actually be removed from disk,
+// not just orphaned because its reference wasn't recognized.
+func TestPermanentlyDeleteFilesRemovesRelativeAssetReferences(t *testing.T) {
+	s, tempDir := newTestServer(t)
+
+	noteRel := "Default/Boards/Folder/Board/task.md"
+	assetRel := "Default/assets/Boards/Folder/Board/img.png"
+	noteWithRelativeAsset(t, tempDir, noteRel, assetRel)
+
+	s.permanentlyDeleteFiles([]string{noteRel}, "")
+
+	if _, err := os.Stat(filepath.Join(tempDir, filepath.FromSlash(noteRel))); !os.IsNotExist(err) {
+		t.Fatalf("expected note to be deleted, stat err: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tempDir, filepath.FromSlash(assetRel))); !os.IsNotExist(err) {
+		t.Fatalf("expected asset to be permanently deleted, stat err: %v", err)
+	}
+}
+
+// Regression test: trashing then restoring a note must round-trip its asset
+// reference back into the same relative-to-note form the app writes on
+// every save — not the old app-rooted absolute form, which would still
+// technically resolve today (AbsoluteAssetPath treats it as a no-op legacy
+// path) but silently reintroduces the non-portable format on every restore.
+func TestRestoreTrashBundleKeepsRelativeAssetReference(t *testing.T) {
+	s, tempDir := newTestServer(t)
+
+	noteRel := "Default/Boards/Folder/Board/task.md"
+	assetRel := "Default/assets/Boards/Folder/Board/img.png"
+	noteWithRelativeAsset(t, tempDir, noteRel, assetRel)
+
+	if err := s.trashFiles([]string{noteRel}, noteRel, "file", "Default", "testid456"); err != nil {
+		t.Fatalf("trashFiles failed: %v", err)
+	}
+	if err := s.restoreTrashBundle("Default", "testid456"); err != nil {
+		t.Fatalf("restoreTrashBundle failed: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(tempDir, filepath.FromSlash(assetRel))); err != nil {
+		t.Fatalf("expected asset restored to original location: %v", err)
+	}
+	restored, err := os.ReadFile(filepath.Join(tempDir, filepath.FromSlash(noteRel)))
+	if err != nil {
+		t.Fatalf("failed to read restored note: %v", err)
+	}
+	if !strings.Contains(string(restored), "../../../assets/Boards/Folder/Board/img.png") {
+		t.Fatalf("expected restored note to reference the asset with a note-relative path, got:\n%s", restored)
+	}
+	if strings.Contains(string(restored), "/Default/assets/") {
+		t.Fatalf("restored note regressed to the old app-rooted absolute asset path, got:\n%s", restored)
+	}
+}
+
+// Regression test: the image editor's "._orig" backup (see handleUploadAsset)
+// is never referenced anywhere in note content — it's discoverable only by
+// naming convention next to the asset it belongs to. A card with an edited
+// (annotated/cropped) image must have both files cleaned up on trash, not
+// just the one the note actually links to.
+func TestTrashFilesMovesOrigBackupSibling(t *testing.T) {
+	s, tempDir := newTestServer(t)
+
+	noteRel := "Default/Boards/Folder/Board/task.md"
+	assetRel := "Default/assets/Boards/Folder/Board/img.png"
+	origRel := "Default/assets/Boards/Folder/Board/img._orig.png"
+	noteWithRelativeAsset(t, tempDir, noteRel, assetRel)
+	if err := os.WriteFile(filepath.Join(tempDir, filepath.FromSlash(origRel)), []byte("fake-orig-bytes"), 0644); err != nil {
+		t.Fatalf("write orig backup: %v", err)
+	}
+
+	if err := s.trashFiles([]string{noteRel}, noteRel, "file", "Default", "testid789"); err != nil {
+		t.Fatalf("trashFiles failed: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(tempDir, filepath.FromSlash(origRel))); !os.IsNotExist(err) {
+		t.Fatalf("expected orig backup to be removed from original location, stat err: %v", err)
+	}
+	bundleAssetsDir := filepath.Join(s.trashDirForWorkspace("Default"), "testid789", "assets")
+	entries, err := os.ReadDir(bundleAssetsDir)
+	if err != nil {
+		t.Fatalf("failed to read trash bundle assets dir: %v", err)
+	}
+	names := map[string]bool{}
+	for _, e := range entries {
+		names[e.Name()] = true
+	}
+	if !names["img.png"] || !names["img._orig.png"] {
+		t.Fatalf("expected both img.png and img._orig.png in trash bundle, got %+v", entries)
+	}
+
+	// Restoring should bring the orig backup home alongside the main asset.
+	if err := s.restoreTrashBundle("Default", "testid789"); err != nil {
+		t.Fatalf("restoreTrashBundle failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tempDir, filepath.FromSlash(origRel))); err != nil {
+		t.Fatalf("expected orig backup restored to original location: %v", err)
+	}
+}
+
+// Regression test: same "._orig" sibling scenario for permanent delete.
+func TestPermanentlyDeleteFilesRemovesOrigBackupSibling(t *testing.T) {
+	s, tempDir := newTestServer(t)
+
+	noteRel := "Default/Boards/Folder/Board/task.md"
+	assetRel := "Default/assets/Boards/Folder/Board/img.png"
+	origRel := "Default/assets/Boards/Folder/Board/img._orig.png"
+	noteWithRelativeAsset(t, tempDir, noteRel, assetRel)
+	if err := os.WriteFile(filepath.Join(tempDir, filepath.FromSlash(origRel)), []byte("fake-orig-bytes"), 0644); err != nil {
+		t.Fatalf("write orig backup: %v", err)
+	}
+
+	s.permanentlyDeleteFiles([]string{noteRel}, "")
+
+	if _, err := os.Stat(filepath.Join(tempDir, filepath.FromSlash(origRel))); !os.IsNotExist(err) {
+		t.Fatalf("expected orig backup to be permanently deleted, stat err: %v", err)
+	}
+}
+
+// Regression test: the image markup editor appends a cache-busting
+// "?t=<timestamp>" to the asset URL it writes back into a note (see
+// Editor.tsx's handleImageSave) so the browser re-fetches the edited image
+// instead of showing a stale cached one. That query string ends up
+// persisted as part of the note's on-disk relative asset reference, e.g.
+// "../../../assets/Boards/.../img.png?t=1737100000000" — the real file on
+// disk is still just "img.png", with no query string in its name. Deleting
+// the note must still resolve through that contamination to find the real
+// file, not silently skip it because the literal string doesn't exist.
+func TestTrashFilesHandlesCacheBustedAssetReference(t *testing.T) {
+	s, tempDir := newTestServer(t)
+
+	noteRel := "Default/Boards/Folder/Board/task.md"
+	assetRel := "Default/assets/Boards/Folder/Board/img.png"
+	assetFull := filepath.Join(tempDir, filepath.FromSlash(assetRel))
+	noteFull := filepath.Join(tempDir, filepath.FromSlash(noteRel))
+
+	if err := os.MkdirAll(filepath.Dir(assetFull), 0755); err != nil {
+		t.Fatalf("mkdir asset dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(noteFull), 0755); err != nil {
+		t.Fatalf("mkdir note dir: %v", err)
+	}
+	if err := os.WriteFile(assetFull, []byte("fake-png-bytes"), 0644); err != nil {
+		t.Fatalf("write asset: %v", err)
+	}
+	content := "---\ntitle: Task\ntype: task\n---\n\n![](../../../assets/Boards/Folder/Board/img.png?t=1737100000000)\n"
+	if err := os.WriteFile(noteFull, []byte(content), 0644); err != nil {
+		t.Fatalf("write note: %v", err)
+	}
+
+	if err := s.trashFiles([]string{noteRel}, noteRel, "file", "Default", "testidquery"); err != nil {
+		t.Fatalf("trashFiles failed: %v", err)
+	}
+
+	if _, err := os.Stat(assetFull); !os.IsNotExist(err) {
+		t.Fatalf("expected cache-busted asset to be removed from original location, stat err: %v", err)
+	}
+	bundleAssetsDir := filepath.Join(s.trashDirForWorkspace("Default"), "testidquery", "assets")
+	entries, err := os.ReadDir(bundleAssetsDir)
+	if err != nil {
+		t.Fatalf("failed to read trash bundle assets dir: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "img.png" {
+		t.Fatalf("expected exactly one trashed asset named img.png, got %+v", entries)
+	}
+}
+
+// Same cache-busted-reference scenario for permanent delete.
+func TestPermanentlyDeleteFilesHandlesCacheBustedAssetReference(t *testing.T) {
+	s, tempDir := newTestServer(t)
+
+	noteRel := "Default/Boards/Folder/Board/task.md"
+	assetRel := "Default/assets/Boards/Folder/Board/img.png"
+	assetFull := filepath.Join(tempDir, filepath.FromSlash(assetRel))
+	noteFull := filepath.Join(tempDir, filepath.FromSlash(noteRel))
+
+	if err := os.MkdirAll(filepath.Dir(assetFull), 0755); err != nil {
+		t.Fatalf("mkdir asset dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(noteFull), 0755); err != nil {
+		t.Fatalf("mkdir note dir: %v", err)
+	}
+	if err := os.WriteFile(assetFull, []byte("fake-png-bytes"), 0644); err != nil {
+		t.Fatalf("write asset: %v", err)
+	}
+	content := "---\ntitle: Task\ntype: task\n---\n\n![](../../../assets/Boards/Folder/Board/img.png?t=1737100000000)\n"
+	if err := os.WriteFile(noteFull, []byte(content), 0644); err != nil {
+		t.Fatalf("write note: %v", err)
+	}
+
+	s.permanentlyDeleteFiles([]string{noteRel}, "")
+
+	if _, err := os.Stat(assetFull); !os.IsNotExist(err) {
+		t.Fatalf("expected cache-busted asset to be permanently deleted, stat err: %v", err)
+	}
+}
