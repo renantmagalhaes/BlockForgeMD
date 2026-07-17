@@ -217,6 +217,8 @@ Your content here, in standard Markdown.
 
 Kanban boards, canvases, mind maps, and diagrams embed their data as a fenced code block inside the same `.md` file — so you can read, diff, and version-control everything with git.
 
+**Known limitation — non-Latin titles:** the on-disk filename is derived from the title by stripping everything except `a-z A-Z 0-9`, spaces, and hyphens. A title written entirely in a non-Latin script or in emoji (e.g. fully Japanese, Chinese, Cyrillic, Arabic, or emoji-only) has nothing left after stripping, so creating that page currently fails silently — no file is written and no error is shown. This only affects the generated *filename*; it's unrelated to git, GitHub, or NAS sync, which are fully Unicode-safe and store file content byte-for-byte regardless of what's inside it.
+
 ---
 
 ## License
