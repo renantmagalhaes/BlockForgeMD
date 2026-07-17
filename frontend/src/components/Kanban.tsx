@@ -267,13 +267,15 @@ const BoardSettingsModal: React.FC<{
   allBoardTags: string[]
   columns?: string[]
   completedColumns?: string[]
+  completionTargetColumn?: string
   onClose: () => void
   onSavePriority: (idx: number, name: string, color: string) => Promise<void>
   onDeletePriority: (idx: number) => Promise<void>
   onAddPriority: (name: string, color: string) => Promise<void>
   onSetTagColor: (tag: string, color: string) => Promise<void>
   onToggleCompleted?: (col: string) => void
-}> = ({ priorities, tagColors, allBoardTags, columns, completedColumns = [], onClose, onSavePriority, onDeletePriority, onAddPriority, onSetTagColor, onToggleCompleted }) => {
+  onSetCompletionTarget?: (col: string) => void
+}> = ({ priorities, tagColors, allBoardTags, columns, completedColumns = [], completionTargetColumn, onClose, onSavePriority, onDeletePriority, onAddPriority, onSetTagColor, onToggleCompleted, onSetCompletionTarget }) => {
   const [editingIdx, setEditingIdx] = useState<number | null>(null)
   const [editName, setEditName]     = useState('')
   const [editColor, setEditColor]   = useState('')
@@ -398,6 +400,23 @@ const BoardSettingsModal: React.FC<{
                   )
                 })}
               </div>
+            </div>
+          )}
+
+          {/* Quick Complete target */}
+          {columns && columns.length > 0 && (
+            <div>
+              <h3 className="text-[10px] font-bold bf-kanban-section-label uppercase tracking-widest mb-3">Quick Complete</h3>
+              <p className="text-[11px] bf-kanban-hint mb-3">
+                The column a card moves to when checked off via the card's checkbox or the "Mark as completed" right-click action. Defaults to "Done".
+              </p>
+              <select
+                value={completionTargetColumn}
+                onChange={e => onSetCompletionTarget?.(e.target.value)}
+                className="bf-kanban-input rounded-lg px-2 py-1.5 text-xs w-full outline-none cursor-pointer"
+              >
+                {columns.map(col => <option key={col} value={col}>{col}</option>)}
+              </select>
             </div>
           )}
 
@@ -708,15 +727,18 @@ const CardContextMenu: React.FC<{
   currentCol: string
   columns: string[]
   priorities: PriorityDef[]
+  isCompleted: boolean
+  completionTargetColumn: string
   onClose: () => void
   onOpen: () => void
   onMove: (col: string) => Promise<void>
+  onMarkComplete: () => void
   onSetPriority: (name: string) => void
   onSetDueDate: (date: string) => void
   onDelete?: () => void
   otherBoards?: { path: string; title: string; columns: string[] }[]
   onMoveToBoard?: (boardPath: string, column: string) => void
-}> = ({ x, y, task, currentCol, columns, priorities, onClose, onOpen, onMove, onSetPriority, onSetDueDate, onDelete, otherBoards = [], onMoveToBoard }) => {
+}> = ({ x, y, task, currentCol, columns, priorities, isCompleted, completionTargetColumn, onClose, onOpen, onMove, onMarkComplete, onSetPriority, onSetDueDate, onDelete, otherBoards = [], onMoveToBoard }) => {
   const [sub, setSub] = useState<'move' | 'priority' | 'date' | 'moveBoard' | null>(null)
   const [moveBoardTarget, setMoveBoardTarget] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -783,6 +805,12 @@ const CardContextMenu: React.FC<{
 
       <div className="py-1.5">
         <Row icon={<Edit3 size={13} />} label="Open card" onClick={() => { onOpen(); onClose() }} />
+
+        <Row
+          icon={<Check size={13} />}
+          label={isCompleted ? 'Mark as not completed' : `Mark as completed → ${completionTargetColumn}`}
+          onClick={() => { onMarkComplete(); onClose() }}
+        />
 
         <Divider />
 
@@ -1458,6 +1486,20 @@ const Kanban: React.FC<KanbanProps> = ({
     return boardColumns.filter(c => DONE_NAMES.includes(c.toLowerCase()))
   }, [boardFrontMatter?.completedColumns, boardColumns])
 
+  // Which single column the quick-complete checkbox/context-menu action sends
+  // a card to. "Completed" is ambiguous — a board's done-equivalent column
+  // can be named anything (or there can be several, per completedColumns
+  // above) — so this is an explicit per-board choice (Board Settings),
+  // defaulting to a column literally named "Done" if one exists.
+  const completionTargetColumn = useMemo(() => {
+    const stored = boardFrontMatter?.completionTargetColumn
+    if (stored && boardColumns.some(c => c.toLowerCase() === stored.toLowerCase())) return stored
+    const doneCol = boardColumns.find(c => c.toLowerCase() === 'done')
+    if (doneCol) return doneCol
+    if (completedColumns.length > 0) return completedColumns[completedColumns.length - 1]
+    return boardColumns[boardColumns.length - 1] ?? 'Done'
+  }, [boardFrontMatter?.completionTargetColumn, boardColumns, completedColumns])
+
   const getParentDir = (p: string) => { const i = p.lastIndexOf('/'); return i === -1 ? '' : p.slice(0, i + 1) }
 
   const boardFolder = boardPath
@@ -1712,6 +1754,22 @@ const Kanban: React.FC<KanbanProps> = ({
       ? completedColumns.filter(c => c.toLowerCase() !== col.toLowerCase())
       : [...completedColumns, col]
     await onUpdateBoardFrontMatter?.({ completedColumns: next })
+  }
+
+  const handleSetCompletionTarget = async (col: string) => {
+    await onUpdateBoardFrontMatter?.({ completionTargetColumn: col })
+  }
+
+  // Quick-complete: the card checkbox and the context menu's "Mark as
+  // completed" both call this. A card already sitting in a completed
+  // column reopens to the board's first column instead — there's no single
+  // obvious "undo" column otherwise, but the first column is always a
+  // reasonable "back to the start of the flow" choice.
+  const handleMarkComplete = async (path: string, currentCol: string) => {
+    const alreadyDone = completedColumns.some(c => c.toLowerCase() === currentCol.toLowerCase())
+    const target = alreadyDone ? (boardColumns[0] ?? '') : completionTargetColumn
+    if (!target || target.toLowerCase() === currentCol.toLowerCase()) return
+    await onMoveCard(path, target)
   }
 
   const toggleColCollapse = (col: string) => {
@@ -2051,12 +2109,25 @@ const Kanban: React.FC<KanbanProps> = ({
                       } as React.CSSProperties}
                     >
                       {/* Drag handle hint */}
-                      <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-30 transition-opacity pointer-events-none">
+                      <div className="absolute top-2 right-7 opacity-0 group-hover:opacity-30 transition-opacity pointer-events-none">
                         <GripVertical size={13} />
                       </div>
 
+                      {/* Quick-complete checkbox — sends the card straight to
+                          completionTargetColumn (Board Settings, default
+                          "Done"); un-checking reopens it to the first column. */}
+                      <button
+                        onClick={e => { e.stopPropagation(); handleMarkComplete(task.path, col) }}
+                        title={isCompleted ? 'Mark as not completed' : `Mark as completed (moves to "${completionTargetColumn}")`}
+                        className={`absolute top-2 right-2 w-4 h-4 rounded border flex items-center justify-center transition cursor-pointer z-10 ${
+                          isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-zinc-600 hover:border-zinc-400'
+                        }`}
+                      >
+                        {isCompleted && <Check size={10} className="text-white" />}
+                      </button>
+
                       {/* Title */}
-                      <div className={`font-medium bf-kanban-card-title transition mb-2.5 text-[13px] leading-snug break-words min-w-0 pr-4 ${isCompleted ? 'line-through' : ''}`}>
+                      <div className={`font-medium bf-kanban-card-title transition mb-2.5 text-[13px] leading-snug break-words min-w-0 pr-6 ${isCompleted ? 'line-through' : ''}`}>
                         {task.title}
                       </div>
 
@@ -2276,12 +2347,14 @@ const Kanban: React.FC<KanbanProps> = ({
           allBoardTags={allBoardTags}
           columns={boardColumns}
           completedColumns={completedColumns}
+          completionTargetColumn={completionTargetColumn}
           onClose={() => setSettingsOpen(false)}
           onSavePriority={handleSavePriority}
           onDeletePriority={handleDeletePriority}
           onAddPriority={handleAddPriority}
           onSetTagColor={handleSetTagColor}
           onToggleCompleted={handleToggleColumnCompleted}
+          onSetCompletionTarget={handleSetCompletionTarget}
         />
       )}
 
@@ -2294,9 +2367,12 @@ const Kanban: React.FC<KanbanProps> = ({
           currentCol={cardCtxMenu.col}
           columns={boardColumns}
           priorities={priorities}
+          isCompleted={completedColumns.some(c => c.toLowerCase() === cardCtxMenu.col.toLowerCase())}
+          completionTargetColumn={completionTargetColumn}
           onClose={() => setCardCtxMenu(null)}
           onOpen={() => openCard(cardCtxMenu.task.path)}
           onMove={col => onMoveCard(cardCtxMenu.task.path, col)}
+          onMarkComplete={() => handleMarkComplete(cardCtxMenu.task.path, cardCtxMenu.col)}
           onSetPriority={name => handleSetCardPriority(cardCtxMenu.task.path, name)}
           onSetDueDate={date => onUpdateTaskFrontMatter?.(cardCtxMenu.task.path, { dueDate: date })}
           onDelete={onDeleteCard ? () => onDeleteCard(cardCtxMenu.task.path) : undefined}
