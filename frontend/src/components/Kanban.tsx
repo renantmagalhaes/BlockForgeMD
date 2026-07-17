@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { Editor } from './Editor'
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd'
+import { motion, AnimatePresence } from 'framer-motion'
 import { alertDialog, confirmDialog, promptDialog } from '../lib/dialog'
 
 const API_BASE = import.meta.env.DEV ? 'http://localhost:8080' : ''
@@ -2116,15 +2117,42 @@ const Kanban: React.FC<KanbanProps> = ({
                       {/* Quick-complete checkbox — sends the card straight to
                           completionTargetColumn (Board Settings, default
                           "Done"); un-checking reopens it to the first column. */}
-                      <button
+                      <motion.button
                         onClick={e => { e.stopPropagation(); handleMarkComplete(task.path, col) }}
                         title={isCompleted ? 'Mark as not completed' : `Mark as completed (moves to "${completionTargetColumn}")`}
-                        className={`absolute top-2 right-2 w-4 h-4 rounded border flex items-center justify-center transition cursor-pointer z-10 ${
-                          isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-zinc-600 hover:border-zinc-400'
+                        whileHover={{ scale: 1.15 }}
+                        whileTap={{ scale: 0.8 }}
+                        animate={isCompleted ? { scale: [1, 1.3, 1] } : { scale: 1 }}
+                        transition={{ duration: 0.3, ease: 'easeOut' }}
+                        className={`group/check absolute top-2 right-2 w-4 h-4 rounded-full border-2 flex items-center justify-center cursor-pointer z-10 transition-colors duration-150 ${
+                          isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-zinc-500 hover:border-emerald-400'
                         }`}
                       >
-                        {isCompleted && <Check size={10} className="text-white" />}
-                      </button>
+                        <AnimatePresence>
+                          {isCompleted && (
+                            <motion.span
+                              key="check"
+                              initial={{ scale: 0, rotate: -45, opacity: 0 }}
+                              animate={{ scale: 1, rotate: 0, opacity: 1 }}
+                              exit={{ scale: 0, opacity: 0 }}
+                              transition={{ type: 'spring', stiffness: 500, damping: 18 }}
+                              className="flex items-center justify-center"
+                            >
+                              <Check size={10} className="text-white" strokeWidth={3} />
+                            </motion.span>
+                          )}
+                        </AnimatePresence>
+                        {/* Ghost preview of the checkmark — a quiet hint, on
+                            hover, of what clicking will do — before the card
+                            is actually marked complete. */}
+                        {!isCompleted && (
+                          <Check
+                            size={10}
+                            strokeWidth={3}
+                            className="text-emerald-400 opacity-0 scale-50 group-hover/check:opacity-70 group-hover/check:scale-100 transition-all duration-150"
+                          />
+                        )}
+                      </motion.button>
 
                       {/* Title */}
                       <div className={`font-medium bf-kanban-card-title transition mb-2.5 text-[13px] leading-snug break-words min-w-0 pr-6 ${isCompleted ? 'line-through' : ''}`}>
