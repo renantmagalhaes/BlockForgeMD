@@ -2198,8 +2198,12 @@ const Kanban: React.FC<KanbanProps> = ({
                           )}
                         </div>
 
-                        {/* Tags */}
-                        <div className="flex flex-wrap gap-1 items-center" onClick={e => e.stopPropagation()}>
+                        {/* Tags — no container-level stopPropagation here:
+                            only the actual interactive bits (remove button,
+                            +tag button) stop it, so clicking the empty gaps
+                            in this row still opens the card like everywhere
+                            else. */}
+                        <div className="flex flex-wrap gap-1 items-center">
                           {tags.map(tag => {
                             const tc = isCompleted ? '#64748b' : (tagColors[tag] || '#8b5cf6')
                             return (
@@ -2210,7 +2214,7 @@ const Kanban: React.FC<KanbanProps> = ({
                               >
                                 {tag}
                                 <button
-                                  onClick={() => handleRemoveTag(task.path, tag, tags)}
+                                  onClick={e => { e.stopPropagation(); handleRemoveTag(task.path, tag, tags) }}
                                   className="ml-0.5 opacity-0 group-hover/tag:opacity-100 hover:text-red-400 transition cursor-pointer"
                                 >
                                   <X size={8} />
@@ -2229,7 +2233,7 @@ const Kanban: React.FC<KanbanProps> = ({
                             />
                           ) : (
                             <button
-                              onClick={() => setTagEditorCard(task.path)}
+                              onClick={e => { e.stopPropagation(); setTagEditorCard(task.path) }}
                               className={`px-1.5 py-0.5 text-[10px] rounded-md border border-dashed transition cursor-pointer bf-kanban-tag-btn ${
                                 tags.length === 0 ? 'opacity-0 group-hover:opacity-100' : ''
                               }`}
