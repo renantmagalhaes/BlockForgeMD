@@ -83,10 +83,11 @@ interface KanbanProps {
   onSaveCardViewMode?: (mode: 'modal' | 'fullscreen') => void
   initialPropertiesCollapsed?: boolean
   isMobile?: boolean
-  // Current width of the app's own left sidebar (App.tsx), so the card
-  // panel's desktop "fullscreen" mode can leave room for it instead of
-  // covering it — see that mode's comment for why this matters.
-  sidebarCollapsed?: boolean
+  // Current width (px) of the app's own left sidebar (App.tsx) — rail plus
+  // its resizable level-2 panel, or just the rail when collapsed — so the
+  // card panel's desktop "fullscreen" mode can leave room for it instead of
+  // covering it. See that mode's comment for why this matters.
+  sidebarWidthPx?: number
   autosaveDelay?: number
   activeWorkspace?: string
   tagColors?: Record<string, string>
@@ -955,12 +956,12 @@ const CardDetailPanel: React.FC<{
   initialPropertiesCollapsed?: boolean
   closing?: boolean
   isMobile?: boolean
-  sidebarCollapsed?: boolean
+  sidebarWidthPx?: number
   autosaveDelay?: number
   globalLayoutOverride?: string
   globalColumnWidthOverride?: string
   dateFormat?: string
-}> = ({ task, viewMode, columns, allBoardTags, tagColors, onEnsureTagColor, files, onClose, onSetMode, onUpdateFrontMatter, onRenameFile, resolvePath, onSelectFile, onDelete, onCardSaved, initialPropertiesCollapsed, closing, isMobile, sidebarCollapsed, autosaveDelay, globalLayoutOverride, globalColumnWidthOverride, dateFormat }) => {
+}> = ({ task, viewMode, columns, allBoardTags, tagColors, onEnsureTagColor, files, onClose, onSetMode, onUpdateFrontMatter, onRenameFile, resolvePath, onSelectFile, onDelete, onCardSaved, initialPropertiesCollapsed, closing, isMobile, sidebarWidthPx, autosaveDelay, globalLayoutOverride, globalColumnWidthOverride, dateFormat }) => {
   // Modal (80vw/80vh) doesn't fit a phone screen — mobile always gets the
   // fullscreen layout regardless of the saved preference.
   const effectiveViewMode: CardViewMode = isMobile ? 'fullscreen' : viewMode
@@ -1209,7 +1210,7 @@ const CardDetailPanel: React.FC<{
         className="fixed top-0 right-0 bottom-0 z-[600] flex flex-col bf-kanban-modal overflow-hidden transition-[opacity,left] duration-200 ease-out"
         style={{
           opacity: active ? 1 : 0,
-          left: isMobile ? 0 : (sidebarCollapsed ? '4rem' : '20rem'),
+          left: isMobile ? 0 : (sidebarWidthPx ?? 320),
         }}
       >
         {toolbar}
@@ -1263,7 +1264,7 @@ const Kanban: React.FC<KanbanProps> = ({
   onSaveCardViewMode,
   initialPropertiesCollapsed,
   isMobile,
-  sidebarCollapsed,
+  sidebarWidthPx,
   autosaveDelay,
   activeWorkspace,
   tagColors: globalTagColors,
@@ -2479,7 +2480,7 @@ const Kanban: React.FC<KanbanProps> = ({
             initialPropertiesCollapsed={initialPropertiesCollapsed}
             closing={closingCard}
             isMobile={isMobile}
-            sidebarCollapsed={sidebarCollapsed}
+            sidebarWidthPx={sidebarWidthPx}
             autosaveDelay={autosaveDelay}
             globalLayoutOverride={globalLayoutOverride}
             globalColumnWidthOverride={globalColumnWidthOverride}

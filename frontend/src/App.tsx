@@ -520,7 +520,7 @@ const TreeNodeComponent: React.FC<{
             <span className="w-3.5 shrink-0" />
           )}
           {getIcon()}
-          <span className="truncate ml-0.5">{node.title || node.name}</span>
+          <span className="truncate ml-0.5" title={node.title || node.name}>{node.title || node.name}</span>
         </div>
 
         <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 shrink-0 ml-1">
@@ -1194,6 +1194,44 @@ const App: React.FC = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const isMobile = useIsMobile()
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false)
+  // Level-2 panel (the section list/tree, not the icon rail) width — desktop
+  // only, drag-resizable via the handle at its right edge. Persisted in
+  // localStorage as a pure per-browser layout preference, same as the other
+  // simple UI dimension/appearance prefs (theme, app font, etc.).
+  const SIDEBAR_PANEL_MIN = 200
+  const SIDEBAR_PANEL_MAX = 900
+  const [sidebarPanelWidth, setSidebarPanelWidth] = useState<number>(() => {
+    const saved = parseInt(localStorage.getItem('bf-sidebar-panel-width') || '', 10)
+    return Number.isFinite(saved) ? Math.min(SIDEBAR_PANEL_MAX, Math.max(SIDEBAR_PANEL_MIN, saved)) : 256
+  })
+  // Suppresses the collapse/expand width transition while actively dragging
+  // the resize handle — otherwise every mousemove-driven width update tries
+  // to animate, and the panel visibly lags behind the cursor instead of
+  // tracking it 1:1.
+  const [isResizingSidebar, setIsResizingSidebar] = useState(false)
+  const handleSidebarResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startWidth = sidebarPanelWidth
+    let latestWidth = startWidth
+    setIsResizingSidebar(true)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    const handleMove = (ev: MouseEvent) => {
+      latestWidth = Math.min(SIDEBAR_PANEL_MAX, Math.max(SIDEBAR_PANEL_MIN, startWidth + (ev.clientX - startX)))
+      setSidebarPanelWidth(latestWidth)
+    }
+    const handleUp = () => {
+      window.removeEventListener('mousemove', handleMove)
+      window.removeEventListener('mouseup', handleUp)
+      setIsResizingSidebar(false)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      localStorage.setItem('bf-sidebar-panel-width', String(latestWidth))
+    }
+    window.addEventListener('mousemove', handleMove)
+    window.addEventListener('mouseup', handleUp)
+  }
   type SidebarSection = 'favorites' | 'documents' | 'boards' | 'canvas' | 'mindmaps'
   const [activeSidebarSection, setActiveSidebarSection] = useState<SidebarSection>('documents')
   const [kanbanCardViewMode, setKanbanCardViewMode] = useState<'modal' | 'fullscreen'>('modal')
@@ -2610,7 +2648,20 @@ const App: React.FC = () => {
       {/* ── Sidebar ──────────────────────────────────────────────────────── */}
       {/* Mobile: fixed off-canvas drawer, hidden by default, slides in over content.
           Desktop (md+): back to a normal, always-visible flex column. */}
-      <div className={`fixed inset-y-0 left-0 z-[1000] w-[85vw] max-w-[320px] transform transition-transform duration-200 ease-in-out ${mobileDrawerOpen ? 'translate-x-0' : '-translate-x-full'} md:static md:inset-auto md:z-auto md:translate-x-0 md:transition-[width] ${sidebarCollapsed ? 'md:w-16' : 'md:w-80'} bg-[#161b22] border-r border-slate-800 flex no-print bf-sidebar overflow-hidden shrink-0`}>
+      <div
+        // md:relative (not md:static): still takes the sidebar out of
+        // `fixed` positioning on desktop so it lays out normally as a flex
+        // item (relative behaves exactly like static for in-flow layout
+        // purposes), but also gives the absolutely-positioned resize handle
+        // below a containing block to anchor to. A *separate*, unprefixed
+        // `relative` class here would be redundant on desktop and actively
+        // wrong on mobile: Tailwind emits `.relative` after `.fixed` in its
+        // compiled CSS regardless of class order in this string, so an
+        // unprefixed `relative` would silently win over the base `fixed`
+        // class below 768px and break the off-canvas slide entirely.
+        className={`fixed inset-y-0 left-0 z-[1000] w-[85vw] max-w-[320px] md:max-w-none transform transition-transform duration-200 ease-in-out ${mobileDrawerOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:inset-auto md:z-auto md:translate-x-0 ${isResizingSidebar ? '' : 'md:transition-[width]'} ${sidebarCollapsed ? 'md:w-16' : ''} bg-[#161b22] border-r border-slate-800 flex no-print bf-sidebar overflow-hidden shrink-0`}
+        style={!isMobile && !sidebarCollapsed ? { width: 64 + sidebarPanelWidth } : undefined}
+      >
 
         {/* ── Level 1: icon rail — always visible ─────────────────────────── */}
         <div className="w-16 shrink-0 flex flex-col h-full items-center pt-4 pb-3 gap-1 border-r border-slate-800/60">
@@ -2766,7 +2817,14 @@ const App: React.FC = () => {
         </div>
 
         {/* ── Level 2: section panel ──────────────────────────────────────── */}
-        {!sidebarCollapsed && <div className="w-64 shrink-0 flex flex-col h-full overflow-hidden">
+        {/* On mobile this stays a fixed w-64 regardless of the desktop drag
+            width — sidebarPanelWidth is a persisted desktop preference that
+            can be dragged well past what the ~85vw/max-320px mobile drawer
+            has room for, and applying it there blows out the whole drawer. */}
+        {!sidebarCollapsed && <div
+          className={`shrink-0 flex flex-col h-full overflow-hidden ${isMobile ? 'w-64' : ''}`}
+          style={!isMobile ? { width: sidebarPanelWidth } : undefined}
+        >
           <div className="p-4 border-b border-slate-800 bf-sidebar-header">
             <h1 className="font-bold text-sm tracking-tight">
               {activeSidebarSection === 'mindmaps' ? 'Mind Maps' : activeSidebarSection.charAt(0).toUpperCase() + activeSidebarSection.slice(1)}
@@ -2884,7 +2942,7 @@ const App: React.FC = () => {
                           >
                             <div className="flex items-center gap-1.5 truncate min-w-0">
                               {getFileTypeIcon(file.type, file.frontMatter?.editor)}
-                              <span className="truncate ml-0.5">{file.title}</span>
+                              <span className="truncate ml-0.5" title={file.title}>{file.title}</span>
                             </div>
                             <button
                               onClick={e => { e.stopPropagation(); handleToggleFavorite(path) }}
@@ -3321,6 +3379,17 @@ const App: React.FC = () => {
           )}
           </div>
         </div>}
+
+        {/* Drag handle — resizes the level-2 panel (desktop only; the
+            collapsed icon-only rail and the mobile off-canvas drawer aren't
+            resizable). Sits on the sidebar's own right border. */}
+        {!sidebarCollapsed && !isMobile && (
+          <div
+            onMouseDown={handleSidebarResizeStart}
+            className="hidden md:block absolute top-0 bottom-0 right-0 w-1 cursor-col-resize z-10 hover:bg-violet-500/50 active:bg-violet-500/70 transition-colors"
+            title="Drag to resize"
+          />
+        )}
       </div>
 
       {/* ── Mobile top bar — hamburger + current page title, hidden on desktop ── */}
@@ -3418,7 +3487,7 @@ const App: React.FC = () => {
                 onSaveCardViewMode={saveKanbanCardViewMode}
                 initialPropertiesCollapsed={propertiesCollapsed}
                 isMobile={isMobile}
-                sidebarCollapsed={sidebarCollapsed}
+                sidebarWidthPx={sidebarCollapsed ? 64 : 64 + sidebarPanelWidth}
                 autosaveDelay={autosaveDelay}
                 activeWorkspace={activeWorkspace}
                 tagColors={tagColors}
