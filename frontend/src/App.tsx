@@ -3354,16 +3354,7 @@ const App: React.FC = () => {
                 onReorderCards={handleReorderCards}
                 onDeleteCard={handleDeleteFile}
                 onRenameBoard={selectedPath ? async (newName: string) => {
-                  const parts = selectedPath.split('/')
-                  parts[parts.length - 1] = newName + '.board.md'
-                  const newPath = parts.join('/')
-                  await fetch(`${API_BASE}/api/file/move`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ from: selectedPath, to: newPath }),
-                  })
-                  await fetchFiles()
-                  fetchFileContent(newPath)
+                  await handleRenameFile(selectedPath, newName)
                 } : undefined}
                 onCardSaved={fetchFiles}
                 initialCardViewMode={kanbanCardViewMode}
@@ -4574,10 +4565,13 @@ const App: React.FC = () => {
             )}
 
             {/* Boards section */}
-            {contextMenu.sectionType === 'boards' && (contextMenu.nodeType === 'board' || !contextMenu.nodeType) && (
+            {contextMenu.sectionType === 'boards' && (
               <>
-                {ctxBtn('New Task', <CheckSquare size={13} className="text-amber-500" />,
-                  () => handleCreateFile('task', ctxParent, undefined, ['task']))}
+                {(contextMenu.nodeType === 'board' || !contextMenu.nodeType) &&
+                  ctxBtn('New Task', <CheckSquare size={13} className="text-amber-500" />,
+                    () => handleCreateFile('task', ctxParent, undefined, ['task']))}
+                {ctxBtn('New Kanban Board', <LayoutGrid size={13} className="text-rose-400" />,
+                  () => handleCreateFile('board', ctxParent, undefined, ['board']))}
                 {ctxBtn('New Folder', <FolderPlus size={13} className="text-slate-400" />,
                   () => handleCreateFile('folder', ctxParent, undefined, ['folder']))}
               </>
@@ -4605,8 +4599,13 @@ const App: React.FC = () => {
               </>
             )}
 
-            {/* Rename — available for all page types */}
-            {!contextMenu.isFolder && (() => {
+            {/* Rename — available for every node with a real backing file,
+                folders included. We check the actual node type rather than
+                isFolder: a board/document with nested children also sets
+                isFolder for expand/collapse purposes, which would otherwise
+                hide Rename on it. Structural placeholder nodes with no
+                backing file have no nodeType at all, so require one. */}
+            {!!contextMenu.nodeType && (() => {
               const fileTitle = files.find(f => f.path === contextMenu.path)?.title
                 || contextMenu.path?.split('/').pop()?.replace(/\.(board|excalidraw|drawio|mindmap)\.md$/, '').replace(/\.md$/, '')
                 || ''
