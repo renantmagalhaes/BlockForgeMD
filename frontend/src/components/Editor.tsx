@@ -205,7 +205,6 @@ import {
   Hash,
   Activity,
   Plus,
-  Minus,
   FileText,
   LayoutGrid,
   Brush,
@@ -241,7 +240,11 @@ import {
   XCircle,
   CheckCircle2,
   Flame,
-  ListTodo
+  ListTodo,
+  GripVertical,
+  GripHorizontal,
+  ArrowLeft,
+  ArrowRight
 } from "lucide-react";
 
 // Configure Turndown for clean Markdown serialization
@@ -5972,7 +5975,10 @@ export const Editor: React.FC<
     });
   }, [selectedIndex, commandActive]);
 
-  // Floating Table Controls coordinates state
+  // Floating Table Controls coordinates state — drives ONLY the cell
+  // background color button/popover now (selection-driven, since color
+  // needs to apply to whatever cell(s) are actually selected, which a
+  // hover point alone can't tell us for a multi-cell drag-selection).
   const [
     activeTableRect,
     setActiveTableRect
@@ -5986,6 +5992,81 @@ export const Editor: React.FC<
     cellWidth: number;
     cellHeight: number;
   } | null>(null);
+
+  // Row/column insert+delete controls — Notion/ClickUp-style gutters that
+  // live in a reserved margin along the table's left (rows) and top
+  // (columns) edges, plus thin "add" strips along the bottom/right. They
+  // only appear when the pointer is actually in one of those margins (not
+  // when hovering/typing/selecting inside the table body), and since the
+  // rendered buttons occupy exactly the same screen region the hit-test
+  // checks, there's no gap for the pointer to cross where they'd vanish.
+  const TABLE_GUTTER_SIZE = 16;
+  const [tableGutter, setTableGutter] = useState<{
+    tableEl: HTMLElement;
+    tableRect: { top: number; left: number; width: number; height: number };
+    rows: { top: number; height: number }[];
+    cols: { left: number; width: number }[];
+    hoverRow: number | null;
+    hoverCol: number | null;
+    hoverAddRow: boolean;
+    hoverAddCol: boolean;
+  } | null>(null);
+  const [tableGutterMenu, setTableGutterMenu] = useState<{
+    type: "row" | "col";
+    index: number;
+    tableEl: HTMLElement;
+    top: number;
+    left: number;
+  } | null>(null);
+
+  const computeTableLayout = (tableEl: HTMLElement) => {
+    const table = tableEl as HTMLTableElement;
+    const tableRect = table.getBoundingClientRect();
+    const rows = Array.from(table.rows).map((r) => {
+      const rr = r.getBoundingClientRect();
+      return { top: rr.top, height: rr.height };
+    });
+    const firstRow = table.rows[0];
+    const cols = firstRow
+      ? Array.from(firstRow.cells).map((c) => {
+          const cr = c.getBoundingClientRect();
+          return { left: cr.left, width: cr.width };
+        })
+      : [];
+    return {
+      tableRect: {
+        top: tableRect.top,
+        left: tableRect.left,
+        width: tableRect.width,
+        height: tableRect.height
+      },
+      rows,
+      cols
+    };
+  };
+
+  // Moves the selection into a specific row/column of a table (via an
+  // anchor cell) and runs a table command against it — this is what makes
+  // insert/delete work on ANY row or column, not just wherever the text
+  // caret currently happens to be.
+  const runTableIndexCommand = (
+    tableEl: HTMLElement,
+    type: "row" | "col",
+    index: number,
+    run: (chain: any) => any
+  ) => {
+    if (!editor) return;
+    const table = tableEl as HTMLTableElement;
+    const row = type === "row" ? table.rows[index] : table.rows[0];
+    const cell = row ? (type === "row" ? row.cells[0] : row.cells[index]) : null;
+    if (!cell) return;
+    try {
+      const pos = editor.view.posAtDOM(cell, 0);
+      run(editor.chain().focus().setTextSelection(pos)).run();
+    } catch (e) {
+      console.error("Table command failed", e);
+    }
+  };
 
   const updateTableRect = () => {
     if (!editor || !editor.isFocused) {
@@ -6066,6 +6147,16 @@ export const Editor: React.FC<
       "blur",
       handleUpdateDelayed
     );
+    // "update" fires on every transaction — typed content that changes a
+    // row's height, or a column dragged wider/narrower via the table's
+    // built-in resize handles, are both transactions but neither one is a
+    // selectionUpdate/focus/blur/scroll/resize, so without this the color
+    // button's position would silently drift out of sync with the table
+    // until one of those other events happened to fire.
+    editor.on(
+      "update",
+      handleUpdateDelayed
+    );
 
     window.addEventListener(
       "scroll",
@@ -6090,6 +6181,10 @@ export const Editor: React.FC<
         "blur",
         handleUpdateDelayed
       );
+      editor.off(
+        "update",
+        handleUpdateDelayed
+      );
       window.removeEventListener(
         "scroll",
         handleUpdate,
@@ -6099,6 +6194,94 @@ export const Editor: React.FC<
         "resize",
         handleUpdate
       );
+    };
+  }, [editor]);
+
+  // Row/column gutter hover tracking. Scoped to `window` (not the editor's
+  // own DOM) because the gutter buttons render just *outside* the table's
+  // DOM subtree, in the reserved margin around it — if we only listened on
+  // the editor's dom, the pointer would "leave" as soon as it crossed into
+  // that margin. The hit-test regions below are defined to exactly match
+  // where the gutter buttons are rendered, so there's never a gap between
+  // "still hovering" and "button is there".
+  useEffect(() => {
+    if (!editor) return;
+
+    const handleMove = (e: MouseEvent) => {
+      // Left button held = the user is drag-selecting cells/text, not
+      // looking to manage rows/columns — don't clutter that with gutters.
+      if (e.buttons & 1) {
+        setTableGutter(null);
+        return;
+      }
+      const dom = editor.view.dom;
+      const tables = Array.from(dom.querySelectorAll("table")) as HTMLElement[];
+      const x = e.clientX;
+      const y = e.clientY;
+
+      for (const tableEl of tables) {
+        const { tableRect, rows, cols } = computeTableLayout(tableEl);
+        const inRowGutter =
+          x >= tableRect.left - TABLE_GUTTER_SIZE &&
+          x < tableRect.left &&
+          y >= tableRect.top &&
+          y <= tableRect.top + tableRect.height;
+        const inColGutter =
+          y >= tableRect.top - TABLE_GUTTER_SIZE &&
+          y < tableRect.top &&
+          x >= tableRect.left &&
+          x <= tableRect.left + tableRect.width;
+        const inAddRow =
+          y >= tableRect.top + tableRect.height &&
+          y < tableRect.top + tableRect.height + TABLE_GUTTER_SIZE &&
+          x >= tableRect.left &&
+          x <= tableRect.left + tableRect.width;
+        const inAddCol =
+          x >= tableRect.left + tableRect.width &&
+          x < tableRect.left + tableRect.width + TABLE_GUTTER_SIZE &&
+          y >= tableRect.top &&
+          y <= tableRect.top + tableRect.height;
+
+        if (!inRowGutter && !inColGutter && !inAddRow && !inAddCol) continue;
+
+        const hoverRow = inRowGutter
+          ? rows.findIndex((r) => y >= r.top && y < r.top + r.height)
+          : null;
+        const hoverCol = inColGutter
+          ? cols.findIndex((c) => x >= c.left && x < c.left + c.width)
+          : null;
+
+        setTableGutter({
+          tableEl,
+          tableRect,
+          rows,
+          cols,
+          hoverRow: hoverRow === -1 ? null : hoverRow,
+          hoverCol: hoverCol === -1 ? null : hoverCol,
+          hoverAddRow: inAddRow,
+          hoverAddCol: inAddCol
+        });
+        return;
+      }
+      setTableGutter(null);
+    };
+
+    // Typing shouldn't leave stale gutters/menus lingering over the table.
+    const handleKeydown = () => {
+      setTableGutter(null);
+      setTableGutterMenu(null);
+    };
+    const handleScrollOrResize = () => setTableGutter(null);
+
+    window.addEventListener("mousemove", handleMove);
+    editor.view.dom.addEventListener("keydown", handleKeydown);
+    window.addEventListener("scroll", handleScrollOrResize, true);
+    window.addEventListener("resize", handleScrollOrResize);
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      editor.view.dom.removeEventListener("keydown", handleKeydown);
+      window.removeEventListener("scroll", handleScrollOrResize, true);
+      window.removeEventListener("resize", handleScrollOrResize);
     };
   }, [editor]);
 
@@ -13885,99 +14068,269 @@ export const Editor: React.FC<
           </div>
         </div>
       )}
-      {/* Floating Table Add/Delete Row/Col Overlays */}
+      {/* Table row/column gutters — Notion/ClickUp-style: a thin reserved
+          margin along the table's left (row grips) and top (column grips)
+          edges, plus "+" strips along the bottom/right for appending. They
+          only render while the pointer is actually in one of those
+          margins — never from hovering, selecting, or typing inside the
+          table body — and clicking a grip opens a small menu with
+          insert/delete actions for that specific row or column, so
+          inserting/deleting in the middle of the table works the same as
+          at the edges. */}
+      {tableGutter && (
+        <>
+          {tableGutter.rows.map((r, i) => (
+            <button
+              key={`row-${i}`}
+              title={`Row ${i + 1} options`}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setTableGutterMenu({
+                  type: "row",
+                  index: i,
+                  tableEl: tableGutter.tableEl,
+                  top: r.top,
+                  left: tableGutter.tableRect.left - TABLE_GUTTER_SIZE
+                });
+              }}
+              style={{
+                position: "fixed",
+                top: `${r.top}px`,
+                left: `${tableGutter.tableRect.left - TABLE_GUTTER_SIZE}px`,
+                width: `${TABLE_GUTTER_SIZE}px`,
+                height: `${r.height}px`,
+                zIndex: 9998
+              }}
+              className={`flex items-center justify-center rounded-sm transition cursor-pointer ${
+                tableGutter.hoverRow === i
+                  ? "bg-violet-600/80 text-white"
+                  : "bg-slate-700/30 text-slate-400 hover:bg-slate-600/50"
+              }`}
+            >
+              <GripVertical size={11} />
+            </button>
+          ))}
+          {tableGutter.cols.map((c, i) => (
+            <button
+              key={`col-${i}`}
+              title={`Column ${i + 1} options`}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setTableGutterMenu({
+                  type: "col",
+                  index: i,
+                  tableEl: tableGutter.tableEl,
+                  top: tableGutter.tableRect.top - TABLE_GUTTER_SIZE,
+                  left: c.left
+                });
+              }}
+              style={{
+                position: "fixed",
+                top: `${tableGutter.tableRect.top - TABLE_GUTTER_SIZE}px`,
+                left: `${c.left}px`,
+                width: `${c.width}px`,
+                height: `${TABLE_GUTTER_SIZE}px`,
+                zIndex: 9998
+              }}
+              className={`flex items-center justify-center rounded-sm transition cursor-pointer ${
+                tableGutter.hoverCol === i
+                  ? "bg-violet-600/80 text-white"
+                  : "bg-slate-700/30 text-slate-400 hover:bg-slate-600/50"
+              }`}
+            >
+              <GripHorizontal size={11} />
+            </button>
+          ))}
+          {/* Append row */}
+          <button
+            title="Add row"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              runTableIndexCommand(
+                tableGutter.tableEl,
+                "row",
+                tableGutter.rows.length - 1,
+                (chain) => chain.addRowAfter()
+              );
+            }}
+            style={{
+              position: "fixed",
+              top: `${tableGutter.tableRect.top + tableGutter.tableRect.height}px`,
+              left: `${tableGutter.tableRect.left}px`,
+              width: `${tableGutter.tableRect.width}px`,
+              height: `${TABLE_GUTTER_SIZE}px`,
+              zIndex: 9998
+            }}
+            className={`flex items-center justify-center transition cursor-pointer ${
+              tableGutter.hoverAddRow
+                ? "bg-violet-600/80 text-white"
+                : "bg-slate-700/20 text-slate-500 hover:bg-slate-600/40"
+            }`}
+          >
+            <Plus size={12} />
+          </button>
+          {/* Append column */}
+          <button
+            title="Add column"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              runTableIndexCommand(
+                tableGutter.tableEl,
+                "col",
+                tableGutter.cols.length - 1,
+                (chain) => chain.addColumnAfter()
+              );
+            }}
+            style={{
+              position: "fixed",
+              top: `${tableGutter.tableRect.top}px`,
+              left: `${tableGutter.tableRect.left + tableGutter.tableRect.width}px`,
+              width: `${TABLE_GUTTER_SIZE}px`,
+              height: `${tableGutter.tableRect.height}px`,
+              zIndex: 9998
+            }}
+            className={`flex items-center justify-center transition cursor-pointer ${
+              tableGutter.hoverAddCol
+                ? "bg-violet-600/80 text-white"
+                : "bg-slate-700/20 text-slate-500 hover:bg-slate-600/40"
+            }`}
+          >
+            <Plus size={12} />
+          </button>
+        </>
+      )}
+      {/* Row/column gutter menu — opened by clicking a grip above. */}
+      {tableGutterMenu && (
+        <>
+          <div
+            className="fixed inset-0 z-[9998]"
+            onMouseDown={() => setTableGutterMenu(null)}
+          />
+          <div
+            className="fixed z-[9999] bg-[#161b22] border border-slate-700 rounded-lg shadow-2xl py-1 w-40 text-sm"
+            style={{
+              top: `${tableGutterMenu.top}px`,
+              left: `${tableGutterMenu.left}px`
+            }}
+          >
+            {tableGutterMenu.type === "row" ? (
+              <>
+                <button
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    runTableIndexCommand(
+                      tableGutterMenu.tableEl,
+                      "row",
+                      tableGutterMenu.index,
+                      (chain) => chain.addRowBefore()
+                    );
+                    setTableGutterMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-1.5 hover:bg-slate-700/60 flex items-center gap-2 text-slate-200"
+                >
+                  <ArrowUp size={13} /> Insert above
+                </button>
+                <button
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    runTableIndexCommand(
+                      tableGutterMenu.tableEl,
+                      "row",
+                      tableGutterMenu.index,
+                      (chain) => chain.addRowAfter()
+                    );
+                    setTableGutterMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-1.5 hover:bg-slate-700/60 flex items-center gap-2 text-slate-200"
+                >
+                  <ArrowDown size={13} /> Insert below
+                </button>
+                <div className="h-px bg-slate-700 my-1" />
+                <button
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    runTableIndexCommand(
+                      tableGutterMenu.tableEl,
+                      "row",
+                      tableGutterMenu.index,
+                      (chain) => chain.deleteRow()
+                    );
+                    setTableGutterMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-1.5 hover:bg-red-900/30 flex items-center gap-2 text-red-400"
+                >
+                  <Trash2 size={13} /> Delete row
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    runTableIndexCommand(
+                      tableGutterMenu.tableEl,
+                      "col",
+                      tableGutterMenu.index,
+                      (chain) => chain.addColumnBefore()
+                    );
+                    setTableGutterMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-1.5 hover:bg-slate-700/60 flex items-center gap-2 text-slate-200"
+                >
+                  <ArrowLeft size={13} /> Insert left
+                </button>
+                <button
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    runTableIndexCommand(
+                      tableGutterMenu.tableEl,
+                      "col",
+                      tableGutterMenu.index,
+                      (chain) => chain.addColumnAfter()
+                    );
+                    setTableGutterMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-1.5 hover:bg-slate-700/60 flex items-center gap-2 text-slate-200"
+                >
+                  <ArrowRight size={13} /> Insert right
+                </button>
+                <div className="h-px bg-slate-700 my-1" />
+                <button
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    runTableIndexCommand(
+                      tableGutterMenu.tableEl,
+                      "col",
+                      tableGutterMenu.index,
+                      (chain) => chain.deleteColumn()
+                    );
+                    setTableGutterMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-1.5 hover:bg-red-900/30 flex items-center gap-2 text-red-400"
+                >
+                  <Trash2 size={13} /> Delete column
+                </button>
+              </>
+            )}
+          </div>
+        </>
+      )}
+      {/* Floating cell background color picker — kept selection-driven
+          (activeTableRect), not hover-driven: color needs to apply to
+          whatever is actually selected (including a multi-cell
+          drag-selection), which a hover point alone can't tell us. */}
       {activeTableRect && (
         <>
-          {/* Add Row "+" button below the table */}
-          <button
-            onMouseDown={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              editor
-                .chain()
-                .addRowAfter()
-                .run();
-            }}
-            title="Add Row"
-            style={{
-              position: "fixed",
-              top: `${activeTableRect.top + activeTableRect.height + 6}px`,
-              left: `${activeTableRect.left + activeTableRect.width / 2 - 12}px`,
-              zIndex: 9999
-            }}
-            className="bg-[#1e2330] hover:bg-violet-600 border border-slate-700 hover:border-violet-500 text-slate-400 hover:text-white rounded-full w-6 h-6 shadow-2xl transition cursor-pointer flex items-center justify-center"
-          >
-            <Plus size={12} />
-          </button>
-
-          {/* Delete Row "−" button to the left of the current row */}
-          <button
-            onMouseDown={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              editor
-                .chain()
-                .focus()
-                .deleteRow()
-                .run();
-            }}
-            title="Delete Row"
-            style={{
-              position: "fixed",
-              top: `${activeTableRect.cellTop + activeTableRect.cellHeight / 2 - 12}px`,
-              left: `${activeTableRect.left - 30}px`,
-              zIndex: 9999
-            }}
-            className="bg-[#1e2330] hover:bg-red-700 border border-slate-700 hover:border-red-500 text-slate-400 hover:text-white rounded-full w-6 h-6 shadow-2xl transition cursor-pointer flex items-center justify-center"
-          >
-            <Minus size={12} />
-          </button>
-
-          {/* Add Column "+" button to the right of the table */}
-          <button
-            onMouseDown={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              editor
-                .chain()
-                .addColumnAfter()
-                .run();
-            }}
-            title="Add Column"
-            style={{
-              position: "fixed",
-              top: `${activeTableRect.top + activeTableRect.height / 2 - 12}px`,
-              left: `${activeTableRect.left + activeTableRect.width + 6}px`,
-              zIndex: 9999
-            }}
-            className="bg-[#1e2330] hover:bg-violet-600 border border-slate-700 hover:border-violet-500 text-slate-400 hover:text-white rounded-full w-6 h-6 shadow-2xl transition cursor-pointer flex items-center justify-center"
-          >
-            <Plus size={12} />
-          </button>
-
-          {/* Delete Column "−" button above the current column */}
-          <button
-            onMouseDown={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              editor
-                .chain()
-                .focus()
-                .deleteColumn()
-                .run();
-            }}
-            title="Delete Column"
-            style={{
-              position: "fixed",
-              top: `${activeTableRect.top - 30}px`,
-              left: `${activeTableRect.cellLeft + activeTableRect.cellWidth / 2 - 12}px`,
-              zIndex: 9999
-            }}
-            className="bg-[#1e2330] hover:bg-red-700 border border-slate-700 hover:border-red-500 text-slate-400 hover:text-white rounded-full w-6 h-6 shadow-2xl transition cursor-pointer flex items-center justify-center"
-          >
-            <Minus size={12} />
-          </button>
-
           {/* Cell background color picker */}
           <div
             style={{
