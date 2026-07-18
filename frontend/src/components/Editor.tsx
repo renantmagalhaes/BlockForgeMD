@@ -10058,14 +10058,17 @@ export const Editor: React.FC<
                               No
                               priority
                             </option>
-                            <option value="Low">
-                              Low
+                            <option value="Urgent">
+                              Urgent
+                            </option>
+                            <option value="High">
+                              High
                             </option>
                             <option value="Medium">
                               Medium
                             </option>
-                            <option value="High">
-                              High
+                            <option value="Low">
+                              Low
                             </option>
                           </select>
                         </div>
