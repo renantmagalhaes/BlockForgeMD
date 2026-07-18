@@ -1858,6 +1858,40 @@ func (s *Server) collectFolderFiles(folderMDPath string) ([]string, error) {
 // trashFiles moves a list of files (and their referenced assets) into a single
 // trash bundle at trashRoot/id.  It writes _meta.json at the end.
 // workspace is embedded in the asset URL so the serve handler can locate it.
+// historicalAssetURLs scans every stored history snapshot for a note (see
+// saveFileBackup) and returns the set of asset URLs any of them ever
+// referenced. A note's CURRENT content only reveals assets it references
+// right now — an image that was uploaded and later removed from the body,
+// or made unreachable by rolling back to an earlier version, leaves no
+// trace there. Its old snapshots still have it, though, so this is what
+// lets delete-time cleanup catch those instead of orphaning them in the
+// shared assets folder forever.
+func (s *Server) historicalAssetURLs(relPath string) map[string]bool {
+	found := map[string]bool{}
+	historyDir := filepath.Join(s.rootPath, ".blockforge", "history", url.PathEscape(relPath))
+	entries, err := os.ReadDir(historyDir)
+	if err != nil {
+		return found
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(historyDir, entry.Name()))
+		if err != nil {
+			continue
+		}
+		parser.RewriteAssetPaths(relPath, string(raw), func(notePath, u string) string {
+			absURL := stripURLSuffix(parser.AbsoluteAssetPath(notePath, u))
+			if isAppAssetURL(absURL) {
+				found[absURL] = true
+			}
+			return u // collect only — snapshots on disk are never rewritten
+		})
+	}
+	return found
+}
+
 func (s *Server) trashFiles(files []string, originalPath, itemType, workspace, id string) error {
 	trashRoot := s.trashDirForWorkspace(workspace)
 	bundleDir := filepath.Join(trashRoot, id)
@@ -1871,6 +1905,36 @@ func (s *Server) trashFiles(files []string, originalPath, itemType, workspace, i
 
 	assetMap := map[string]string{} // trash filename → original URL
 
+	// Moves a single already-resolved asset URL into the trash bundle and
+	// records it in assetMap, shared by both the current-content rewrite
+	// pass below and the history-only sweep that follows it. Returns the
+	// name it was given inside the bundle, or "" if the move failed (e.g.
+	// the asset no longer exists on disk).
+	moveAssetToTrash := func(absURL string) string {
+		assetRel := strings.TrimPrefix(absURL, "/")
+		assetFull := filepath.Join(s.rootPath, filepath.FromSlash(assetRel))
+		filename := filepath.Base(assetFull)
+		destName := uniqueAssetName(assetsDir, filename)
+
+		if mvErr := moveFile(assetFull, filepath.Join(assetsDir, destName)); mvErr != nil {
+			return "" // asset may not exist or not accessible
+		}
+		assetMap[destName] = absURL
+
+		// The image editor's permanent-original backup isn't referenced
+		// anywhere in content, so it has to be located and moved
+		// alongside the asset it belongs to rather than found on its
+		// own pass over the note.
+		if origFull := origBackupPath(assetFull); fileExists(origFull) {
+			origFilename := filepath.Base(origFull)
+			origDestName := uniqueAssetName(assetsDir, origFilename)
+			if moveFile(origFull, filepath.Join(assetsDir, origDestName)) == nil {
+				assetMap[origDestName] = origBackupPath(absURL)
+			}
+		}
+		return destName
+	}
+
 	for _, relPath := range files {
 		fullPath := filepath.Join(s.rootPath, filepath.FromSlash(relPath))
 		raw, err := os.ReadFile(fullPath)
@@ -1878,6 +1942,7 @@ func (s *Server) trashFiles(files []string, originalPath, itemType, workspace, i
 			continue
 		}
 		content := string(raw)
+		handled := map[string]bool{}
 
 		// Asset references are stored on disk relative to the note's own
 		// location (see assetlinks.go), not as the app-rooted "/workspace/
@@ -1887,36 +1952,29 @@ func (s *Server) trashFiles(files []string, originalPath, itemType, workspace, i
 		// references (body images, front-matter cover/attachments) and
 		// which raw substring to swap out, so reuse it instead of a
 		// hand-rolled regex that only matched the old absolute form.
-		newContent := parser.RewriteAssetPaths(relPath, content, func(notePath, url string) string {
-			absURL := stripURLSuffix(parser.AbsoluteAssetPath(notePath, url))
+		newContent := parser.RewriteAssetPaths(relPath, content, func(notePath, rawURL string) string {
+			absURL := stripURLSuffix(parser.AbsoluteAssetPath(notePath, rawURL))
 			if !isAppAssetURL(absURL) {
-				return url // external link or non-asset — leave untouched
+				return rawURL // external link or non-asset — leave untouched
 			}
-			assetRel := strings.TrimPrefix(absURL, "/")
-			assetFull := filepath.Join(s.rootPath, filepath.FromSlash(assetRel))
-			filename := filepath.Base(assetFull)
-			destName := uniqueAssetName(assetsDir, filename)
-
-			if mvErr := moveFile(assetFull, filepath.Join(assetsDir, destName)); mvErr != nil {
-				return url // asset may not exist or not accessible; leave reference as-is
+			handled[absURL] = true
+			destName := moveAssetToTrash(absURL)
+			if destName == "" {
+				return rawURL // move failed — leave reference as-is
 			}
-			// Include workspace in URL so the asset handler can locate the bundle.
-			assetMap[destName] = absURL
-
-			// The image editor's permanent-original backup isn't referenced
-			// anywhere in content, so it has to be located and moved
-			// alongside the asset it belongs to rather than found on its
-			// own pass over the note.
-			if origFull := origBackupPath(assetFull); fileExists(origFull) {
-				origFilename := filepath.Base(origFull)
-				origDestName := uniqueAssetName(assetsDir, origFilename)
-				if moveFile(origFull, filepath.Join(assetsDir, origDestName)) == nil {
-					assetMap[origDestName] = origBackupPath(absURL)
-				}
-			}
-
 			return fmt.Sprintf("/api/trash-asset/%s/%s/%s", workspace, id, destName)
 		})
+
+		// Assets this note referenced at some point in its history but not
+		// in its current content (removed images, old covers, anything
+		// orphaned by a rollback) — sweep those into the trash bundle too,
+		// even though nothing in the saved content points at them anymore.
+		for absURL := range s.historicalAssetURLs(relPath) {
+			if !handled[absURL] {
+				moveAssetToTrash(absURL)
+			}
+		}
+
 		contentDest := filepath.Join(contentDir, filepath.FromSlash(relPath))
 		if mkErr := os.MkdirAll(filepath.Dir(contentDest), 0755); mkErr != nil {
 			continue
@@ -1945,26 +2003,45 @@ func (s *Server) trashFiles(files []string, originalPath, itemType, workspace, i
 
 // permanentlyDeleteFiles removes files and their referenced assets from disk immediately.
 func (s *Server) permanentlyDeleteFiles(files []string, childrenAbsDir string) {
+	removeAsset := func(absURL string) {
+		assetFull := filepath.Join(s.rootPath, filepath.FromSlash(strings.TrimPrefix(absURL, "/")))
+		_ = os.Remove(assetFull)
+		if origFull := origBackupPath(assetFull); fileExists(origFull) {
+			_ = os.Remove(origFull)
+		}
+	}
+
 	for _, relPath := range files {
 		fullPath := filepath.Join(s.rootPath, filepath.FromSlash(relPath))
+		handled := map[string]bool{}
 		if raw, err := os.ReadFile(fullPath); err == nil {
 			// See trashFiles' comment: references are relative-to-note on
 			// disk, so resolve through AbsoluteAssetPath before removing.
-			parser.RewriteAssetPaths(relPath, string(raw), func(notePath, url string) string {
-				absURL := stripURLSuffix(parser.AbsoluteAssetPath(notePath, url))
+			parser.RewriteAssetPaths(relPath, string(raw), func(notePath, u string) string {
+				absURL := stripURLSuffix(parser.AbsoluteAssetPath(notePath, u))
 				if isAppAssetURL(absURL) {
-					assetFull := filepath.Join(s.rootPath, filepath.FromSlash(strings.TrimPrefix(absURL, "/")))
-					_ = os.Remove(assetFull)
-					// See trashFiles' comment: the image editor's original
-					// backup isn't referenced in content, only discoverable
-					// by naming convention alongside the asset it belongs to.
-					if origFull := origBackupPath(assetFull); fileExists(origFull) {
-						_ = os.Remove(origFull)
-					}
+					removeAsset(absURL)
+					handled[absURL] = true
 				}
-				return url
+				return u
 			})
 		}
+
+		// Same history sweep as trashFiles — catches assets this note
+		// referenced at some point but not anymore (removed images, old
+		// covers, anything orphaned by a rollback), which the live content
+		// alone would never reveal.
+		for absURL := range s.historicalAssetURLs(relPath) {
+			if !handled[absURL] {
+				removeAsset(absURL)
+			}
+		}
+
+		// The note is gone for good — its revision history no longer
+		// serves any purpose and would otherwise sit on disk forever.
+		historyDir := filepath.Join(s.rootPath, ".blockforge", "history", url.PathEscape(relPath))
+		_ = os.RemoveAll(historyDir)
+
 		_ = os.Remove(fullPath)
 		_ = s.db.DeleteFile(relPath)
 	}

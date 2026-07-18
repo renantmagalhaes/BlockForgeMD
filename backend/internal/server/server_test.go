@@ -373,6 +373,114 @@ func TestTrashFilesHandlesCacheBustedAssetReference(t *testing.T) {
 	}
 }
 
+// Regression test for the reported bug: upload an image to a card, then
+// remove it from the card's content (simulating either an explicit removal
+// or a rollback to a version that predates the upload) — the asset is no
+// longer referenced by current content, but it WAS referenced by an older
+// history snapshot. Deleting the card must still find and clean it up via
+// that history, not just leave it orphaned in the shared assets folder
+// because the live content's own references no longer mention it.
+func TestTrashFilesCleansUpAssetOrphanedByHistory(t *testing.T) {
+	s, tempDir := newTestServer(t)
+
+	noteRel := "Default/Boards/Folder/Board/task.md"
+	assetRel := "Default/assets/Boards/Folder/Board/img.png"
+	assetFull := filepath.Join(tempDir, filepath.FromSlash(assetRel))
+	noteFull := filepath.Join(tempDir, filepath.FromSlash(noteRel))
+
+	if err := os.MkdirAll(filepath.Dir(assetFull), 0755); err != nil {
+		t.Fatalf("mkdir asset dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(noteFull), 0755); err != nil {
+		t.Fatalf("mkdir note dir: %v", err)
+	}
+	if err := os.WriteFile(assetFull, []byte("fake-png-bytes"), 0644); err != nil {
+		t.Fatalf("write asset: %v", err)
+	}
+
+	withImage := "---\ntitle: Task\ntype: task\n---\n\n![](../../../assets/Boards/Folder/Board/img.png)\n"
+	withoutImage := "---\ntitle: Task\ntype: task\n---\n\nJust text now, image removed.\n"
+
+	// Simulate the real save flow: write the with-image version first, then
+	// call saveFileBackup (as the save handler does) before overwriting with
+	// the without-image version — this is what actually populates history.
+	if err := os.WriteFile(noteFull, []byte(withImage), 0644); err != nil {
+		t.Fatalf("write initial note: %v", err)
+	}
+	s.saveFileBackup(noteRel, withoutImage)
+	if err := os.WriteFile(noteFull, []byte(withoutImage), 0644); err != nil {
+		t.Fatalf("overwrite note: %v", err)
+	}
+
+	// Sanity check: current content genuinely no longer references the
+	// asset (this is what makes the bug possible in the first place).
+	if strings.Contains(withoutImage, "img.png") {
+		t.Fatalf("test setup broken: current content still references img.png")
+	}
+
+	if err := s.trashFiles([]string{noteRel}, noteRel, "file", "Default", "testid-history"); err != nil {
+		t.Fatalf("trashFiles failed: %v", err)
+	}
+
+	if _, err := os.Stat(assetFull); !os.IsNotExist(err) {
+		t.Fatalf("expected history-only-referenced asset to be removed from original location, stat err: %v", err)
+	}
+	bundleAssetsDir := filepath.Join(s.trashDirForWorkspace("Default"), "testid-history", "assets")
+	entries, err := os.ReadDir(bundleAssetsDir)
+	if err != nil {
+		t.Fatalf("failed to read trash bundle assets dir: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "img.png" {
+		t.Fatalf("expected the history-only asset to be swept into the trash bundle, got %+v", entries)
+	}
+}
+
+// Same history-orphan scenario for permanent delete, which must also remove
+// the note's revision history itself once the note is gone for good.
+func TestPermanentlyDeleteFilesCleansUpAssetOrphanedByHistory(t *testing.T) {
+	s, tempDir := newTestServer(t)
+
+	noteRel := "Default/Boards/Folder/Board/task.md"
+	assetRel := "Default/assets/Boards/Folder/Board/img.png"
+	assetFull := filepath.Join(tempDir, filepath.FromSlash(assetRel))
+	noteFull := filepath.Join(tempDir, filepath.FromSlash(noteRel))
+
+	if err := os.MkdirAll(filepath.Dir(assetFull), 0755); err != nil {
+		t.Fatalf("mkdir asset dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(noteFull), 0755); err != nil {
+		t.Fatalf("mkdir note dir: %v", err)
+	}
+	if err := os.WriteFile(assetFull, []byte("fake-png-bytes"), 0644); err != nil {
+		t.Fatalf("write asset: %v", err)
+	}
+
+	withImage := "---\ntitle: Task\ntype: task\n---\n\n![](../../../assets/Boards/Folder/Board/img.png)\n"
+	withoutImage := "---\ntitle: Task\ntype: task\n---\n\nJust text now, image removed.\n"
+
+	if err := os.WriteFile(noteFull, []byte(withImage), 0644); err != nil {
+		t.Fatalf("write initial note: %v", err)
+	}
+	s.saveFileBackup(noteRel, withoutImage)
+	if err := os.WriteFile(noteFull, []byte(withoutImage), 0644); err != nil {
+		t.Fatalf("overwrite note: %v", err)
+	}
+
+	historyDir := filepath.Join(tempDir, ".blockforge", "history", url.PathEscape(noteRel))
+	if _, err := os.Stat(historyDir); err != nil {
+		t.Fatalf("test setup broken: history dir missing: %v", err)
+	}
+
+	s.permanentlyDeleteFiles([]string{noteRel}, "")
+
+	if _, err := os.Stat(assetFull); !os.IsNotExist(err) {
+		t.Fatalf("expected history-only-referenced asset to be permanently deleted, stat err: %v", err)
+	}
+	if _, err := os.Stat(historyDir); !os.IsNotExist(err) {
+		t.Fatalf("expected the note's history directory to be removed on permanent delete, stat err: %v", err)
+	}
+}
+
 // Same cache-busted-reference scenario for permanent delete.
 func TestPermanentlyDeleteFilesHandlesCacheBustedAssetReference(t *testing.T) {
 	s, tempDir := newTestServer(t)
