@@ -3,7 +3,11 @@ package server
 import (
 	"blockforgemd/internal/db"
 	"blockforgemd/internal/watcher"
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -508,5 +512,193 @@ func TestPermanentlyDeleteFilesHandlesCacheBustedAssetReference(t *testing.T) {
 
 	if _, err := os.Stat(assetFull); !os.IsNotExist(err) {
 		t.Fatalf("expected cache-busted asset to be permanently deleted, stat err: %v", err)
+	}
+}
+
+// Regression test for the follow-up bug report: an asset whose only
+// reference lived in a history snapshot that has since been pruned (aged
+// out of the configured retention window) is invisible to
+// historicalAssetURLs — the permanent, never-pruned asset log is the
+// backstop for exactly this case. Deliberately does NOT create any history
+// snapshot, to prove the asset log alone (independent of history) is
+// sufficient to find and clean up the asset.
+func TestPermanentlyDeleteFilesCleansUpAssetViaLogWithNoHistory(t *testing.T) {
+	s, tempDir := newTestServer(t)
+
+	noteRel := "Default/Boards/Folder/Board/task.md"
+	assetRel := "Default/assets/Boards/Folder/Board/img.png"
+	assetFull := filepath.Join(tempDir, filepath.FromSlash(assetRel))
+	noteFull := filepath.Join(tempDir, filepath.FromSlash(noteRel))
+
+	if err := os.MkdirAll(filepath.Dir(assetFull), 0755); err != nil {
+		t.Fatalf("mkdir asset dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(noteFull), 0755); err != nil {
+		t.Fatalf("mkdir note dir: %v", err)
+	}
+	if err := os.WriteFile(assetFull, []byte("fake-png-bytes"), 0644); err != nil {
+		t.Fatalf("write asset: %v", err)
+	}
+	// Current content never references the image at all — as if it was
+	// removed long enough ago that its history snapshot has since aged out
+	// and been pruned (simulated here by simply never creating one).
+	content := "---\ntitle: Task\ntype: task\n---\n\nJust text, no image reference, no history entry either.\n"
+	if err := os.WriteFile(noteFull, []byte(content), 0644); err != nil {
+		t.Fatalf("write note: %v", err)
+	}
+
+	// Simulates what handleUploadAsset does on every upload.
+	s.appendAssetLog(noteRel, "/"+filepath.ToSlash(assetRel))
+
+	s.permanentlyDeleteFiles([]string{noteRel}, "")
+
+	if _, err := os.Stat(assetFull); !os.IsNotExist(err) {
+		t.Fatalf("expected log-only-referenced asset to be permanently deleted, stat err: %v", err)
+	}
+}
+
+// Regression test: renaming a note must carry its version history and
+// permanent asset log along to the new path — otherwise every pre-rename
+// snapshot/upload record becomes permanently invisible to anything keyed by
+// the note's current path (the Version History panel, rollback, and this
+// package's own delete-time asset cleanup all key off the current path).
+func TestHandleMoveFileCarriesHistoryAndAssetLog(t *testing.T) {
+	s, tempDir := newTestServer(t)
+
+	oldRel := "Default/Boards/Folder/Board/Old-Name.md"
+	newRel := "Default/Boards/Folder/Board/New-Name.md"
+	oldFull := filepath.Join(tempDir, filepath.FromSlash(oldRel))
+
+	if err := os.MkdirAll(filepath.Dir(oldFull), 0755); err != nil {
+		t.Fatalf("mkdir note dir: %v", err)
+	}
+	if err := os.WriteFile(oldFull, []byte("---\ntitle: Old Name\ntype: task\n---\n\nBody\n"), 0644); err != nil {
+		t.Fatalf("write note: %v", err)
+	}
+
+	// Populate a history snapshot and an asset-log entry under the OLD path,
+	// exactly as saveFileBackup / appendAssetLog would have over the note's
+	// life prior to this rename.
+	s.saveFileBackup(oldRel, "---\ntitle: Old Name\ntype: task\n---\n\nBody v2\n")
+	s.appendAssetLog(oldRel, "/Default/assets/Boards/Folder/Board/img.png")
+
+	oldHistoryDir := historyDirPath(tempDir, oldRel)
+	if _, err := os.Stat(oldHistoryDir); err != nil {
+		t.Fatalf("test setup broken: history dir missing: %v", err)
+	}
+	oldLogPath := assetLogPath(tempDir, oldRel)
+	if _, err := os.Stat(oldLogPath); err != nil {
+		t.Fatalf("test setup broken: asset log missing: %v", err)
+	}
+
+	reqBody, _ := json.Marshal(map[string]string{"from": oldRel, "to": newRel})
+	req := httptest.NewRequest(http.MethodPost, "/api/file/move", bytes.NewReader(reqBody))
+	rec := httptest.NewRecorder()
+	s.handleMoveFile(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("handleMoveFile returned %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if _, err := os.Stat(oldHistoryDir); !os.IsNotExist(err) {
+		t.Fatalf("expected old history dir to be gone after rename, stat err: %v", err)
+	}
+	if _, err := os.Stat(oldLogPath); !os.IsNotExist(err) {
+		t.Fatalf("expected old asset log to be gone after rename, stat err: %v", err)
+	}
+
+	newHistoryDir := historyDirPath(tempDir, newRel)
+	newEntries, err := os.ReadDir(newHistoryDir)
+	if err != nil || len(newEntries) != 1 {
+		t.Fatalf("expected exactly 1 history snapshot to have followed the rename, err=%v entries=%v", err, newEntries)
+	}
+	newLogPath := assetLogPath(tempDir, newRel)
+	logBytes, err := os.ReadFile(newLogPath)
+	if err != nil || !strings.Contains(string(logBytes), "img.png") {
+		t.Fatalf("expected asset log to have followed the rename with its entry intact, err=%v content=%s", err, logBytes)
+	}
+}
+
+// End-to-end regression for the exact scenario the user described: upload
+// an image, rename the card (so the asset was logged under a name the card
+// no longer has), then delete it — the permanent asset log must have
+// followed the rename for delete-time cleanup to still find the image.
+func TestRenamedNoteAssetStillCleanedUpOnDelete(t *testing.T) {
+	s, tempDir := newTestServer(t)
+
+	oldRel := "Default/Boards/Folder/Board/Old-Name.md"
+	newRel := "Default/Boards/Folder/Board/New-Name.md"
+	assetRel := "Default/assets/Boards/Folder/Board/Old-Name-clipboard-123.png"
+	oldFull := filepath.Join(tempDir, filepath.FromSlash(oldRel))
+	assetFull := filepath.Join(tempDir, filepath.FromSlash(assetRel))
+
+	if err := os.MkdirAll(filepath.Dir(oldFull), 0755); err != nil {
+		t.Fatalf("mkdir note dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(assetFull), 0755); err != nil {
+		t.Fatalf("mkdir asset dir: %v", err)
+	}
+	if err := os.WriteFile(assetFull, []byte("fake-png-bytes"), 0644); err != nil {
+		t.Fatalf("write asset: %v", err)
+	}
+	// The card's CURRENT content never references the image — it was
+	// removed before the rename, so only the asset log (uploaded under the
+	// OLD note name) remembers it ever existed.
+	if err := os.WriteFile(oldFull, []byte("---\ntitle: Old Name\ntype: task\n---\n\nNo image here.\n"), 0644); err != nil {
+		t.Fatalf("write note: %v", err)
+	}
+	s.appendAssetLog(oldRel, "/"+filepath.ToSlash(assetRel))
+
+	reqBody, _ := json.Marshal(map[string]string{"from": oldRel, "to": newRel})
+	req := httptest.NewRequest(http.MethodPost, "/api/file/move", bytes.NewReader(reqBody))
+	rec := httptest.NewRecorder()
+	s.handleMoveFile(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("handleMoveFile returned %d: %s", rec.Code, rec.Body.String())
+	}
+
+	s.permanentlyDeleteFiles([]string{newRel}, "")
+
+	if _, err := os.Stat(assetFull); !os.IsNotExist(err) {
+		t.Fatalf("expected asset uploaded under the pre-rename name to still be cleaned up, stat err: %v", err)
+	}
+}
+
+// Regression test: trashing then restoring a note must bring its version
+// history and asset log back too — otherwise a restored note's
+// delete-safety net (and its Version History panel) would silently reset
+// to empty even though the note itself came back intact.
+func TestTrashAndRestorePreservesHistoryAndAssetLog(t *testing.T) {
+	s, tempDir := newTestServer(t)
+
+	noteRel := "Default/Boards/Folder/Board/task.md"
+	noteFull := filepath.Join(tempDir, filepath.FromSlash(noteRel))
+	if err := os.MkdirAll(filepath.Dir(noteFull), 0755); err != nil {
+		t.Fatalf("mkdir note dir: %v", err)
+	}
+	if err := os.WriteFile(noteFull, []byte("---\ntitle: Task\ntype: task\n---\n\nBody\n"), 0644); err != nil {
+		t.Fatalf("write note: %v", err)
+	}
+	s.saveFileBackup(noteRel, "---\ntitle: Task\ntype: task\n---\n\nBody v2\n")
+	s.appendAssetLog(noteRel, "/Default/assets/Boards/Folder/Board/img.png")
+
+	if err := s.trashFiles([]string{noteRel}, noteRel, "file", "Default", "testid-hist-restore"); err != nil {
+		t.Fatalf("trashFiles failed: %v", err)
+	}
+	if _, err := os.Stat(historyDirPath(tempDir, noteRel)); !os.IsNotExist(err) {
+		t.Fatalf("expected history dir to be moved out of its original location by trash")
+	}
+
+	if err := s.restoreTrashBundle("Default", "testid-hist-restore"); err != nil {
+		t.Fatalf("restoreTrashBundle failed: %v", err)
+	}
+
+	restoredHistoryDir := historyDirPath(tempDir, noteRel)
+	entries, err := os.ReadDir(restoredHistoryDir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("expected history to be restored with its 1 snapshot, err=%v entries=%v", err, entries)
+	}
+	logBytes, err := os.ReadFile(assetLogPath(tempDir, noteRel))
+	if err != nil || !strings.Contains(string(logBytes), "img.png") {
+		t.Fatalf("expected asset log to be restored with its entry intact, err=%v content=%s", err, logBytes)
 	}
 }

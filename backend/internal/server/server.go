@@ -946,6 +946,10 @@ func (s *Server) handleUploadAsset(w http.ResponseWriter, r *http.Request) {
 	} else {
 		urlPath = fmt.Sprintf("%s/%s", urlBase, filename)
 	}
+	// Permanent record that this note owns this asset — see appendAssetLog's
+	// comment for why this can't just be reconstructed from content/history
+	// at delete time.
+	s.appendAssetLog(notePath, urlPath)
 	respondJSON(w, map[string]string{"url": urlPath})
 }
 
@@ -1807,9 +1811,9 @@ func origBackupPath(assetFull string) string {
 	return strings.TrimSuffix(assetFull, ext) + "._orig" + ext
 }
 
-// fileExists reports whether path exists and is a regular file (or at least
-// not confirmed absent — any stat error other than "not exist" is treated
-// as "can't tell, don't try to touch it").
+// fileExists reports whether path exists — a file or a directory (or at
+// least not confirmed absent — any stat error other than "not exist" is
+// treated as "can't tell, don't try to touch it").
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
@@ -1855,9 +1859,74 @@ func (s *Server) collectFolderFiles(folderMDPath string) ([]string, error) {
 	return files, err
 }
 
-// trashFiles moves a list of files (and their referenced assets) into a single
-// trash bundle at trashRoot/id.  It writes _meta.json at the end.
-// workspace is embedded in the asset URL so the serve handler can locate it.
+// historyDirPath and assetLogPath return the on-disk location of a note's
+// version-history snapshots and permanent asset-upload log, respectively.
+// Centralized here because both need to be resolved consistently from four
+// places: written (saveFileBackup / appendAssetLog), read at delete-time,
+// and moved on rename (handleMoveFile) so they keep following the note
+// instead of being silently abandoned under its old path.
+func historyDirPath(rootPath, relPath string) string {
+	return filepath.Join(rootPath, ".blockforge", "history", url.PathEscape(relPath))
+}
+func assetLogPath(rootPath, relPath string) string {
+	return filepath.Join(rootPath, ".blockforge", "asset-log", url.PathEscape(relPath)+".jsonl")
+}
+
+// appendAssetLog permanently records that assetURL was uploaded for notePath.
+// Unlike version-history snapshots (bounded, pruned to the configured
+// history_limit — see saveFileBackup), this log is never pruned: it's the
+// durable source of truth for "every asset this note has ever owned," so
+// delete-time cleanup can still find and remove an image even after the
+// history snapshot that once referenced it has aged out of the retention
+// window entirely.
+func (s *Server) appendAssetLog(notePath, assetURL string) {
+	if notePath == "" || assetURL == "" {
+		return
+	}
+	logPath := assetLogPath(s.rootPath, notePath)
+	if err := os.MkdirAll(filepath.Dir(logPath), 0755); err != nil {
+		log.Printf("asset-log: failed to create dir: %v", err)
+		return
+	}
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Printf("asset-log: failed to open: %v", err)
+		return
+	}
+	defer f.Close()
+	entry, _ := json.Marshal(map[string]string{
+		"path":       assetURL,
+		"uploadedAt": time.Now().UTC().Format(time.RFC3339),
+	})
+	f.Write(entry)
+	f.Write([]byte("\n"))
+}
+
+// assetLogURLs reads every asset URL ever recorded for relPath by
+// appendAssetLog. One JSON object per line (append-only) rather than a
+// single JSON array specifically so appending never requires reading the
+// existing file back first.
+func (s *Server) assetLogURLs(relPath string) map[string]bool {
+	found := map[string]bool{}
+	data, err := os.ReadFile(assetLogPath(s.rootPath, relPath))
+	if err != nil {
+		return found
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var entry struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal([]byte(line), &entry); err == nil && entry.Path != "" {
+			found[entry.Path] = true
+		}
+	}
+	return found
+}
+
 // historicalAssetURLs scans every stored history snapshot for a note (see
 // saveFileBackup) and returns the set of asset URLs any of them ever
 // referenced. A note's CURRENT content only reveals assets it references
@@ -1865,10 +1934,12 @@ func (s *Server) collectFolderFiles(folderMDPath string) ([]string, error) {
 // or made unreachable by rolling back to an earlier version, leaves no
 // trace there. Its old snapshots still have it, though, so this is what
 // lets delete-time cleanup catch those instead of orphaning them in the
-// shared assets folder forever.
+// shared assets folder forever. (Bounded by the configured retention
+// window — assetLogURLs above is the unbounded backstop for anything that
+// has already aged out of history entirely.)
 func (s *Server) historicalAssetURLs(relPath string) map[string]bool {
 	found := map[string]bool{}
-	historyDir := filepath.Join(s.rootPath, ".blockforge", "history", url.PathEscape(relPath))
+	historyDir := historyDirPath(s.rootPath, relPath)
 	entries, err := os.ReadDir(historyDir)
 	if err != nil {
 		return found
@@ -1891,6 +1962,10 @@ func (s *Server) historicalAssetURLs(relPath string) map[string]bool {
 	}
 	return found
 }
+
+// trashFiles moves a list of files (and their referenced assets) into a single
+// trash bundle at trashRoot/id.  It writes _meta.json at the end.
+// workspace is embedded in the asset URL so the serve handler can locate it.
 
 func (s *Server) trashFiles(files []string, originalPath, itemType, workspace, id string) error {
 	trashRoot := s.trashDirForWorkspace(workspace)
@@ -1969,7 +2044,17 @@ func (s *Server) trashFiles(files []string, originalPath, itemType, workspace, i
 		// in its current content (removed images, old covers, anything
 		// orphaned by a rollback) — sweep those into the trash bundle too,
 		// even though nothing in the saved content points at them anymore.
+		// Two sources, since each covers a gap the other can't: history is
+		// bounded by the retention window (an old-enough removal ages out
+		// of it entirely), while the asset log is unbounded but only exists
+		// for uploads made after this log was introduced.
 		for absURL := range s.historicalAssetURLs(relPath) {
+			if !handled[absURL] {
+				moveAssetToTrash(absURL)
+				handled[absURL] = true
+			}
+		}
+		for absURL := range s.assetLogURLs(relPath) {
 			if !handled[absURL] {
 				moveAssetToTrash(absURL)
 			}
@@ -1987,6 +2072,24 @@ func (s *Server) trashFiles(files []string, originalPath, itemType, workspace, i
 			log.Printf("trash: failed to remove %s: %v", fullPath, rmErr)
 		}
 		_ = s.db.DeleteFile(relPath)
+
+		// Bring the note's version history and asset log along into the
+		// bundle rather than leaving them behind under the old path (or
+		// deleting them outright) — a trashed note can still be restored,
+		// and restoring it should bring back its full delete-safety net,
+		// not silently reset it.
+		if historyDir := historyDirPath(s.rootPath, relPath); fileExists(historyDir) {
+			dest := filepath.Join(bundleDir, "history", url.PathEscape(relPath))
+			if mkErr := os.MkdirAll(filepath.Dir(dest), 0755); mkErr == nil {
+				_ = os.Rename(historyDir, dest)
+			}
+		}
+		if logPath := assetLogPath(s.rootPath, relPath); fileExists(logPath) {
+			dest := filepath.Join(bundleDir, "asset-log", url.PathEscape(relPath)+".jsonl")
+			if mkErr := os.MkdirAll(filepath.Dir(dest), 0755); mkErr == nil {
+				_ = os.Rename(logPath, dest)
+			}
+		}
 	}
 
 	meta := TrashMeta{
@@ -2027,20 +2130,26 @@ func (s *Server) permanentlyDeleteFiles(files []string, childrenAbsDir string) {
 			})
 		}
 
-		// Same history sweep as trashFiles — catches assets this note
-		// referenced at some point but not anymore (removed images, old
-		// covers, anything orphaned by a rollback), which the live content
-		// alone would never reveal.
+		// Same history + asset-log sweep as trashFiles — catches assets this
+		// note referenced at some point but not anymore (removed images,
+		// old covers, anything orphaned by a rollback), which the live
+		// content alone would never reveal.
 		for absURL := range s.historicalAssetURLs(relPath) {
+			if !handled[absURL] {
+				removeAsset(absURL)
+				handled[absURL] = true
+			}
+		}
+		for absURL := range s.assetLogURLs(relPath) {
 			if !handled[absURL] {
 				removeAsset(absURL)
 			}
 		}
 
-		// The note is gone for good — its revision history no longer
-		// serves any purpose and would otherwise sit on disk forever.
-		historyDir := filepath.Join(s.rootPath, ".blockforge", "history", url.PathEscape(relPath))
-		_ = os.RemoveAll(historyDir)
+		// The note is gone for good — its revision history and asset log no
+		// longer serve any purpose and would otherwise sit on disk forever.
+		_ = os.RemoveAll(historyDirPath(s.rootPath, relPath))
+		_ = os.Remove(assetLogPath(s.rootPath, relPath))
 
 		_ = os.Remove(fullPath)
 		_ = s.db.DeleteFile(relPath)
@@ -2138,6 +2247,22 @@ func (s *Server) restoreTrashBundle(workspace, id string) error {
 			log.Printf("restore: failed to index %s: %v", relPath, idxErr)
 		}
 		s.broadcastEvent(relPath)
+
+		// Bring the note's version history and asset log back too, if
+		// trashFiles packed them into this bundle — a restored note should
+		// regain its full delete-safety net, not come back with history
+		// silently reset to empty.
+		if bundledHistory := filepath.Join(bundleDir, "history", url.PathEscape(relPath)); fileExists(bundledHistory) {
+			if mkErr := os.MkdirAll(filepath.Dir(historyDirPath(s.rootPath, relPath)), 0755); mkErr == nil {
+				_ = os.Rename(bundledHistory, historyDirPath(s.rootPath, relPath))
+			}
+		}
+		if bundledLog := filepath.Join(bundleDir, "asset-log", url.PathEscape(relPath)+".jsonl"); fileExists(bundledLog) {
+			dest := assetLogPath(s.rootPath, relPath)
+			if mkErr := os.MkdirAll(filepath.Dir(dest), 0755); mkErr == nil {
+				_ = os.Rename(bundledLog, dest)
+			}
+		}
 	}
 
 	return os.RemoveAll(bundleDir)
@@ -2582,6 +2707,25 @@ func (s *Server) handleMoveFile(w http.ResponseWriter, r *http.Request) {
 	// any relative asset references (cover, attachments, inline images) so
 	// they still resolve correctly at the new location.
 	rebaseAssetPathsInFile(req.From, req.To, toFull)
+
+	// The note's version history and permanent asset log are both keyed by
+	// its path — without moving them here, a rename would silently sever
+	// every pre-rename snapshot and upload record from any future lookup
+	// keyed by the new (current) path: the Version History panel would
+	// appear to start from a blank slate, and delete-time asset cleanup
+	// would lose all record of anything uploaded before this rename.
+	if oldHistoryDir := historyDirPath(s.rootPath, req.From); fileExists(oldHistoryDir) {
+		newHistoryDir := historyDirPath(s.rootPath, req.To)
+		if mkErr := os.MkdirAll(filepath.Dir(newHistoryDir), 0755); mkErr == nil {
+			_ = os.Rename(oldHistoryDir, newHistoryDir)
+		}
+	}
+	if oldLogPath := assetLogPath(s.rootPath, req.From); fileExists(oldLogPath) {
+		newLogPath := assetLogPath(s.rootPath, req.To)
+		if mkErr := os.MkdirAll(filepath.Dir(newLogPath), 0755); mkErr == nil {
+			_ = os.Rename(oldLogPath, newLogPath)
+		}
+	}
 
 	// Move the sub-page directory if it exists
 	// e.g. Documents/Note1.md  → sub-dir Documents/Note1/
