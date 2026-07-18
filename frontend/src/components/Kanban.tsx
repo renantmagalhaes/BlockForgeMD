@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Calendar, User, Plus, Trash2, Edit3, X, Check,
   ChevronLeft, ChevronRight, Settings, Palette,
@@ -167,14 +168,31 @@ const TagInput: React.FC<{
   onCancel: () => void
 }> = ({ value, onChange, suggestions, onSubmit, onCancel }) => {
   const ref = useRef<HTMLInputElement>(null)
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number } | null>(null)
   useEffect(() => { ref.current?.focus() }, [])
 
   const filtered = value
     ? suggestions.filter(s => s.toLowerCase().includes(value.toLowerCase()) && s !== value)
     : suggestions
 
+  // Portaled + position:fixed (computed from the input's real screen
+  // position) instead of position:absolute in-place: this input lives
+  // inside a card, inside a scrollable column — a plain absolute dropdown
+  // gets silently clipped by that column's own overflow the moment the
+  // card is anywhere near the bottom of the visible list, cutting off
+  // most of the suggestion list instead of showing it in full.
+  useEffect(() => {
+    if (filtered.length > 0 && wrapperRef.current) {
+      const r = wrapperRef.current.getBoundingClientRect()
+      setDropdownPos({ top: r.bottom + 2, left: r.left })
+    } else {
+      setDropdownPos(null)
+    }
+  }, [filtered.length, value])
+
   return (
-    <div className="relative" onClick={e => e.stopPropagation()}>
+    <div ref={wrapperRef} className="relative" onClick={e => e.stopPropagation()}>
       <input
         ref={ref}
         value={value}
@@ -186,8 +204,12 @@ const TagInput: React.FC<{
         placeholder="tag…"
         className="w-20 bf-kanban-input rounded px-1.5 py-0.5 text-[10px] outline-none"
       />
-      {filtered.length > 0 && (
-        <div className="absolute top-full left-0 mt-0.5 bf-kanban-popover rounded-lg py-1 z-50 min-w-[110px] max-h-28 overflow-y-auto no-scrollbar">
+      {filtered.length > 0 && dropdownPos && createPortal(
+        <div
+          className="fixed bf-kanban-popover rounded-lg py-1 z-[9999] min-w-[110px] max-h-40 overflow-y-auto no-scrollbar"
+          style={{ top: dropdownPos.top, left: dropdownPos.left }}
+          onClick={e => e.stopPropagation()}
+        >
           {filtered.map(s => (
             <button
               key={s}
@@ -197,7 +219,8 @@ const TagInput: React.FC<{
               {s}
             </button>
           ))}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )

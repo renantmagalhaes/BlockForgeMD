@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -242,7 +243,15 @@ func UpdateFrontMatterInFile(rootPath, relPath string, updates map[string]interf
 	var fm map[string]interface{}
 	if len(fmRaw) > 0 {
 		if err := yaml.Unmarshal([]byte(strings.Join(fmRaw, "\n")), &fm); err != nil {
-			fm = make(map[string]interface{})
+			// Do NOT fall back to an empty map here: `updates` is a partial
+			// patch (e.g. just `attachments` or `cover`), applied on top of
+			// whatever `fm` ends up being. Silently treating unparseable
+			// existing front matter as "no front matter" would make this
+			// partial update overwrite the file with ONLY the patched
+			// field, discarding title/type/status/tags/everything else.
+			// Abort instead so the caller sees the failure and the file is
+			// left untouched.
+			return "", fmt.Errorf("existing front matter is not valid YAML, refusing partial update to avoid data loss: %w", err)
 		}
 	} else {
 		fm = make(map[string]interface{})

@@ -7692,18 +7692,23 @@ export const Editor: React.FC<
       cover: ""
     });
 
-  // Shared helper — extract + upload an image from a ClipboardEvent/DataTransfer
-  const pasteImageFromClipboard = (
+  // Shared helper — pull an image File out of clipboard items, regardless
+  // of destination (attachment vs. cover). Clipboard image data (a real
+  // screenshot/copied bitmap, as opposed to a copied file) lands in
+  // `clipboardData.items`, not `.files` — `.files` is typically empty for
+  // that case, so any paste handler built on `.files` alone silently
+  // no-ops on the most common paste-an-image gesture.
+  const extractImageFileFromClipboard = (
     items: DataTransferItemList
-  ) => {
+  ): File | null => {
     const imgItem = Array.from(
       items
     ).find((i) =>
       i.type.startsWith("image/")
     );
-    if (!imgItem) return false;
+    if (!imgItem) return null;
     const blob = imgItem.getAsFile();
-    if (!blob) return false;
+    if (!blob) return null;
     const ext =
       imgItem.type
         .split("/")[1]
@@ -7712,13 +7717,23 @@ export const Editor: React.FC<
       .toISOString()
       .replace(/[^0-9]/g, "")
       .slice(0, 14);
-    uploadAttachmentRef.current(
-      new File(
-        [blob],
-        `clipboard_${ts}.${ext}`,
-        { type: imgItem.type }
-      )
+    return new File(
+      [blob],
+      `clipboard_${ts}.${ext}`,
+      { type: imgItem.type }
     );
+  };
+
+  // Attachment-panel paste — extract + upload as an attachment
+  const pasteImageFromClipboard = (
+    items: DataTransferItemList
+  ) => {
+    const file =
+      extractImageFileFromClipboard(
+        items
+      );
+    if (!file) return false;
+    uploadAttachmentRef.current(file);
     return true;
   };
 
@@ -11198,17 +11213,17 @@ export const Editor: React.FC<
                     !onUpdateFrontMatter
                   )
                     return;
+                  const items =
+                    e.clipboardData
+                      ?.items;
+                  if (!items) return;
                   const file =
-                    Array.from(
-                      e.clipboardData
-                        .files
-                    ).find((f) =>
-                      f.type.startsWith(
-                        "image/"
-                      )
+                    extractImageFileFromClipboard(
+                      items
                     );
                   if (file) {
                     e.preventDefault();
+                    e.stopPropagation();
                     uploadCover(file);
                   }
                 }}
@@ -11354,17 +11369,17 @@ export const Editor: React.FC<
                     coverInputRef.current?.click()
                   }
                   onPaste={(e) => {
+                    const items =
+                      e.clipboardData
+                        ?.items;
+                    if (!items) return;
                     const file =
-                      Array.from(
-                        e.clipboardData
-                          .files
-                      ).find((f) =>
-                        f.type.startsWith(
-                          "image/"
-                        )
+                      extractImageFileFromClipboard(
+                        items
                       );
                     if (file) {
                       e.preventDefault();
+                      e.stopPropagation();
                       uploadCover(file);
                     }
                   }}
