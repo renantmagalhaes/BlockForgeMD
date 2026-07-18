@@ -9,7 +9,12 @@ import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-p
 import { motion, AnimatePresence } from 'framer-motion'
 import { alertDialog, confirmDialog, promptDialog } from '../lib/dialog'
 
-const API_BASE = import.meta.env.DEV ? 'http://localhost:8080' : ''
+// Always relative — Vite's dev server proxy (see vite.config.ts) already
+// routes /api and /auth to whatever backend port is actually configured.
+// A hardcoded 'http://localhost:8080' fallback here (as this used to be)
+// bypasses that proxy entirely and silently breaks the moment the dev
+// backend runs on any other port.
+const API_BASE = ''
 
 const splitFrontMatter = (content: string) => {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/)

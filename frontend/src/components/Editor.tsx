@@ -97,6 +97,24 @@ const CELL_COLORS = [
   }
 ];
 
+// The saved .md file still carries `# Title` as the first body line (kept
+// for portability — plain Markdown viewers/GitHub/Obsidian render it as the
+// page heading, since YAML frontmatter isn't shown as a title by any of
+// them). But the page title itself is no longer editable *as* that line:
+// it's driven by the Title page attribute and rendered as a separate
+// element above the editor. This strips that leading H1 out of what
+// actually gets loaded into ProseMirror, so it can never be selected,
+// edited, or accidentally retitled via the document body — see the H1
+// re-add in executeAutoSave for the other half of this.
+const stripLeadingTitleH1 = (
+  markdown: string
+): string => {
+  const trimmed = markdown.replace(/^\s+/, "");
+  const match = trimmed.match(/^# [^\n]*\n?/);
+  if (!match) return markdown;
+  return trimmed.slice(match[0].length).replace(/^\n+/, "");
+};
+
 const TableCell = TableCellBase.extend({
   addAttributes() {
     return {
@@ -4639,6 +4657,50 @@ export const Editor: React.FC<
     onTitleChange
   );
 
+  // Draft state for the two title-editing surfaces (the big in-editor
+  // title heading, and the Page Attributes Title field) — both hold local
+  // text while being edited and only commit (via commitTitleChange, which
+  // triggers the actual rename) on blur/Enter, not per-keystroke. null =
+  // not currently editing that surface.
+  const [
+    titleDraft,
+    setTitleDraft
+  ] = useState<string | null>(null);
+  const [
+    pageAttrTitleDraft,
+    setPageAttrTitleDraft
+  ] = useState<string | null>(null);
+  // Escape sets the draft to null AND blurs the input in the same
+  // synchronous handler — but the blur handler's closure still sees the
+  // pre-Escape draft (state updates aren't applied until the next render),
+  // so without this ref it would go ahead and commit the very edit Escape
+  // was supposed to cancel. Set synchronously right before blur(), read
+  // once in onBlur.
+  const titleCancelRef = useRef(false);
+  const pageAttrTitleCancelRef = useRef(
+    false
+  );
+
+  // The only thing allowed to change the page title now — routes through
+  // onTitleChange (the same rename flow already used for Kanban card
+  // titles: rewrites frontmatter `title:` + the saved file's H1, and moves
+  // the file on disk if the slug changes), so both editing surfaces above
+  // always agree with the saved file instead of drifting out of sync.
+  const commitTitleChange = async (
+    newTitle: string
+  ) => {
+    const trimmed = newTitle.trim();
+    if (
+      !trimmed ||
+      trimmed ===
+        frontMatterTitleRef.current
+    )
+      return;
+    await onTitleChangeRef.current?.(
+      trimmed
+    );
+  };
+
   // Version history states
   const [historyOpen, setHistoryOpen] =
     useState(false);
@@ -5100,26 +5162,16 @@ export const Editor: React.FC<
   const lastFilePathRef = useRef<
     string | null
   >(null);
-  const lastSyncedTitleRef =
-    useRef<string>(
-      frontMatter?.title || ""
-    );
 
   // Always-current reference to the frontmatter title — updated on every render
-  // so the file-load effect can read the latest value without a dep-loop.
+  // so the file-load effect and the title-commit handler can read the latest
+  // value without a dep-loop.
   const frontMatterTitleRef =
     useRef<string>(
       frontMatter?.title || ""
     );
   frontMatterTitleRef.current =
     frontMatter?.title || "";
-
-  // Reset lastSyncedTitleRef when switching files so we don't trigger a
-  // spurious rename the moment a different file is opened.
-  useEffect(() => {
-    lastSyncedTitleRef.current =
-      frontMatter?.title || "";
-  }, [filePath]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Click outside to close paste popup
   useEffect(() => {
@@ -6963,28 +7015,31 @@ export const Editor: React.FC<
       if (fileChanged) {
         lastFilePathRef.current =
           filePath;
-        // Ensure the body always opens with a # Title heading so the first line
-        // is editable as the page name. If the H1 was deleted or never existed,
-        // prepend it from the frontmatter title so sync can work immediately.
-        const pageTitle =
-          frontMatterTitleRef.current;
-        const body =
-          initialContent.trimStart();
-        const bodyWithH1 =
-          pageTitle &&
-          !body.startsWith("# ")
-            ? `# ${pageTitle}\n\n${body}`
-            : initialContent;
+        // lastSavedContentRef tracks the full on-disk body (with its leading
+        // # Title line, matching what the parent's initialContent prop and
+        // executeAutoSave's saved markdown both contain) so external-change
+        // detection above keeps working — but the title itself is driven by
+        // the Title page attribute now, not this line, so it's stripped
+        // before ever reaching ProseMirror. See stripLeadingTitleH1.
         lastSavedContentRef.current =
-          bodyWithH1;
-        lastSyncedTitleRef.current =
-          pageTitle;
+          initialContent;
         const html =
           getHTMLFromMarkdown(
-            bodyWithH1
+            stripLeadingTitleH1(
+              initialContent
+            )
           );
+        // emitUpdate: false — this is a programmatic content LOAD, not a
+        // user edit. Without this, it fires the same onUpdate->
+        // triggerAutoSave() path as real typing, scheduling a debounced
+        // autosave. That autosave re-prepends the H1 from
+        // frontMatterTitleRef.current, which — right after a rename, where
+        // filePath updates a render or two before the frontMatter prop
+        // catches up — can still be the OLD title, so it would silently
+        // overwrite the just-renamed file's new title with the stale one.
         editor.commands.setContent(
-          html
+          html,
+          { emitUpdate: false }
         );
         setSaveStatus("saved");
       } else if (
@@ -6995,10 +7050,13 @@ export const Editor: React.FC<
           initialContent;
         const html =
           getHTMLFromMarkdown(
-            initialContent
+            stripLeadingTitleH1(
+              initialContent
+            )
           );
         editor.commands.setContent(
-          html
+          html,
+          { emitUpdate: false }
         );
         setSaveStatus("saved");
       }
@@ -7169,57 +7227,23 @@ export const Editor: React.FC<
     if (!editor) return;
     setSaveStatus("saving");
     const html = editor.getHTML();
-    const markdown =
+    const bodyMarkdown =
       turndownService.turndown(html);
+    // The title lives outside the ProseMirror doc now (see
+    // stripLeadingTitleH1), so it has to be re-added here for the saved
+    // file to keep its on-disk # Title line. Title changes themselves are
+    // saved separately, via commitTitleChange → onTitleChange (the rename
+    // flow) — never through this autosave path.
+    const title =
+      frontMatterTitleRef.current;
+    const markdown = title
+      ? `# ${title}\n\n${bodyMarkdown}`
+      : bodyMarkdown;
     try {
       await onSaveRef.current(markdown);
       lastSavedContentRef.current =
         markdown;
       setSaveStatus("saved");
-
-      // After a successful save, check if the first line changed and notify the
-      // parent to rename the file + frontmatter title. This must run after save
-      // (not during typing) to avoid a race between the save and the rename.
-      // We detect both H1 and plain paragraph nodes so that users who cleared
-      // the page and started typing still get their title synced.
-      if (onTitleChangeRef.current && editor) {
-        const json = editor.getJSON();
-        const firstNode =
-          json.content?.[0];
-        if (
-          firstNode &&
-          (firstNode.type ===
-            "heading" ||
-            firstNode.type ===
-              "paragraph")
-        ) {
-          const firstLineText =
-            (
-              firstNode.content as
-                | any[]
-                | undefined
-            )
-              ?.map(
-                (n: any) => n.text || ""
-              )
-              .join("") || "";
-          if (
-            firstLineText &&
-            firstLineText !==
-              lastSyncedTitleRef.current
-          ) {
-            lastSyncedTitleRef.current =
-              firstLineText;
-            // Awaited so this executeAutoSave (and thus the saveChainRef it's
-            // chained on) doesn't resolve until the rename this triggers has
-            // actually landed — otherwise a same-cycle autosave could still
-            // fire against the pre-rename path. See saveChainRef comment.
-            await onTitleChangeRef.current(
-              firstLineText
-            );
-          }
-        }
-      }
 
       if (historyOpen) {
         fetchHistory();
@@ -7274,11 +7298,15 @@ export const Editor: React.FC<
       // data.content is the raw file (front matter + body) restored from the
       // snapshot — strip the front matter before rendering, otherwise it gets
       // typeset as literal body text (title/tags/attachments JSON and all).
+      // The body itself may still carry a leading # Title line if the
+      // snapshot predates this file's last save (or predates this feature
+      // entirely) — strip it the same as any other load, so a rollback
+      // can't reintroduce an editable/selectable title into the body.
       const { body } = splitFrontMatter(
         data.content
       );
       const html = getHTMLFromMarkdown(
-        body
+        stripLeadingTitleH1(body)
       );
       lastSavedContentRef.current =
         body;
@@ -9948,7 +9976,10 @@ export const Editor: React.FC<
                   <div className="overflow-hidden">
                     <div className="px-3 pb-3 space-y-2">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-                        {/* 1. Title Input (syncs back to front matter) */}
+                        {/* 1. Title Input — commits (renames) on blur/Enter
+                            rather than per-keystroke, same as the big
+                            in-editor title heading below; both go through
+                            commitTitleChange. */}
                         <div className="flex items-center gap-3 group">
                           <span className="w-20 text-slate-500 font-medium flex items-center gap-1.5 shrink-0">
                             <Info
@@ -9959,21 +9990,66 @@ export const Editor: React.FC<
                           <input
                             type="text"
                             value={
-                              frontMatter.title ||
-                              ""
+                              pageAttrTitleDraft !==
+                              null
+                                ? pageAttrTitleDraft
+                                : frontMatter.title ||
+                                  ""
+                            }
+                            onFocus={() =>
+                              setPageAttrTitleDraft(
+                                frontMatter.title ||
+                                  ""
+                              )
                             }
                             onChange={(
                               e
                             ) =>
-                              onUpdateFrontMatter(
-                                {
-                                  title:
-                                    e
-                                      .target
-                                      .value
-                                }
+                              setPageAttrTitleDraft(
+                                e
+                                  .target
+                                  .value
                               )
                             }
+                            onBlur={() => {
+                              if (
+                                pageAttrTitleCancelRef.current
+                              ) {
+                                pageAttrTitleCancelRef.current =
+                                  false;
+                              } else if (
+                                pageAttrTitleDraft !==
+                                null
+                              ) {
+                                commitTitleChange(
+                                  pageAttrTitleDraft
+                                );
+                              }
+                              setPageAttrTitleDraft(
+                                null
+                              );
+                            }}
+                            onKeyDown={(
+                              e
+                            ) => {
+                              if (
+                                e.key ===
+                                "Enter"
+                              )
+                                (
+                                  e.target as HTMLInputElement
+                                ).blur();
+                              else if (
+                                e.key ===
+                                "Escape"
+                              ) {
+                                pageAttrTitleCancelRef.current =
+                                  true;
+                                (
+                                  e.target as HTMLInputElement
+                                ).blur();
+                              }
+                            }}
                             className="flex-1 bg-transparent hover:bg-slate-800/40 focus:bg-slate-900 border border-transparent focus:border-slate-800 rounded px-2.5 py-1 text-slate-200 outline-none transition"
                           />
                         </div>
@@ -11395,6 +11471,97 @@ export const Editor: React.FC<
                   )}
                 </div>
               </div>
+            )}
+          </div>
+
+          {/* Page title — a separate element from the ProseMirror document
+              body, driven by the Title page attribute instead of an
+              editable first line. This keeps it outside the doc entirely:
+              Ctrl+A / normal typing in the body can never touch it, and it
+              can no longer be retitled (and the file silently renamed) by
+              accident. Double-click to rename, or edit the Title field in
+              Page Attributes above — both commit through the same
+              commitTitleChange handler, so they can never drift apart.
+              Shares getWidthClass() with the cover/icon header and the
+              body content block above/below it, so the page-alignment
+              control (left/center/full) moves the title along with
+              everything else instead of leaving it pinned full-width. */}
+          <div
+            className={`px-4 pt-2 pb-1 ${getWidthClass()} transition-all duration-300`}
+          >
+            {titleDraft !== null ? (
+              <input
+                autoFocus
+                value={titleDraft}
+                onFocus={(e) =>
+                  e.target.select()
+                }
+                onChange={(e) =>
+                  setTitleDraft(
+                    e.target.value
+                  )
+                }
+                onBlur={() => {
+                  if (
+                    titleCancelRef.current
+                  ) {
+                    titleCancelRef.current =
+                      false;
+                  } else {
+                    commitTitleChange(
+                      titleDraft
+                    );
+                  }
+                  setTitleDraft(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    (
+                      e.target as HTMLInputElement
+                    ).blur();
+                  } else if (
+                    e.key === "Escape"
+                  ) {
+                    titleCancelRef.current =
+                      true;
+                    (
+                      e.target as HTMLInputElement
+                    ).blur();
+                  }
+                }}
+                className="w-full bg-transparent text-slate-100 outline-none border-b-2 border-violet-500"
+                style={{
+                  fontSize: "2rem",
+                  fontWeight: 800,
+                  lineHeight: 1.2
+                }}
+              />
+            ) : (
+              <h1
+                onDoubleClick={() => {
+                  if (!onTitleChange)
+                    return;
+                  setTitleDraft(
+                    frontMatter?.title ||
+                      ""
+                  );
+                }}
+                title={
+                  onTitleChange
+                    ? "Double-click to rename"
+                    : undefined
+                }
+                className={`text-slate-100 select-none ${onTitleChange ? "cursor-text" : ""}`}
+                style={{
+                  fontSize: "2rem",
+                  fontWeight: 800,
+                  lineHeight: 1.2
+                }}
+              >
+                {frontMatter?.title ||
+                  "Untitled"}
+              </h1>
             )}
           </div>
 
