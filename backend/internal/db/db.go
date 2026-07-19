@@ -250,9 +250,15 @@ func (db *DB) GetFile(path string) (*FileRecord, error) {
 	return &record, nil
 }
 
-// ListFiles returns all files in the database ordered by position, including their front matter
+// ListFiles returns metadata for every file (path, title, type, front matter,
+// position, etc.) but deliberately omits the content column: this powers the
+// sidebar tree/kanban/graph views, which never render file bodies, and it's
+// re-fetched on almost every SSE file_update and local mutation — including
+// full content here means every client re-downloads the entire vault's text
+// on every edit anywhere, which stops scaling once the vault has any size to
+// it. Use GetFile or Search when the body text is actually needed.
 func (db *DB) ListFiles() ([]FileRecord, error) {
-	rows, err := db.Conn.Query("SELECT path, title, type, content_hash, updated_at, COALESCE(content, ''), COALESCE(position, rowid) FROM files ORDER BY COALESCE(position, rowid) ASC;")
+	rows, err := db.Conn.Query("SELECT path, title, type, content_hash, updated_at, COALESCE(position, rowid) FROM files ORDER BY COALESCE(position, rowid) ASC;")
 	if err != nil {
 		return nil, err
 	}
@@ -263,7 +269,7 @@ func (db *DB) ListFiles() ([]FileRecord, error) {
 
 	for rows.Next() {
 		var record FileRecord
-		err := rows.Scan(&record.Path, &record.Title, &record.Type, &record.ContentHash, &record.UpdatedAt, &record.Content, &record.Position)
+		err := rows.Scan(&record.Path, &record.Title, &record.Type, &record.ContentHash, &record.UpdatedAt, &record.Position)
 		if err == nil {
 			record.FrontMatter = make(map[string]string)
 			records = append(records, record)
