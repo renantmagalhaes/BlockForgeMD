@@ -61,6 +61,9 @@ interface PriorityDef {
 
 interface KanbanProps {
   files: FileRecord[]
+  // See App.tsx's SSE file_update listener — lets an open card detail panel
+  // know its own body content changed on disk, independent of selectedPath.
+  remoteUpdateSignal?: { path: string; seq: number }
   onMoveCard: (path: string, newStatus: string) => Promise<void>
   onMoveCardToBoard?: (cardPath: string, targetBoardPath: string, targetColumn: string) => Promise<void>
   onSelectFile: (path: string) => void
@@ -967,6 +970,10 @@ type CardViewMode = 'modal' | 'fullscreen'
 
 const CardDetailPanel: React.FC<{
   task: FileRecord
+  // See App.tsx's SSE file_update listener — fires (with a bumped seq, so
+  // consecutive updates to the same path both register) whenever any file
+  // changes on disk, so this can tell whether it was *this* card's body.
+  remoteUpdateSignal?: { path: string; seq: number }
   viewMode: CardViewMode
   columns: string[]
   allBoardTags: string[]
@@ -989,7 +996,7 @@ const CardDetailPanel: React.FC<{
   globalLayoutOverride?: string
   globalColumnWidthOverride?: string
   dateFormat?: string
-}> = ({ task, viewMode, columns, allBoardTags, tagColors, onEnsureTagColor, files, onClose, onSetMode, onUpdateFrontMatter, onRenameFile, resolvePath, onSelectFile, onDelete, onCardSaved, initialPropertiesCollapsed, closing, isMobile, sidebarWidthPx, autosaveDelay, globalLayoutOverride, globalColumnWidthOverride, dateFormat }) => {
+}> = ({ task, remoteUpdateSignal, viewMode, columns, allBoardTags, tagColors, onEnsureTagColor, files, onClose, onSetMode, onUpdateFrontMatter, onRenameFile, resolvePath, onSelectFile, onDelete, onCardSaved, initialPropertiesCollapsed, closing, isMobile, sidebarWidthPx, autosaveDelay, globalLayoutOverride, globalColumnWidthOverride, dateFormat }) => {
   // Modal (80vw/80vh) doesn't fit a phone screen — mobile always gets the
   // fullscreen layout regardless of the saved preference.
   const effectiveViewMode: CardViewMode = isMobile ? 'fullscreen' : viewMode
@@ -1083,6 +1090,23 @@ const CardDetailPanel: React.FC<{
       })
       .catch(() => { setLoadErr(true); setContentVisible(true) })
   }, [task.path])
+
+  // Unlike the main document view, this panel has no ongoing subscription to
+  // its own file's changes — the effect above only ever fires once per card
+  // open. Refetch when this card's path shows up in the app-wide SSE signal,
+  // so the same conflict-banner logic in Editor (keyed off its initialContent
+  // prop changing) applies here too. Skipped while this panel's own save is
+  // in flight so the echo of our own write doesn't trigger a pointless refetch.
+  useEffect(() => {
+    if (!remoteUpdateSignal || remoteUpdateSignal.path !== task.path || isSaving) return
+    fetch(`${API_BASE}/api/file?path=${encodeURIComponent(task.path)}`)
+      .then(r => { if (!r.ok) throw new Error('not ok'); return r.json() })
+      .then(data => {
+        const { fmStr: fm, body: b } = splitFrontMatter(data.content || '')
+        setFmStr(fm); setBody(b)
+      })
+      .catch(() => {})
+  }, [remoteUpdateSignal])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -1272,6 +1296,7 @@ const CardDetailPanel: React.FC<{
 // ─── Main Kanban ───────────────────────────────────────────────────────────────
 const Kanban: React.FC<KanbanProps> = ({
   files,
+  remoteUpdateSignal,
   onMoveCard,
   onMoveCardToBoard,
   onSelectFile,
@@ -2485,6 +2510,7 @@ const Kanban: React.FC<KanbanProps> = ({
         return (
           <CardDetailPanel
             task={activeCard}
+            remoteUpdateSignal={remoteUpdateSignal}
             viewMode={cardViewMode}
             columns={boardColumns}
             allBoardTags={allBoardTags}

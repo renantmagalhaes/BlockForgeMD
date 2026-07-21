@@ -1260,6 +1260,11 @@ const App: React.FC = () => {
   const [historyIntervalInput, setHistoryIntervalInput] = useState('0')
   const selectedPathRef = useRef<string | null>(null)
   const isSavingRef = useRef(false)
+  // Tells any open Kanban card panel that this path changed on disk — see
+  // the SSE file_update listener below. A plain path string wouldn't re-fire
+  // for consecutive updates to the same path (React bails out on an
+  // unchanged state value), hence pairing it with a counter.
+  const [remoteUpdateSignal, setRemoteUpdateSignal] = useState<{ path: string; seq: number }>({ path: '', seq: 0 })
   // Monotonic sequence number guarding `files` against stale-response races:
   // a mounted Kanban board triggers fetchFiles() very frequently (every card
   // save/SSE file_update), so a GET issued before a local optimistic reorder
@@ -1902,6 +1907,13 @@ const App: React.FC = () => {
       if (selectedPathRef.current && selectedPathRef.current === e.data && !isSavingRef.current) {
         fetchFileContent(selectedPathRef.current)
       }
+      // Kanban's card detail panel loads its body content independently of
+      // selectedPath (it's a modal over a board, not the main document view)
+      // and has no other way to hear about an external change to whichever
+      // card it currently has open. `path` alone wouldn't re-fire this signal
+      // for two updates to the same path in a row (identical state doesn't
+      // trigger a re-render), hence the counter.
+      setRemoteUpdateSignal(prev => ({ path: e.data, seq: prev.seq + 1 }))
     })
     es.onerror = () => {
       if (offlineTimer) return
@@ -3471,6 +3483,7 @@ const App: React.FC = () => {
             >
               <Kanban
                 files={files}
+                remoteUpdateSignal={remoteUpdateSignal}
                 onMoveCard={handleMoveCard}
                 onMoveCardToBoard={handleMoveCardToBoard}
                 onSelectFile={fetchFileContent}

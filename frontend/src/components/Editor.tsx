@@ -4624,6 +4624,12 @@ export const Editor: React.FC<
     useState<
       "saved" | "saving" | "dirty"
     >("saved");
+  // Set when an SSE file_update for this same file arrives while the editor
+  // is focused — the content-sync effect below deliberately won't clobber
+  // active typing, but silently ignoring it entirely just delays the same
+  // overwrite until the next autosave. This surfaces it instead of hiding it.
+  const [remoteConflict, setRemoteConflict] =
+    useState(false);
   const saveTimeoutRef = useRef<
     any | null
   >(null);
@@ -7042,6 +7048,7 @@ export const Editor: React.FC<
           { emitUpdate: false }
         );
         setSaveStatus("saved");
+        setRemoteConflict(false);
       } else if (
         contentChangedExternally &&
         !editor.isFocused
@@ -7059,6 +7066,16 @@ export const Editor: React.FC<
           { emitUpdate: false }
         );
         setSaveStatus("saved");
+        setRemoteConflict(false);
+      } else if (
+        contentChangedExternally &&
+        editor.isFocused
+      ) {
+        // Don't clobber active typing — but don't silently drop the update
+        // either. lastSavedContentRef is deliberately left stale here, so
+        // contentChangedExternally keeps evaluating true (and this banner
+        // keeps showing) until the user explicitly reloads or dismisses it.
+        setRemoteConflict(true);
       }
 
       if (historyOpen && fileChanged) {
@@ -7071,6 +7088,25 @@ export const Editor: React.FC<
     editor,
     historyOpen
   ]);
+
+  // Manually applies the latest on-disk content over the local editor,
+  // discarding whatever's currently typed — the "Reload" side of the
+  // remote-conflict banner. initialContent is already the fresh version by
+  // the time this can be clicked (the parent's fetchFileContent ran as soon
+  // as the SSE update arrived; only the ProseMirror doc itself was held
+  // back while focused).
+  const applyRemoteContent = () => {
+    if (!editor) return;
+    lastSavedContentRef.current = initialContent;
+    const html = getHTMLFromMarkdown(
+      stripLeadingTitleH1(initialContent)
+    );
+    editor.commands.setContent(html, {
+      emitUpdate: false
+    });
+    setSaveStatus("saved");
+    setRemoteConflict(false);
+  };
 
   // Highlight search term when loading document from search results
   useEffect(() => {
@@ -9929,6 +9965,31 @@ export const Editor: React.FC<
 
         {/* Editor Body & Page Properties Panel */}
         <div className="flex-1 overflow-y-auto px-3 py-4 md:px-8 md:py-6 no-scrollbar flex flex-col print-document-container">
+          {/* Remote-conflict banner — this page changed elsewhere while we
+              were focused (see the content-sync effect above), so the local
+              edit wasn't overwritten automatically. Surface the choice
+              instead of silently discarding one side on the next autosave. */}
+          {remoteConflict && (
+            <div className="mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3 py-2 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-300 text-xs font-medium no-print">
+              <span>
+                This page was changed elsewhere while you were editing. Reload to see the latest version (your unsaved edits will be lost), or keep editing — your version will overwrite theirs when it saves.
+              </span>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={applyRemoteContent}
+                  className="px-2.5 py-1 rounded-md bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 transition cursor-pointer"
+                >
+                  Reload
+                </button>
+                <button
+                  onClick={() => setRemoteConflict(false)}
+                  className="px-2.5 py-1 rounded-md hover:bg-amber-500/10 text-amber-300/80 transition cursor-pointer"
+                >
+                  Keep editing
+                </button>
+              </div>
+            </div>
+          )}
           {/* File path breadcrumbs */}
           <div className="text-[10px] text-slate-500 font-mono mb-4 uppercase tracking-wider select-none">
             {filePath}
