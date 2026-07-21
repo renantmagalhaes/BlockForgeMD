@@ -176,6 +176,14 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	// nginx (and anything built on it, e.g. Nginx Proxy Manager) buffers
+	// proxied responses by default, which would hold back every SSE event
+	// until its buffer fills or the connection closes. This response header
+	// is nginx's documented per-response override to disable that buffering,
+	// with no proxy-side config needed — defensive for any nginx-fronted
+	// deployment even though it wasn't the confirmed cause of any specific
+	// reported issue.
+	w.Header().Set("X-Accel-Buffering", "no")
 
 	clientChan := make(chan string, 10)
 
