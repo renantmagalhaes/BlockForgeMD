@@ -347,7 +347,18 @@ turndownService.addRule("tables", {
       name === "td" ||
       name === "th"
     ) {
-      return ` ${content.trim()} |`;
+      // A cell with more than one paragraph (Enter pressed inside it) or an
+      // explicit hard break both come through here as a raw \n from
+      // Turndown's own paragraph/br rules — but a GFM pipe-table row must be
+      // exactly one physical line, so an unescaped newline here splits the
+      // row across lines and corrupts the table on the next load. <br> is
+      // the standard portable escape: marked's table parser keeps the row
+      // intact, and the HTML it emits for the cell parses back into a
+      // hardBreak node in the same paragraph, preserving the visual line break.
+      const cellContent = content
+        .trim()
+        .replace(/\n+/g, "<br>");
+      return ` ${cellContent} |`;
     }
     if (name === "tr") {
       const isHeader =
