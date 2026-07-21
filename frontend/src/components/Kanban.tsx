@@ -518,8 +518,21 @@ const KanbanFilterBar: React.FC<{
   const dueDateRef = useRef<HTMLInputElement>(null)
   const isActive = filterTags.length > 0 || filterPriorities.length > 0 || filterAssignees.length > 0 || filterDueDate !== '' || searchText.length > 0
 
+  // Portaled + position:fixed (computed from the trigger button's real
+  // screen position), same fix as TagInput's suggestion list elsewhere in
+  // this file: this filter bar sits right above the board's own scrollable
+  // column area, and a plain absolute dropdown ends up stacked behind it
+  // instead of on top (a new stacking context from the drag-and-drop
+  // library's transforms on the columns wins over a same-context z-index).
+  const [tagDropPos, setTagDropPos] = useState<{ top: number; left: number } | null>(null)
+  const [assigneeDropPos, setAssigneeDropPos] = useState<{ top: number; left: number } | null>(null)
+
   useEffect(() => {
-    if (!tagDropOpen) return
+    if (!tagDropOpen) { setTagDropPos(null); return }
+    if (tagDropRef.current) {
+      const r = tagDropRef.current.getBoundingClientRect()
+      setTagDropPos({ top: r.bottom + 6, left: r.left })
+    }
     const handler = (e: MouseEvent) => {
       if (tagDropRef.current && !tagDropRef.current.contains(e.target as Node))
         setTagDropOpen(false)
@@ -529,7 +542,11 @@ const KanbanFilterBar: React.FC<{
   }, [tagDropOpen])
 
   useEffect(() => {
-    if (!assigneeDropOpen) return
+    if (!assigneeDropOpen) { setAssigneeDropPos(null); return }
+    if (assigneeDropRef.current) {
+      const r = assigneeDropRef.current.getBoundingClientRect()
+      setAssigneeDropPos({ top: r.bottom + 6, left: r.left })
+    }
     const handler = (e: MouseEvent) => {
       if (assigneeDropRef.current && !assigneeDropRef.current.contains(e.target as Node))
         setAssigneeDropOpen(false)
@@ -607,8 +624,12 @@ const KanbanFilterBar: React.FC<{
             />
           </button>
 
-          {tagDropOpen && (
-            <div className="absolute top-full left-0 mt-1.5 bf-kanban-popover rounded-xl py-1.5 z-50 min-w-[170px] max-h-52 overflow-y-auto no-scrollbar">
+          {tagDropOpen && tagDropPos && createPortal(
+            <div
+              className="fixed bf-kanban-popover rounded-xl py-1.5 z-[9999] min-w-[170px] max-h-52 overflow-y-auto no-scrollbar"
+              style={{ top: tagDropPos.top, left: tagDropPos.left }}
+              onMouseDown={e => e.stopPropagation()}
+            >
               {allTags.map(tag => {
                 const tc = tagColors[tag] || '#8b5cf6'
                 const checked = filterTags.includes(tag)
@@ -636,7 +657,8 @@ const KanbanFilterBar: React.FC<{
                   </button>
                 )
               })}
-            </div>
+            </div>,
+            document.body
           )}
         </div>
       )}
@@ -664,8 +686,12 @@ const KanbanFilterBar: React.FC<{
             />
           </button>
 
-          {assigneeDropOpen && (
-            <div className="absolute top-full left-0 mt-1.5 bf-kanban-popover rounded-xl py-1.5 z-50 min-w-[180px] max-h-52 overflow-y-auto no-scrollbar">
+          {assigneeDropOpen && assigneeDropPos && createPortal(
+            <div
+              className="fixed bf-kanban-popover rounded-xl py-1.5 z-[9999] min-w-[180px] max-h-52 overflow-y-auto no-scrollbar"
+              style={{ top: assigneeDropPos.top, left: assigneeDropPos.left }}
+              onMouseDown={e => e.stopPropagation()}
+            >
               {allAssignees.map(name => {
                 const checked = filterAssignees.includes(name)
                 return (
@@ -687,7 +713,8 @@ const KanbanFilterBar: React.FC<{
                   </button>
                 )
               })}
-            </div>
+            </div>,
+            document.body
           )}
         </div>
       )}
