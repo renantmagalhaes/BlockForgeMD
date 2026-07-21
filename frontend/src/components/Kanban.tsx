@@ -167,11 +167,13 @@ const TagInput: React.FC<{
   value: string
   onChange: (v: string) => void
   suggestions: string[]
+  tagColors?: Record<string, string>
   onSubmit: (tag: string) => void
   onCancel: () => void
-}> = ({ value, onChange, suggestions, onSubmit, onCancel }) => {
+}> = ({ value, onChange, suggestions, tagColors, onSubmit, onCancel }) => {
   const ref = useRef<HTMLInputElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
   const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number } | null>(null)
   useEffect(() => { ref.current?.focus() }, [])
 
@@ -194,6 +196,21 @@ const TagInput: React.FC<{
     }
   }, [filtered.length, value])
 
+  // Previously only Escape closed this — clicking anywhere else left it open
+  // (and, since it's rendered in place of the "+ tag" button, effectively
+  // stuck). The suggestion list is portaled to document.body (see above), so
+  // a click landing there needs its own ref to not be treated as "outside".
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      const target = e.target as Node
+      if (wrapperRef.current?.contains(target)) return
+      if (dropdownRef.current?.contains(target)) return
+      onCancel()
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [onCancel])
+
   return (
     <div ref={wrapperRef} className="relative" onClick={e => e.stopPropagation()}>
       <input
@@ -209,19 +226,28 @@ const TagInput: React.FC<{
       />
       {filtered.length > 0 && dropdownPos && createPortal(
         <div
+          ref={dropdownRef}
           className="fixed bf-kanban-popover rounded-lg py-1 z-[9999] min-w-[110px] max-h-40 overflow-y-auto no-scrollbar"
           style={{ top: dropdownPos.top, left: dropdownPos.left }}
           onClick={e => e.stopPropagation()}
         >
-          {filtered.map(s => (
-            <button
-              key={s}
-              onMouseDown={e => { e.preventDefault(); onSubmit(s) }}
-              className="flex w-full px-2 py-1 text-[10px] bf-kanban-popover-item text-left cursor-pointer"
-            >
-              {s}
-            </button>
-          ))}
+          {filtered.map(s => {
+            const tc = tagColors?.[s] || '#8b5cf6'
+            return (
+              <button
+                key={s}
+                onMouseDown={e => { e.preventDefault(); onSubmit(s) }}
+                className="flex w-full px-2 py-1 text-left cursor-pointer bf-kanban-popover-item"
+              >
+                <span
+                  className="px-1.5 py-0.5 text-[10px] rounded-md border font-medium"
+                  style={{ background: tc + '18', borderColor: tc + '44', color: tc }}
+                >
+                  {s}
+                </span>
+              </button>
+            )
+          })}
         </div>,
         document.body
       )}
@@ -2316,6 +2342,7 @@ const Kanban: React.FC<KanbanProps> = ({
                               value={tagInput}
                               onChange={setTagInput}
                               suggestions={allBoardTags.filter(t => !tags.includes(t))}
+                              tagColors={tagColors}
                               onSubmit={tag => handleAddTag(task.path, tag, tags)}
                               onCancel={() => { setTagEditorCard(null); setTagInput('') }}
                             />

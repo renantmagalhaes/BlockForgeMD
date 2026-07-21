@@ -4751,6 +4751,10 @@ export const Editor: React.FC<
     tagAutocompleteOpen,
     setTagAutocompleteOpen
   ] = useState(false);
+  const tagFieldRef = useRef<HTMLFormElement>(null);
+  const tagDropdownRef = useRef<HTMLDivElement>(null);
+  const [tagDropPos, setTagDropPos] =
+    useState<{ top: number; left: number } | null>(null);
   const [
     textColorOpen,
     setTextColorOpen
@@ -8765,7 +8769,13 @@ export const Editor: React.FC<
       onEnsureTagColor?.(cleanTag);
     }
     setNewTagInput("");
-    setTagAutocompleteOpen(false);
+    // Deliberately not closing tagAutocompleteOpen: the input keeps focus
+    // after adding a tag (see the suggestion button's onMouseDown
+    // preventDefault, below), specifically so tags can be added one after
+    // another without re-clicking. Force-closing here left the dropdown
+    // stuck shut afterward — focus never actually left the input, so
+    // nothing was left to re-trigger it back open (only onFocus/onChange do
+    // that) until the user clicked away and back, or typed something.
   };
 
   const handleAddTagSubmit = (
@@ -8789,6 +8799,34 @@ export const Editor: React.FC<
         (t) =>
           !getTagsArray().includes(t)
       );
+
+  // Portaled + position:fixed (computed from the tag field's real screen
+  // position), same fix as Kanban's TagInput: a plain absolute dropdown here
+  // can end up stacked behind other UI (the properties panel sits above a
+  // scrollable document / a Kanban card modal), and only closing on Escape
+  // (or the previous onBlur-with-timeout hack) left it stuck open when
+  // clicked away from instead of dismissing like every other popover.
+  useEffect(() => {
+    if (!tagAutocompleteOpen || tagSuggestions.length === 0 || !tagFieldRef.current) {
+      setTagDropPos(null);
+      return;
+    }
+    const r = tagFieldRef.current.getBoundingClientRect();
+    setTagDropPos({ top: r.bottom + 4, left: r.left });
+  }, [tagAutocompleteOpen, tagSuggestions.length, newTagInput]);
+
+  useEffect(() => {
+    if (!tagAutocompleteOpen) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as Element;
+      if (tagFieldRef.current?.contains(target)) return;
+      if (tagDropdownRef.current?.contains(target)) return;
+      setTagAutocompleteOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () =>
+      document.removeEventListener("mousedown", handler);
+  }, [tagAutocompleteOpen]);
 
   const handleRemoveTag = (
     tagToRemove: string
@@ -10884,6 +10922,7 @@ export const Editor: React.FC<
                           )}
 
                           <form
+                            ref={tagFieldRef}
                             onSubmit={
                               handleAddTagSubmit
                             }
@@ -10910,15 +10949,6 @@ export const Editor: React.FC<
                               onFocus={() =>
                                 setTagAutocompleteOpen(
                                   true
-                                )
-                              }
-                              onBlur={() =>
-                                setTimeout(
-                                  () =>
-                                    setTagAutocompleteOpen(
-                                      false
-                                    ),
-                                  150
                                 )
                               }
                               onKeyDown={(
@@ -10950,31 +10980,47 @@ export const Editor: React.FC<
                             </button>
                             {tagAutocompleteOpen &&
                               tagSuggestions.length >
-                                0 && (
-                                <div className="absolute top-full left-0 mt-1 bg-[#1a2236] border border-slate-700 rounded-lg shadow-xl py-1 z-50 min-w-[130px] max-h-36 overflow-y-auto no-scrollbar">
+                                0 &&
+                              tagDropPos &&
+                              createPortal(
+                                <div
+                                  ref={tagDropdownRef}
+                                  className="fixed bg-[#1a2236] border border-slate-700 rounded-lg shadow-xl py-1 z-[9999] min-w-[130px] max-h-36 overflow-y-auto no-scrollbar"
+                                  style={{ top: tagDropPos.top, left: tagDropPos.left }}
+                                >
                                   {tagSuggestions.map(
                                     (
                                       s
-                                    ) => (
+                                    ) => {
+                                      const tc = tagColors[s] || '#8b5cf6';
+                                      return (
                                       <button
                                         key={
                                           s
                                         }
                                         type="button"
-                                        onMouseDown={() =>
+                                        onMouseDown={(e) => {
+                                          e.preventDefault();
                                           handleAddTag(
                                             s
-                                          )
-                                        }
-                                        className="flex w-full px-2.5 py-1.5 text-[10px] text-slate-300 hover:bg-slate-800 text-left cursor-pointer"
+                                          );
+                                        }}
+                                        className="flex w-full px-2.5 py-1.5 text-left cursor-pointer hover:bg-slate-800"
                                       >
-                                        {
-                                          s
-                                        }
+                                        <span
+                                          className="px-1.5 py-0.5 text-[10px] rounded-md border font-medium"
+                                          style={{ background: tc + '18', borderColor: tc + '44', color: tc }}
+                                        >
+                                          {
+                                            s
+                                          }
+                                        </span>
                                       </button>
-                                    )
+                                      );
+                                    }
                                   )}
-                                </div>
+                                </div>,
+                                document.body
                               )}
                           </form>
                         </div>
