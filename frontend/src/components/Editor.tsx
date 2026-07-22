@@ -10463,6 +10463,21 @@ export const Editor: React.FC<
                                           : undefined
                                       );
                                     }}
+                                    onClick={(
+                                      e
+                                    ) => {
+                                      // Native date inputs only open the
+                                      // picker when the tiny calendar glyph
+                                      // itself is clicked — showPicker() lets
+                                      // a click anywhere in the field do it.
+                                      try {
+                                        e.currentTarget.showPicker?.();
+                                      } catch {
+                                        // Unsupported/blocked in some
+                                        // browsers — still usable via the
+                                        // native glyph either way.
+                                      }
+                                    }}
                                     className={`flex-1 bg-slate-900/50 hover:bg-slate-800 rounded px-2.5 py-1 outline-none transition cursor-pointer ${duePast ? "border border-red-500/50 text-red-400" : "border border-slate-800 text-slate-300"}`}
                                   />
                                   {datePart && (

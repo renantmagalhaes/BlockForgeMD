@@ -12,6 +12,12 @@
 
 /* ── Dark (true black) ──────────────────────────────── */
 :root {
+  /* Tells the browser to render native controls (the <input type="date">
+     calendar popup, scrollbars, etc.) in its dark UI instead of following
+     the OS-level prefers-color-scheme — without this, the picker stayed
+     light/dark on its own regardless of which theme the app itself was in. */
+  color-scheme: dark;
+
   /* Overridden at runtime (inline style on <html>) based on the app_font
      setting — see App.tsx. Not theme-dependent, so it lives here once
      rather than in the light-theme override block below. */
@@ -49,6 +55,8 @@
 
 /* ── Light ───────────────────────────────────────────── */
 [data-theme="light"] {
+  color-scheme: light;
+
   --bg-app:         #f8fafc;
   --bg-surface:     #ffffff;
   --bg-elevated:    #f1f5f9;
