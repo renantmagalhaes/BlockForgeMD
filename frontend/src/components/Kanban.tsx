@@ -2063,8 +2063,13 @@ const Kanban: React.FC<KanbanProps> = ({
                     >
                       {count}
                     </span>
+                    {/* min-h-0 alongside flex-1: same flexbox pitfall as the
+                        expanded header's pill — a flex child won't shrink
+                        below its content size by default, so without this
+                        the name just gets hard-clipped by the column's own
+                        overflow-hidden instead of properly ellipsizing. */}
                     <span
-                      className="text-[11px] font-black uppercase tracking-widest flex-1"
+                      className="text-[11px] font-black uppercase tracking-widest flex-1 min-h-0 truncate"
                       style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', color: accent }}
                     >
                       {col}
@@ -2109,9 +2114,13 @@ const Kanban: React.FC<KanbanProps> = ({
                     className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer group"
                     title={onUpdateColumns ? 'Double-click to rename' : undefined}
                   >
-                    {/* Frosted-glass pill: dot (opens color picker) + label */}
+                    {/* Frosted-glass pill: dot (opens color picker) + label.
+                        min-w-0 (not shrink-0) so an extremely long column
+                        name can't balloon the pill past the column's own
+                        width — the inner label's truncate below only takes
+                        effect once this pill is actually allowed to shrink. */}
                     <span
-                      className="flex items-center gap-1.5 pl-1.5 pr-2.5 py-1 rounded-lg text-[10.5px] font-bold uppercase tracking-wide shrink-0 backdrop-blur-md"
+                      className="flex items-center gap-1.5 pl-1.5 pr-2.5 py-1 rounded-lg text-[10.5px] font-bold uppercase tracking-wide min-w-0 backdrop-blur-md"
                       style={{
                         background: `color-mix(in srgb, ${accent} 22%, transparent)`,
                         border: `1px solid color-mix(in srgb, ${accent} 42%, transparent)`,
@@ -2130,11 +2139,14 @@ const Kanban: React.FC<KanbanProps> = ({
                       >
                         <span className="w-1.5 h-1.5 rounded-full" style={{ background: accent }} />
                       </button>
-                      <span className="truncate">{col}</span>
+                      {/* Own title (not just the row's "double-click to
+                          rename" one) so hovering the truncated name itself
+                          reveals the full text natively. */}
+                      <span className="truncate min-w-0" title={col}>{col}</span>
                     </span>
                     {/* Count — tinted to match the column's accent */}
-                    <span className="text-xs font-bold bf-kanban-col-count" style={{ color: accent }}>{colTasks.length}</span>
-                    {onUpdateColumns && <Edit3 size={9} className="bf-kanban-col-edit-icon opacity-0 group-hover:opacity-100 transition ml-auto" />}
+                    <span className="text-xs font-bold bf-kanban-col-count shrink-0" style={{ color: accent }}>{colTasks.length}</span>
+                    {onUpdateColumns && <Edit3 size={9} className="bf-kanban-col-edit-icon opacity-0 group-hover:opacity-100 transition ml-auto shrink-0" />}
                   </div>
                 )}
 
