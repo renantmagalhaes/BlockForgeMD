@@ -11,6 +11,7 @@ import {
   confirmDialog,
   promptDialog
 } from "../lib/dialog";
+import { useIsMobile } from "../lib/useIsMobile";
 import EmojiPicker, {
   Theme
 } from "emoji-picker-react";
@@ -248,6 +249,7 @@ import {
   ArrowUp,
   ArrowDown,
   ChevronRight,
+  ChevronLeft,
   Type,
   Repeat2,
   Presentation,
@@ -4579,6 +4581,204 @@ const AutoPair = Extension.create({
   }
 });
 
+// ─── CalendarPopover ────────────────────────────────────────────────────────
+// A custom month-grid date picker, styled like this app's other floating
+// menus (dark card, violet accent). Native <input type="date"> desktop
+// calendars can't be restyled at all — no header, no theming, browsers draw
+// that popup themselves — so this replaces it outright rather than trying to
+// reskin something CSS has no access to.
+const CalendarPopover: React.FC<{
+  value: string; // 'YYYY-MM-DD' or ''
+  anchorRect: { top: number; left: number; bottom: number };
+  onChange: (date: string) => void;
+  onClose: () => void;
+}> = ({ value, anchorRect, onChange, onClose }) => {
+  const ref = useRef<HTMLDivElement>(null);
+  const parsed = value ? new Date(value + "T00:00:00") : null;
+  const [viewYear, setViewYear] = useState(
+    (parsed ?? new Date()).getFullYear()
+  );
+  const [viewMonth, setViewMonth] = useState(
+    (parsed ?? new Date()).getMonth()
+  );
+
+  useEffect(() => {
+    const down = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Element))
+        onClose();
+    };
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("mousedown", down);
+    document.addEventListener("keydown", key);
+    return () => {
+      document.removeEventListener("mousedown", down);
+      document.removeEventListener("keydown", key);
+    };
+  }, [onClose]);
+
+  const fmt = (y: number, m: number, d: number) => {
+    const dt = new Date(y, m, d);
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+  };
+
+  const today = new Date();
+  const todayStr = fmt(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate()
+  );
+
+  const firstOfMonth = new Date(viewYear, viewMonth, 1);
+  const startWeekday = firstOfMonth.getDay(); // 0 = Sunday
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const daysInPrevMonth = new Date(viewYear, viewMonth, 0).getDate();
+
+  const cells: {
+    day: number;
+    month: number;
+    year: number;
+    inCurrent: boolean;
+  }[] = [];
+  for (let i = startWeekday - 1; i >= 0; i--) {
+    cells.push({
+      day: daysInPrevMonth - i,
+      month: viewMonth - 1,
+      year: viewYear,
+      inCurrent: false
+    });
+  }
+  for (let d = 1; d <= daysInMonth; d++) {
+    cells.push({ day: d, month: viewMonth, year: viewYear, inCurrent: true });
+  }
+  let nextDay = 1;
+  while (cells.length < 42) {
+    cells.push({
+      day: nextDay++,
+      month: viewMonth + 1,
+      year: viewYear,
+      inCurrent: false
+    });
+  }
+
+  const goPrevMonth = () => {
+    if (viewMonth === 0) {
+      setViewMonth(11);
+      setViewYear((y) => y - 1);
+    } else {
+      setViewMonth((m) => m - 1);
+    }
+  };
+  const goNextMonth = () => {
+    if (viewMonth === 11) {
+      setViewMonth(0);
+      setViewYear((y) => y + 1);
+    } else {
+      setViewMonth((m) => m + 1);
+    }
+  };
+
+  const MONTH_NAMES = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+  ];
+
+  return createPortal(
+    <div
+      ref={ref}
+      style={{
+        position: "fixed",
+        top: anchorRect.bottom + 6,
+        left: anchorRect.left,
+        zIndex: 9999
+      }}
+      className="w-64 bg-[#161b22] border border-slate-700/80 rounded-xl shadow-2xl p-3 select-none animate-in fade-in zoom-in-95 duration-100"
+    >
+      <div className="flex items-center justify-between mb-2 px-0.5">
+        <button
+          type="button"
+          onClick={goPrevMonth}
+          className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+        >
+          <ChevronLeft size={14} />
+        </button>
+        <span className="text-xs font-bold text-slate-200">
+          {MONTH_NAMES[viewMonth]} {viewYear}
+        </span>
+        <button
+          type="button"
+          onClick={goNextMonth}
+          className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+        >
+          <ChevronRight size={14} />
+        </button>
+      </div>
+      <div className="grid grid-cols-7 mb-1">
+        {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d) => (
+          <span
+            key={d}
+            className="text-[9px] font-semibold text-slate-500 text-center uppercase"
+          >
+            {d}
+          </span>
+        ))}
+      </div>
+      <div className="grid grid-cols-7 gap-y-0.5">
+        {cells.map((c, i) => {
+          const dateStr = fmt(c.year, c.month, c.day);
+          const isSelected = value === dateStr;
+          const isToday = todayStr === dateStr;
+          return (
+            <button
+              key={i}
+              type="button"
+              onClick={() => {
+                onChange(dateStr);
+                onClose();
+              }}
+              className={`h-7 w-7 mx-auto flex items-center justify-center text-[11px] rounded-lg transition cursor-pointer ${
+                isSelected
+                  ? "bg-violet-600 text-white font-bold"
+                  : c.inCurrent
+                    ? `text-slate-300 hover:bg-slate-800 ${isToday ? "font-bold text-violet-400" : ""}`
+                    : "text-slate-600 hover:bg-slate-800/50"
+              }`}
+            >
+              {c.day}
+            </button>
+          );
+        })}
+      </div>
+      <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-slate-800">
+        <button
+          type="button"
+          onClick={() => {
+            onChange(todayStr);
+            onClose();
+          }}
+          className="text-[10px] font-semibold text-violet-400 hover:text-violet-300 transition cursor-pointer"
+        >
+          Today
+        </button>
+        {value && (
+          <button
+            type="button"
+            onClick={() => {
+              onChange("");
+              onClose();
+            }}
+            className="text-[10px] font-semibold text-slate-500 hover:text-red-400 transition cursor-pointer"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+    </div>,
+    document.body
+  );
+};
+
 export const Editor: React.FC<
   EditorProps
 > = ({
@@ -4605,6 +4805,12 @@ export const Editor: React.FC<
   onSavePropertiesCollapsed,
   autosaveDelay = 1500
 }) => {
+  // Mobile browsers already render a well-fitted native date picker on tap
+  // (unlike desktop, which needs the tiny calendar glyph clicked exactly and
+  // then draws a plain, unstyled grid) — so the custom CalendarPopover below
+  // is desktop-only; mobile keeps the native <input type="date">.
+  const isMobile = useIsMobile();
+
   // The full formatting toolbar is collapsed by default on mobile — it's too
   // tall to show alongside actual content on a phone screen.
   const [
@@ -4755,6 +4961,15 @@ export const Editor: React.FC<
   const tagDropdownRef = useRef<HTMLDivElement>(null);
   const [tagDropPos, setTagDropPos] =
     useState<{ top: number; left: number } | null>(null);
+
+  // Due-date calendar popover (Page Attributes panel)
+  const dueDateBoxRef = useRef<HTMLDivElement>(null);
+  const [dueDateCalendarOpen, setDueDateCalendarOpen] = useState(false);
+  const [dueDateAnchorRect, setDueDateAnchorRect] = useState<{
+    top: number;
+    left: number;
+    bottom: number;
+  } | null>(null);
   const [
     textColorOpen,
     setTextColorOpen
@@ -10443,43 +10658,124 @@ export const Editor: React.FC<
                               <div className="flex-1 flex flex-col gap-1.5">
                                 {/* Date row */}
                                 <div className="flex items-center gap-2">
-                                  <input
-                                    type="date"
-                                    value={
-                                      datePart
-                                    }
-                                    onChange={(
-                                      e
-                                    ) => {
-                                      const d =
-                                        e
-                                          .target
-                                          .value;
-                                      setDue(
-                                        d,
-                                        hasTime
-                                          ? timePart ||
-                                              "09:00"
-                                          : undefined
-                                      );
-                                    }}
-                                    onClick={(
-                                      e
-                                    ) => {
-                                      // Native date inputs only open the
-                                      // picker when the tiny calendar glyph
-                                      // itself is clicked — showPicker() lets
-                                      // a click anywhere in the field do it.
-                                      try {
-                                        e.currentTarget.showPicker?.();
-                                      } catch {
-                                        // Unsupported/blocked in some
-                                        // browsers — still usable via the
-                                        // native glyph either way.
+                                  {isMobile ? (
+                                    <input
+                                      type="date"
+                                      value={
+                                        datePart
                                       }
-                                    }}
-                                    className={`flex-1 bg-slate-900/50 hover:bg-slate-800 rounded px-2.5 py-1 outline-none transition cursor-pointer ${duePast ? "border border-red-500/50 text-red-400" : "border border-slate-800 text-slate-300"}`}
-                                  />
+                                      onChange={(
+                                        e
+                                      ) => {
+                                        const d =
+                                          e
+                                            .target
+                                            .value;
+                                        setDue(
+                                          d,
+                                          hasTime
+                                            ? timePart ||
+                                                "09:00"
+                                            : undefined
+                                        );
+                                      }}
+                                      onClick={(
+                                        e
+                                      ) => {
+                                        // Most mobile browsers already open
+                                        // the native picker on any tap in the
+                                        // field; this is only a fallback for
+                                        // the ones that don't.
+                                        try {
+                                          e.currentTarget.showPicker?.();
+                                        } catch {
+                                          // Unsupported/blocked — the field
+                                          // is still directly editable.
+                                        }
+                                      }}
+                                      className={`flex-1 bg-slate-900/50 hover:bg-slate-800 rounded px-2.5 py-1 outline-none transition cursor-pointer ${duePast ? "border border-red-500/50 text-red-400" : "border border-slate-800 text-slate-300"}`}
+                                    />
+                                  ) : (
+                                    <>
+                                      <div
+                                        ref={
+                                          dueDateBoxRef
+                                        }
+                                        onClick={() => {
+                                          if (
+                                            dueDateBoxRef.current
+                                          ) {
+                                            const r =
+                                              dueDateBoxRef.current.getBoundingClientRect();
+                                            setDueDateAnchorRect(
+                                              {
+                                                top: r.top,
+                                                left: r.left,
+                                                bottom:
+                                                  r.bottom
+                                              }
+                                            );
+                                          }
+                                          setDueDateCalendarOpen(
+                                            true
+                                          );
+                                        }}
+                                        className={`flex-1 flex items-center gap-2 bg-slate-900/50 hover:bg-slate-800 rounded px-2.5 py-1 outline-none transition cursor-pointer ${duePast ? "border border-red-500/50 text-red-400" : "border border-slate-800 text-slate-300"}`}
+                                      >
+                                        <Calendar
+                                          size={
+                                            12
+                                          }
+                                          className="opacity-50 shrink-0"
+                                        />
+                                        <span
+                                          className={
+                                            datePart
+                                              ? ""
+                                              : "text-slate-600"
+                                          }
+                                        >
+                                          {datePart
+                                            ? formatDisplayDate(
+                                                new Date(
+                                                  datePart +
+                                                    "T00:00:00"
+                                                ),
+                                                dateFormat
+                                              )
+                                            : "Select date…"}
+                                        </span>
+                                      </div>
+                                      {dueDateCalendarOpen &&
+                                        dueDateAnchorRect && (
+                                          <CalendarPopover
+                                            value={
+                                              datePart
+                                            }
+                                            anchorRect={
+                                              dueDateAnchorRect
+                                            }
+                                            onChange={(
+                                              d
+                                            ) =>
+                                              setDue(
+                                                d,
+                                                hasTime &&
+                                                  d
+                                                  ? timePart ||
+                                                      "09:00"
+                                                  : undefined
+                                              )
+                                            }
+                                            onClose={() =>
+                                              setDueDateCalendarOpen(
+                                                false
+                                              )
+                                            }
+                                          />
+                                        )}
+                                    </>
+                                  )}
                                   {datePart && (
                                     <button
                                       type="button"
