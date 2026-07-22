@@ -4810,6 +4810,14 @@ export const Editor: React.FC<
     bubbleCoords,
     setBubbleCoords
   ] = useState({ top: 0, left: 0 });
+  const bubbleRef = useRef<HTMLDivElement>(null);
+  // Real measured size of the bubble, refreshed every time it's shown — the
+  // positioning math used to assume a fixed 410x44 regardless of its actual
+  // rendered size (35px tall in practice), which threw off both the "how
+  // much room is above" check and the gap underneath when it flipped below.
+  // Falls back to that same estimate only for the very first paint, before
+  // there's anything to measure yet.
+  const bubbleSizeRef = useRef({ width: 410, height: 44 });
 
   // Word count + reading time
   const [wordCount, setWordCount] =
@@ -6601,8 +6609,13 @@ export const Editor: React.FC<
           return;
         }
 
-        const BUBBLE_W = 410;
-        const BUBBLE_H = 44;
+        // GAP: visual breathing room between the selection and the bubble —
+        // was 8px, which read as "sitting right on top of the text" once
+        // the flipped-below case (limited room above) put the bubble that
+        // close underneath instead of above it.
+        const GAP = 14;
+        const { width: BUBBLE_W, height: BUBBLE_H } =
+          bubbleSizeRef.current;
         const centerX =
           rect.left + rect.width / 2;
         const left = Math.max(
@@ -6615,9 +6628,9 @@ export const Editor: React.FC<
           )
         );
         const rawTop =
-          rect.top >= BUBBLE_H + 12
-            ? rect.top - BUBBLE_H - 8
-            : rect.bottom + 8;
+          rect.top >= BUBBLE_H + GAP + 8
+            ? rect.top - BUBBLE_H - GAP
+            : rect.bottom + GAP;
         const top = Math.max(
           8,
           Math.min(
@@ -6630,6 +6643,25 @@ export const Editor: React.FC<
 
         setBubbleCoords({ top, left });
         setBubbleVisible(true);
+        // The very first time this shows (or if button count/width ever
+        // changes), bubbleSizeRef still holds the fallback estimate — measure
+        // the real rendered size a frame later and immediately reposition
+        // with it, rather than trusting a hardcoded constant that's already
+        // been caught drifting from reality once.
+        requestAnimationFrame(() => {
+          const el = bubbleRef.current;
+          if (!el) return;
+          const r = el.getBoundingClientRect();
+          if (!r.width || !r.height) return;
+          if (
+            Math.abs(r.width - bubbleSizeRef.current.width) < 1 &&
+            Math.abs(r.height - bubbleSizeRef.current.height) < 1
+          ) {
+            return;
+          }
+          bubbleSizeRef.current = { width: r.width, height: r.height };
+          updateBubble();
+        });
       } catch {
         setBubbleVisible(false);
       }
@@ -12014,9 +12046,14 @@ export const Editor: React.FC<
           document.body
         )}
 
-      {/* Bubble Formatting Menu — appears above selected text */}
-      {bubbleVisible && (
+      {/* Bubble Formatting Menu — appears above selected text. Portaled to
+          document.body (like every other floating popover in this app) so
+          it stays genuinely viewport-relative regardless of any transformed
+          ancestor between here and body — e.g. a Kanban card modal's own
+          entrance-animation wrapper. */}
+      {bubbleVisible && createPortal(
         <div
+          ref={bubbleRef}
           style={{
             position: "fixed",
             top: `${bubbleCoords.top}px`,
@@ -12434,7 +12471,8 @@ export const Editor: React.FC<
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Block menu (drag handle click) */}
