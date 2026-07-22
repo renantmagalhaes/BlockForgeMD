@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import {
   Calendar, User, Plus, Trash2, Edit3, X, Check,
   ChevronLeft, ChevronRight, Settings, Palette,
-  Tag, ChevronDown, Search, ChevronsLeft, Copy, ArrowRight, GripVertical, ListChecks, Layers,
+  Tag, ChevronDown, Search, ChevronsLeft, Copy, ArrowRight, GripVertical, ListChecks, Layers, Pencil,
 } from 'lucide-react'
 import { Editor } from './Editor'
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd'
@@ -817,6 +817,7 @@ const CardContextMenu: React.FC<{
   completionTargetColumn: string
   onClose: () => void
   onOpen: () => void
+  onRename?: () => void
   onMove: (col: string) => Promise<void>
   onMarkComplete: () => void
   onSetPriority: (name: string) => void
@@ -824,7 +825,7 @@ const CardContextMenu: React.FC<{
   onDelete?: () => void
   otherBoards?: { path: string; title: string; columns: string[] }[]
   onMoveToBoard?: (boardPath: string, column: string) => void
-}> = ({ x, y, task, currentCol, columns, priorities, isCompleted, completionTargetColumn, onClose, onOpen, onMove, onMarkComplete, onSetPriority, onSetDueDate, onDelete, otherBoards = [], onMoveToBoard }) => {
+}> = ({ x, y, task, currentCol, columns, priorities, isCompleted, completionTargetColumn, onClose, onOpen, onRename, onMove, onMarkComplete, onSetPriority, onSetDueDate, onDelete, otherBoards = [], onMoveToBoard }) => {
   const [sub, setSub] = useState<'move' | 'priority' | 'date' | 'moveBoard' | null>(null)
   const [moveBoardTarget, setMoveBoardTarget] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -891,6 +892,10 @@ const CardContextMenu: React.FC<{
 
       <div className="py-1.5">
         <Row icon={<Edit3 size={13} />} label="Open card" onClick={() => { onOpen(); onClose() }} />
+
+        {onRename && (
+          <Row icon={<Pencil size={13} />} label="Rename" onClick={() => { onRename(); onClose() }} />
+        )}
 
         <Row
           icon={<Check size={13} />}
@@ -2547,6 +2552,11 @@ const Kanban: React.FC<KanbanProps> = ({
           completionTargetColumn={completionTargetColumn}
           onClose={() => setCardCtxMenu(null)}
           onOpen={() => openCard(cardCtxMenu.task.path)}
+          onRename={onRenameTask ? async () => {
+            const newTitle = await promptDialog('Rename card:', cardCtxMenu.task.title, { title: 'Rename Card', placeholder: 'Card title…', confirmLabel: 'Rename' })
+            const trimmed = newTitle?.trim()
+            if (trimmed && trimmed !== cardCtxMenu.task.title) await onRenameTask(cardCtxMenu.task.path, trimmed)
+          } : undefined}
           onMove={col => onMoveCard(cardCtxMenu.task.path, col)}
           onMarkComplete={() => handleMarkComplete(cardCtxMenu.task.path, cardCtxMenu.col)}
           onSetPriority={name => handleSetCardPriority(cardCtxMenu.task.path, name)}
