@@ -2439,7 +2439,13 @@ const Kanban: React.FC<KanbanProps> = ({
               <div className="p-2.5 bf-kanban-col-footer shrink-0">
                 {addingTaskCol === col ? (
                   <form
-                    onSubmit={e => { handleQuickCreate(e, col); setAddingTaskCol(null) }}
+                    // Deliberately not closing the input here — after
+                    // creating one task, the input clears and stays open
+                    // (still focused, since the form/input never unmount)
+                    // so several tasks can be added in a row on Enter alone.
+                    // It still collapses via the onBlur below once it's
+                    // empty and the user actually clicks/tabs away.
+                    onSubmit={e => handleQuickCreate(e, col)}
                     onBlur={e => {
                       if (!e.currentTarget.contains(e.relatedTarget as Node) && !newCardTitles[col]?.trim()) {
                         setAddingTaskCol(null)
