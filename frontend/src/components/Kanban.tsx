@@ -2049,7 +2049,7 @@ const Kanban: React.FC<KanbanProps> = ({
                     {...dropProvided.droppableProps}
                     onClick={() => toggleColCollapse(col)}
                     title={`${col} (${count} cards) — click to expand`}
-                    className="flex flex-col items-center justify-start w-12 shrink-0 min-h-[500px] md:min-h-[180px] md:max-h-full rounded-xl bf-kanban-col cursor-pointer hover:opacity-80 transition pt-3 pb-3 gap-3 overflow-hidden"
+                    className="flex flex-col items-center justify-start w-16 shrink-0 min-h-[500px] md:min-h-[320px] md:max-h-full rounded-xl bf-kanban-col cursor-pointer hover:opacity-80 transition pt-3 pb-3 gap-3 overflow-hidden"
                     style={{
                       borderTop: `3px solid ${accent}`,
                       background: dropSnapshot.isDraggingOver
@@ -2063,13 +2063,17 @@ const Kanban: React.FC<KanbanProps> = ({
                     >
                       {count}
                     </span>
-                    {/* min-h-0 alongside flex-1: same flexbox pitfall as the
-                        expanded header's pill — a flex child won't shrink
+                    {/* min-h-0 alongside flex-1: a flex child won't shrink
                         below its content size by default, so without this
-                        the name just gets hard-clipped by the column's own
-                        overflow-hidden instead of properly ellipsizing. */}
+                        the name would just get hard-clipped by the column's
+                        own overflow-hidden. Wraps (break-words) rather than
+                        truncating — an ellipsis was losing too much of the
+                        name; wrapping onto a second vertical line plus the
+                        taller/wider column above keeps far more of it
+                        readable without a hover. Whatever still doesn't fit
+                        is still fully available via the title tooltip. */}
                     <span
-                      className="text-[11px] font-black uppercase tracking-widest flex-1 min-h-0 truncate"
+                      className="text-[11px] font-black uppercase tracking-widest flex-1 min-h-0 min-w-0 overflow-hidden break-words"
                       style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', color: accent }}
                     >
                       {col}
@@ -2139,10 +2143,12 @@ const Kanban: React.FC<KanbanProps> = ({
                       >
                         <span className="w-1.5 h-1.5 rounded-full" style={{ background: accent }} />
                       </button>
-                      {/* Own title (not just the row's "double-click to
-                          rename" one) so hovering the truncated name itself
-                          reveals the full text natively. */}
-                      <span className="truncate min-w-0" title={col}>{col}</span>
+                      {/* Wraps rather than truncating — an ellipsis was
+                          cutting off too much of longer names. The header
+                          row/column just grow taller to fit; nothing above
+                          it is clipped by that. Title kept as a fallback for
+                          anyone who prefers a quick hover over a taller card. */}
+                      <span className="break-words min-w-0" title={col}>{col}</span>
                     </span>
                     {/* Count — tinted to match the column's accent */}
                     <span className="text-xs font-bold bf-kanban-col-count shrink-0" style={{ color: accent }}>{colTasks.length}</span>
