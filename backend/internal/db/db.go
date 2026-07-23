@@ -22,6 +22,16 @@ type FileRecord struct {
 	Content     string            `json:"content,omitempty"`
 	FrontMatter map[string]string `json:"frontMatter,omitempty"`
 	Position    float64           `json:"position"`
+	// Checklist groups (contiguous runs of `- [ ]`/`- [x]` lines, one group
+	// per run) — kept separate from Content so the Kanban board's bulk file
+	// list can show checklist progress without shipping every file's full
+	// body text (see ListFiles). Populated by parser.ParseFile.
+	ChecklistGroups [][]ChecklistItem `json:"checklistGroups,omitempty"`
+}
+
+type ChecklistItem struct {
+	Done bool   `json:"done"`
+	Text string `json:"text"`
 }
 
 type PositionUpdate struct {
@@ -80,7 +90,8 @@ func (db *DB) createTables() error {
 			type TEXT NOT NULL,
 			content_hash TEXT NOT NULL,
 			updated_at DATETIME NOT NULL,
-			content TEXT
+			content TEXT,
+			checklist TEXT
 		);`,
 		`CREATE TABLE IF NOT EXISTS front_matter (
 			file_path TEXT,
@@ -135,6 +146,7 @@ func (db *DB) createTables() error {
 	// Automatic migrations
 	_, _ = db.Conn.Exec("ALTER TABLE files ADD COLUMN content TEXT;")
 	_, _ = db.Conn.Exec("ALTER TABLE files ADD COLUMN position REAL DEFAULT 0;")
+	_, _ = db.Conn.Exec("ALTER TABLE files ADD COLUMN checklist TEXT;")
 	_, _ = db.Conn.Exec("UPDATE files SET position = rowid WHERE position = 0 OR position IS NULL;")
 	_, _ = db.Conn.Exec("INSERT OR IGNORE INTO settings (key, value) VALUES ('history_limit', '50');")
 
@@ -149,17 +161,29 @@ func (db *DB) UpsertFile(file FileRecord, fm map[string]interface{}, tasks []Tas
 	}
 	defer tx.Rollback()
 
+	// Checklist groups are stored as JSON — tiny compared to full body text,
+	// so unlike Content this is safe to always include in the bulk file list
+	// (see ListFiles).
+	var checklistJSON string
+	if len(file.ChecklistGroups) > 0 {
+		bytes, err := json.Marshal(file.ChecklistGroups)
+		if err == nil {
+			checklistJSON = string(bytes)
+		}
+	}
+
 	// 1. Insert or update file — preserve position for existing rows, assign max+1 for new ones
 	_, err = tx.Exec(`
-		INSERT INTO files (path, title, type, content_hash, updated_at, content, position)
-		VALUES (?, ?, ?, ?, ?, ?, COALESCE((SELECT MAX(position) FROM files), 0) + 1)
+		INSERT INTO files (path, title, type, content_hash, updated_at, content, checklist, position)
+		VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT MAX(position) FROM files), 0) + 1)
 		ON CONFLICT(path) DO UPDATE SET
 			title = excluded.title,
 			type = excluded.type,
 			content_hash = excluded.content_hash,
 			updated_at = excluded.updated_at,
-			content = excluded.content;
-	`, file.Path, file.Title, file.Type, file.ContentHash, file.UpdatedAt, file.Content)
+			content = excluded.content,
+			checklist = excluded.checklist;
+	`, file.Path, file.Title, file.Type, file.ContentHash, file.UpdatedAt, file.Content, checklistJSON)
 	if err != nil {
 		return fmt.Errorf("failed to upsert file: %w", err)
 	}
@@ -258,7 +282,7 @@ func (db *DB) GetFile(path string) (*FileRecord, error) {
 // on every edit anywhere, which stops scaling once the vault has any size to
 // it. Use GetFile or Search when the body text is actually needed.
 func (db *DB) ListFiles() ([]FileRecord, error) {
-	rows, err := db.Conn.Query("SELECT path, title, type, content_hash, updated_at, COALESCE(position, rowid) FROM files ORDER BY COALESCE(position, rowid) ASC;")
+	rows, err := db.Conn.Query("SELECT path, title, type, content_hash, updated_at, COALESCE(position, rowid), COALESCE(checklist, '') FROM files ORDER BY COALESCE(position, rowid) ASC;")
 	if err != nil {
 		return nil, err
 	}
@@ -269,9 +293,13 @@ func (db *DB) ListFiles() ([]FileRecord, error) {
 
 	for rows.Next() {
 		var record FileRecord
-		err := rows.Scan(&record.Path, &record.Title, &record.Type, &record.ContentHash, &record.UpdatedAt, &record.Position)
+		var checklistJSON string
+		err := rows.Scan(&record.Path, &record.Title, &record.Type, &record.ContentHash, &record.UpdatedAt, &record.Position, &checklistJSON)
 		if err == nil {
 			record.FrontMatter = make(map[string]string)
+			if checklistJSON != "" {
+				_ = json.Unmarshal([]byte(checklistJSON), &record.ChecklistGroups)
+			}
 			records = append(records, record)
 		}
 	}

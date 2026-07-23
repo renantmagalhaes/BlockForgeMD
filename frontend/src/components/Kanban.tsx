@@ -32,6 +32,11 @@ interface FileRecord {
   content?: string
   frontMatter?: Record<string, string>
   position?: number
+  // Precomputed server-side from the file's body (see backend parser.go) so
+  // board cards can show checklist progress without the bulk /api/files
+  // listing having to ship every file's full content — see checklistGroups
+  // usage below for the client-side fallback when content IS present.
+  checklistGroups?: { done: boolean; text: string }[][]
 }
 
 // Groups checkbox lines into separate checklists — each contiguous run of
@@ -2424,7 +2429,7 @@ const Kanban: React.FC<KanbanProps> = ({
                       </div>
 
                       {/* Checklist progress — one bar + toggle per separate checklist */}
-                      {parseChecklistGroups(task.content || '').map((items, groupIdx) => {
+                      {(task.checklistGroups ?? parseChecklistGroups(task.content || '')).map((items, groupIdx) => {
                         const done  = items.filter(i => i.done).length
                         const total = items.length
                         const pct   = total ? (done / total) * 100 : 0

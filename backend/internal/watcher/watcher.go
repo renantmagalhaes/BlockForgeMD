@@ -103,8 +103,18 @@ func (w *Watcher) isLocked(relPath string) bool {
 	return true
 }
 
+// checklistBackfillSetting gates a one-time full reindex the first time a
+// build with checklist-group support starts against an existing cache.db —
+// otherwise indexFile's hash-skip below (a deliberate startup-performance
+// optimization: don't re-parse/re-upsert files whose content hasn't
+// changed) would leave every already-indexed, untouched file's checklist
+// column empty forever, since their hash still matches what's on disk.
+const checklistBackfillSetting = "checklist_backfill_v1"
+
 func (w *Watcher) initialIndex() {
 	log.Printf("Starting initial workspace indexing of %s...", w.rootPath)
+	backfillDone, _ := w.db.GetSetting(checklistBackfillSetting, "")
+	forceReindex := backfillDone != "done"
 	count := 0
 	err := filepath.Walk(w.rootPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -124,7 +134,7 @@ func (w *Watcher) initialIndex() {
 		}
 
 		if isSupportedFile(relPath) {
-			if err := w.indexFile(relPath); err == nil {
+			if err := w.indexFile(relPath, forceReindex); err == nil {
 				count++
 			} else {
 				log.Printf("Failed to index %s: %v", relPath, err)
@@ -137,9 +147,12 @@ func (w *Watcher) initialIndex() {
 	} else {
 		log.Printf("Indexed %d files successfully.", count)
 	}
+	if forceReindex {
+		_ = w.db.SetSetting(checklistBackfillSetting, "done")
+	}
 }
 
-func (w *Watcher) indexFile(relPath string) error {
+func (w *Watcher) indexFile(relPath string, force bool) error {
 	res, err := parser.ParseFile(w.rootPath, relPath)
 	if err != nil {
 		return err
@@ -147,7 +160,7 @@ func (w *Watcher) indexFile(relPath string) error {
 
 	// Check if already in DB, content matches hash, and content column is populated
 	existing, err := w.db.GetFile(relPath)
-	if err == nil && existing.ContentHash == res.Record.ContentHash && existing.Content != "" {
+	if !force && err == nil && existing.ContentHash == res.Record.ContentHash && existing.Content != "" {
 		// No changes, skip DB write
 		return nil
 	}
@@ -167,7 +180,7 @@ func (w *Watcher) indexFile(relPath string) error {
 // IndexFile parses a file and immediately upserts it into the DB.
 // Used by restore to bypass the fsnotify delay and update the DB synchronously.
 func (w *Watcher) IndexFile(relPath string) error {
-	return w.indexFile(relPath)
+	return w.indexFile(relPath, false)
 }
 
 // isTrashPath returns true when relPath lives inside a Trash directory
@@ -228,7 +241,7 @@ func (w *Watcher) watchLoop() {
 				log.Printf("Watcher: file modified/created: %s", relPath)
 				// Defer a tiny bit to allow file writes to complete
 				time.AfterFunc(50*time.Millisecond, func() {
-					if err := w.indexFile(relPath); err != nil {
+					if err := w.indexFile(relPath, false); err != nil {
 						log.Printf("Watcher: failed to index %s: %v", relPath, err)
 					}
 				})

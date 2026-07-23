@@ -20,6 +20,12 @@ import (
 var (
 	headerRegexp = regexp.MustCompile(`^#\s+(.+)$`)
 	taskRegexp   = regexp.MustCompile(`^\s*[\-\*]\s+\[([ xX])\]\s+(.+)$`)
+	// Mirrors the frontend's parseChecklistGroups (Kanban.tsx) exactly, so a
+	// board card's progress count matches what client-side parsing would
+	// have shown when full content was available — more lenient than
+	// taskRegexp above (no required "-"/"*" bullet) since that's what the
+	// frontend regex accepts.
+	checklistLineRegexp = regexp.MustCompile(`(?i)^[\s>-]*\[([x ])\]\s+(.+)`)
 )
 
 type ParseResult struct {
@@ -135,12 +141,13 @@ func ParseFile(rootPath, relPath string) (*ParseResult, error) {
 
 	// Build file record
 	record := db.FileRecord{
-		Path:        relPath,
-		Title:       title,
-		Type:        fileType,
-		ContentHash: contentHash,
-		UpdatedAt:   updatedAt,
-		Content:     searchContent,
+		Path:            relPath,
+		Title:           title,
+		Type:            fileType,
+		ContentHash:     contentHash,
+		UpdatedAt:       updatedAt,
+		Content:         searchContent,
+		ChecklistGroups: parseChecklistGroups(bodyLines),
 	}
 
 	// If it is a canvas type, double check we have Excalidraw or Draw.io config
@@ -151,6 +158,31 @@ func ParseFile(rootPath, relPath string) (*ParseResult, error) {
 		FrontMatter: fm,
 		Tasks:       tasks,
 	}, nil
+}
+
+// parseChecklistGroups groups contiguous `- [ ]`/`- [x]` lines into separate
+// checklists — each run broken by any non-checkbox line (blank, heading,
+// paragraph, ...) starts a new group. Mirrors the frontend's identically
+// named function in Kanban.tsx so board cards and the open-card editor
+// agree on checklist boundaries.
+func parseChecklistGroups(lines []string) [][]db.ChecklistItem {
+	var groups [][]db.ChecklistItem
+	var current []db.ChecklistItem
+	for _, line := range lines {
+		if match := checklistLineRegexp.FindStringSubmatch(line); len(match) > 2 {
+			current = append(current, db.ChecklistItem{
+				Done: strings.ToLower(match[1]) == "x",
+				Text: strings.TrimSpace(match[2]),
+			})
+		} else if len(current) > 0 {
+			groups = append(groups, current)
+			current = nil
+		}
+	}
+	if len(current) > 0 {
+		groups = append(groups, current)
+	}
+	return groups
 }
 
 func fmtTaskID(path string, line int) string {
