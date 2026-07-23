@@ -1309,7 +1309,14 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	appBgType, _ := s.db.GetSetting("app_bg_type", "color")
 	appBgColor, _ := s.db.GetSetting("app_bg_color", "")
 	appBgImage, _ := s.db.GetSetting("app_bg_image", "")
-	docHeaderTextColor, _ := s.db.GetSetting("doc_header_text_color", "")
+	// Sidebar/header colors are saved per-theme (dark vs light each keep
+	// their own customization) — the plain, un-suffixed keys are the
+	// pre-existing single shared value, kept only as the seed default for
+	// whichever theme variant hasn't been saved yet, so upgrading doesn't
+	// silently drop a color someone already picked.
+	docHeaderTextColorLegacy, _ := s.db.GetSetting("doc_header_text_color", "")
+	docHeaderTextColorDark, _ := s.db.GetSetting("doc_header_text_color_dark", docHeaderTextColorLegacy)
+	docHeaderTextColorLight, _ := s.db.GetSetting("doc_header_text_color_light", docHeaderTextColorLegacy)
 	autosaveDelayStr, _ := s.db.GetSetting("autosave_delay", "1500")
 	autosaveDelay, err3 := strconv.Atoi(autosaveDelayStr)
 	if err3 != nil || autosaveDelay < 100 {
@@ -1320,8 +1327,12 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	if err4 != nil || historyInterval < 0 {
 		historyInterval = 0
 	}
-	sidebarBgColor, _ := s.db.GetSetting("sidebar_bg_color", "")
-	sidebarTextColor, _ := s.db.GetSetting("sidebar_text_color", "")
+	sidebarBgColorLegacy, _ := s.db.GetSetting("sidebar_bg_color", "")
+	sidebarBgColorDark, _ := s.db.GetSetting("sidebar_bg_color_dark", sidebarBgColorLegacy)
+	sidebarBgColorLight, _ := s.db.GetSetting("sidebar_bg_color_light", sidebarBgColorLegacy)
+	sidebarTextColorLegacy, _ := s.db.GetSetting("sidebar_text_color", "")
+	sidebarTextColorDark, _ := s.db.GetSetting("sidebar_text_color_dark", sidebarTextColorLegacy)
+	sidebarTextColorLight, _ := s.db.GetSetting("sidebar_text_color_light", sidebarTextColorLegacy)
 	globalLayoutOverride, _ := s.db.GetSetting("global_layout_override", "per-page")
 	globalColumnWidthOverride, _ := s.db.GetSetting("global_column_width_override", "per-page")
 	dateFormat, _ := s.db.GetSetting("date_format", "long")
@@ -1344,11 +1355,14 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"app_bg_type":                  appBgType,
 		"app_bg_color":                 appBgColor,
 		"app_bg_image":                 appBgImage,
-		"doc_header_text_color":        docHeaderTextColor,
+		"doc_header_text_color_dark":   docHeaderTextColorDark,
+		"doc_header_text_color_light":  docHeaderTextColorLight,
 		"autosave_delay":               autosaveDelay,
 		"history_interval":             historyInterval,
-		"sidebar_bg_color":             sidebarBgColor,
-		"sidebar_text_color":           sidebarTextColor,
+		"sidebar_bg_color_dark":        sidebarBgColorDark,
+		"sidebar_bg_color_light":       sidebarBgColorLight,
+		"sidebar_text_color_dark":      sidebarTextColorDark,
+		"sidebar_text_color_light":     sidebarTextColorLight,
 		"global_layout_override":       globalLayoutOverride,
 		"global_column_width_override": globalColumnWidthOverride,
 		"date_format":                  dateFormat,
@@ -1370,12 +1384,15 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		GlassSidebarEnabled       *bool   `json:"glass_sidebar_enabled"`
 		AutosaveDelay             *int    `json:"autosave_delay"`
 		HistoryInterval           *int    `json:"history_interval"`
-		SidebarBgColor            *string `json:"sidebar_bg_color"`
-		SidebarTextColor          *string `json:"sidebar_text_color"`
+		SidebarBgColorDark        *string `json:"sidebar_bg_color_dark"`
+		SidebarBgColorLight       *string `json:"sidebar_bg_color_light"`
+		SidebarTextColorDark      *string `json:"sidebar_text_color_dark"`
+		SidebarTextColorLight     *string `json:"sidebar_text_color_light"`
 		AppBgType                 string  `json:"app_bg_type"`
 		AppBgColor                *string `json:"app_bg_color"`
 		AppBgImage                *string `json:"app_bg_image"`
-		DocHeaderTextColor        *string `json:"doc_header_text_color"`
+		DocHeaderTextColorDark    *string `json:"doc_header_text_color_dark"`
+		DocHeaderTextColorLight   *string `json:"doc_header_text_color_light"`
 		GlobalLayoutOverride      string  `json:"global_layout_override"`
 		GlobalColumnWidthOverride string  `json:"global_column_width_override"`
 		DateFormat                string  `json:"date_format"`
@@ -1488,24 +1505,46 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if req.SidebarBgColor != nil {
-		if *req.SidebarBgColor != "" && !hexColorRe.MatchString(*req.SidebarBgColor) {
-			http.Error(w, "invalid sidebar_bg_color value", http.StatusBadRequest)
+	if req.SidebarBgColorDark != nil {
+		if *req.SidebarBgColorDark != "" && !hexColorRe.MatchString(*req.SidebarBgColorDark) {
+			http.Error(w, "invalid sidebar_bg_color_dark value", http.StatusBadRequest)
 			return
 		}
-		if err := s.db.SetSetting("sidebar_bg_color", *req.SidebarBgColor); err != nil {
-			http.Error(w, fmt.Sprintf("failed to save sidebar_bg_color: %v", err), http.StatusInternalServerError)
+		if err := s.db.SetSetting("sidebar_bg_color_dark", *req.SidebarBgColorDark); err != nil {
+			http.Error(w, fmt.Sprintf("failed to save sidebar_bg_color_dark: %v", err), http.StatusInternalServerError)
 			return
 		}
 	}
 
-	if req.SidebarTextColor != nil {
-		if *req.SidebarTextColor != "" && !hexColorRe.MatchString(*req.SidebarTextColor) {
-			http.Error(w, "invalid sidebar_text_color value", http.StatusBadRequest)
+	if req.SidebarBgColorLight != nil {
+		if *req.SidebarBgColorLight != "" && !hexColorRe.MatchString(*req.SidebarBgColorLight) {
+			http.Error(w, "invalid sidebar_bg_color_light value", http.StatusBadRequest)
 			return
 		}
-		if err := s.db.SetSetting("sidebar_text_color", *req.SidebarTextColor); err != nil {
-			http.Error(w, fmt.Sprintf("failed to save sidebar_text_color: %v", err), http.StatusInternalServerError)
+		if err := s.db.SetSetting("sidebar_bg_color_light", *req.SidebarBgColorLight); err != nil {
+			http.Error(w, fmt.Sprintf("failed to save sidebar_bg_color_light: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if req.SidebarTextColorDark != nil {
+		if *req.SidebarTextColorDark != "" && !hexColorRe.MatchString(*req.SidebarTextColorDark) {
+			http.Error(w, "invalid sidebar_text_color_dark value", http.StatusBadRequest)
+			return
+		}
+		if err := s.db.SetSetting("sidebar_text_color_dark", *req.SidebarTextColorDark); err != nil {
+			http.Error(w, fmt.Sprintf("failed to save sidebar_text_color_dark: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if req.SidebarTextColorLight != nil {
+		if *req.SidebarTextColorLight != "" && !hexColorRe.MatchString(*req.SidebarTextColorLight) {
+			http.Error(w, "invalid sidebar_text_color_light value", http.StatusBadRequest)
+			return
+		}
+		if err := s.db.SetSetting("sidebar_text_color_light", *req.SidebarTextColorLight); err != nil {
+			http.Error(w, fmt.Sprintf("failed to save sidebar_text_color_light: %v", err), http.StatusInternalServerError)
 			return
 		}
 	}
@@ -1535,13 +1574,24 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if req.DocHeaderTextColor != nil {
-		if *req.DocHeaderTextColor != "" && !hexColorRe.MatchString(*req.DocHeaderTextColor) {
-			http.Error(w, "invalid doc_header_text_color value", http.StatusBadRequest)
+	if req.DocHeaderTextColorDark != nil {
+		if *req.DocHeaderTextColorDark != "" && !hexColorRe.MatchString(*req.DocHeaderTextColorDark) {
+			http.Error(w, "invalid doc_header_text_color_dark value", http.StatusBadRequest)
 			return
 		}
-		if err := s.db.SetSetting("doc_header_text_color", *req.DocHeaderTextColor); err != nil {
-			http.Error(w, fmt.Sprintf("failed to save doc_header_text_color: %v", err), http.StatusInternalServerError)
+		if err := s.db.SetSetting("doc_header_text_color_dark", *req.DocHeaderTextColorDark); err != nil {
+			http.Error(w, fmt.Sprintf("failed to save doc_header_text_color_dark: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if req.DocHeaderTextColorLight != nil {
+		if *req.DocHeaderTextColorLight != "" && !hexColorRe.MatchString(*req.DocHeaderTextColorLight) {
+			http.Error(w, "invalid doc_header_text_color_light value", http.StatusBadRequest)
+			return
+		}
+		if err := s.db.SetSetting("doc_header_text_color_light", *req.DocHeaderTextColorLight); err != nil {
+			http.Error(w, fmt.Sprintf("failed to save doc_header_text_color_light: %v", err), http.StatusInternalServerError)
 			return
 		}
 	}

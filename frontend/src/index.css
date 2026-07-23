@@ -71,7 +71,10 @@
   --txt-1: #0f172a;
   --txt-2: #334155;
   --txt-3: #64748b;
-  --txt-4: #94a3b8;
+  /* Was #94a3b8 — ~2.5:1 on white, well under WCAG AA even for large text.
+     Everything mapped to --txt-4 (sidebar hints, placeholders, secondary
+     labels) was reading as barely-there gray-on-white. */
+  --txt-4: #7c8aa0;
 
   --accent:         #6366f1;
   --accent-faint:   rgba(99,102,241,0.08);
@@ -453,6 +456,11 @@ body {
 .bf-sidebar .text-slate-600 { color: var(--sidebar-text-override, var(--txt-4)) !important; }
 .bf-sidebar [class*="border-slate"] { border-color: var(--border-1) !important; }
 
+/* Rail icons (Favorites/Documents/Boards/Canvas/Mind Maps) at rest — see
+   RAIL_INACTIVE_CLASS in App.tsx for why this needs to be its own class
+   rather than relying on a text-slate-* substring match. */
+.bf-rail-icon { color: var(--sidebar-text-override, var(--txt-3)) !important; }
+
 /* Sidebar utility icon buttons (small +/edit/move buttons near tree items) */
 .bf-sidebar button[class*="hover:bg-slate"]:hover {
   background-color: var(--bg-hover) !important;
@@ -484,6 +492,52 @@ body {
   border-color: var(--border-2) !important;
   box-shadow: var(--shadow-md) !important;
 }
+
+/* Reusable theming for the many modal/dialog/popover "cards" across the app
+   (alert/confirm/prompt, Settings, Create/Rename item, Search, Workspace
+   rename/create, the calendar popovers) that were all hand-built with
+   hardcoded dark Tailwind classes (bg-[#161b22], text-slate-100, etc.) and
+   never touched by the light-theme retrofit. Add this class to a modal's
+   card element (not its backdrop — a dim overlay is fine in either theme)
+   and it re-themes the common hardcoded patterns inside it via the same
+   attribute-substring convention .bf-sidebar/.bf-properties already use. */
+.bf-popover-card {
+  background-color: var(--bg-elevated) !important;
+  border-color: var(--border-2) !important;
+  color: var(--txt-1) !important;
+}
+.bf-popover-card [class*="text-slate-100"],
+.bf-popover-card [class*="text-slate-200"] { color: var(--txt-1) !important; }
+.bf-popover-card [class*="text-slate-300"],
+.bf-popover-card [class*="text-slate-350"] { color: var(--txt-2) !important; }
+.bf-popover-card [class*="text-slate-400"],
+.bf-popover-card [class*="text-slate-500"] { color: var(--txt-3) !important; }
+.bf-popover-card [class*="text-slate-600"] { color: var(--txt-4) !important; }
+.bf-popover-card [class*="text-violet-4"] { color: var(--accent) !important; }
+.bf-popover-card [class*="hover:text-violet"]:hover { color: var(--accent) !important; }
+/* Selected-item highlight (e.g. the "/" slash-command menu's active row) —
+   bg/border-violet-6/5 aren't covered by the generic bg-slate-8/border-slate
+   substrings above since they're a distinct accent tint, not a neutral
+   surface color. */
+.bf-popover-card [class*="bg-violet-6"] { background-color: var(--accent-faint) !important; }
+.bf-popover-card [class*="border-violet-5"] { border-color: var(--accent-border) !important; }
+.bf-popover-card [class*="border-slate"],
+.bf-popover-card [class*="border-t"],
+.bf-popover-card [class*="border-b"] { border-color: var(--border-1) !important; }
+.bf-popover-card [class*="bg-slate-9"],
+.bf-popover-card [class*="bg-slate-8"],
+.bf-popover-card [class*="bg-\["] { background-color: var(--bg-input) !important; }
+.bf-popover-card button[class*="hover:bg-slate"]:hover,
+.bf-popover-card div[class*="hover:bg-slate"]:hover { background-color: var(--bg-hover) !important; }
+.bf-popover-card button[class*="hover:text-white"]:hover,
+.bf-popover-card button[class*="hover:text-slate"]:hover { color: var(--txt-1) !important; }
+.bf-popover-card input,
+.bf-popover-card select {
+  background-color: var(--bg-input) !important;
+  border-color: var(--border-1) !important;
+  color: var(--txt-1) !important;
+}
+.bf-popover-card input::placeholder { color: var(--txt-4) !important; }
 
 /* ══════════════════════════════════════════════════════
    PROSEMIRROR — PREMIUM DOCUMENT TYPOGRAPHY
@@ -733,6 +787,62 @@ body {
 [data-theme="light"] .hljs-selector-pseudo { color: #0366d6; }
 [data-theme="light"] .hljs-comment,
 [data-theme="light"] .hljs-quote { color: #6a737d; }
+/* These 4 groups previously fell through to the One Dark (dark-tuned)
+   colors verbatim — .hljs-literal's cyan in particular was unreadably
+   low-contrast on a light background. */
+[data-theme="light"] .hljs-doctag,
+[data-theme="light"] .hljs-keyword,
+[data-theme="light"] .hljs-formula { color: #d73a49; }
+[data-theme="light"] .hljs-section,
+[data-theme="light"] .hljs-name,
+[data-theme="light"] .hljs-selector-tag,
+[data-theme="light"] .hljs-deletion,
+[data-theme="light"] .hljs-subst { color: #6f42c1; }
+[data-theme="light"] .hljs-literal { color: #005cc5; }
+[data-theme="light"] .hljs-attr,
+[data-theme="light"] .hljs-variable,
+[data-theme="light"] .hljs-template-variable,
+[data-theme="light"] .hljs-type,
+[data-theme="light"] .hljs-selector-class,
+[data-theme="light"] .hljs-selector-id,
+[data-theme="light"] .hljs-selector-attr,
+[data-theme="light"] .hljs-number,
+[data-theme="light"] .hljs-meta { color: #e36209; }
+
+/* Code blocks (the /code slash command, .code-block-container) were built
+   entirely with hardcoded dark colors (bg-[#0d1117]/bg-[#161b22]/
+   text-slate-100) with no light-theme pass at all. Reuses the same GitHub-
+   light-style palette already used for print, for visual consistency
+   between the editor and an exported PDF. */
+[data-theme="light"] .code-block-container {
+  background-color: #f6f8fa !important;
+  border-color: #d0d7de !important;
+}
+[data-theme="light"] .code-block-container > div:first-child {
+  background-color: #eaeef2 !important;
+  border-color: #d0d7de !important;
+}
+[data-theme="light"] .code-block-container select {
+  color: #57606a !important;
+}
+[data-theme="light"] .code-block-container select option {
+  background-color: #f6f8fa !important;
+  color: #24292f !important;
+}
+[data-theme="light"] .code-block-container pre,
+[data-theme="light"] .code-block-container code {
+  color: #24292f !important;
+}
+[data-theme="light"] .code-block-container [class*="text-slate-500"] { color: #6e7781 !important; }
+[data-theme="light"] .code-block-container button[class*="bg-slate-8"] {
+  background-color: #eaeef2 !important;
+  color: #57606a !important;
+  border-color: transparent !important;
+}
+[data-theme="light"] .code-block-container button[class*="hover:bg-slate-8"]:hover {
+  background-color: #d0d7de !important;
+  color: #24292f !important;
+}
 
 /* ══════════════════════════════════════════════════════
    MISC COMPONENTS

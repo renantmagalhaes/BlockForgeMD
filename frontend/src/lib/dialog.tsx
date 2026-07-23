@@ -65,7 +65,7 @@ export function DialogHost() {
         onMouseDown={(e) => { if (e.target === e.currentTarget) dismissViaBackdrop() }}
       >
         <motion.div
-          className="bg-[#161b22] border border-slate-800 rounded-2xl max-w-sm w-full shadow-2xl p-6"
+          className="bf-popover-card bg-[#161b22] border border-slate-800 rounded-2xl max-w-sm w-full shadow-2xl p-6"
           initial={{ scale: 0.95, y: 10 }}
           animate={{ scale: 1, y: 0 }}
           exit={{ scale: 0.95, y: 10 }}

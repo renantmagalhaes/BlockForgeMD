@@ -70,7 +70,15 @@ import BootstrapScreen from './components/BootstrapScreen'
 // Active rail icon: a bright circular glow — per-section color — that fades
 // outward from the center, rather than a flat tinted square.
 const RAIL_ACTIVE_CLASS = 'text-white rounded-full'
-const RAIL_INACTIVE_CLASS = 'text-white/90 hover:text-white hover:bg-slate-800/60 rounded-lg'
+// Was 'text-white/90 ...' — a hardcoded near-white that only read against
+// the dark sidebar background. In light theme + non-glass mode (an opaque
+// var(--bg-surface) sidebar), that left the icon invisible at rest and
+// visible only on :hover (the hover classes below map to theme vars via
+// the .bf-sidebar overrides in index.css, so hover always worked). Glass
+// mode masked this by putting a blurred dark wallpaper behind the icon
+// instead of a flat light surface. bf-rail-icon is theme-aware for both
+// states.
+const RAIL_INACTIVE_CLASS = 'bf-rail-icon hover:text-white hover:bg-slate-800/60 rounded-lg'
 const RAIL_GLOW_RGB = {
   favorites: '139,92,246', // violet
   documents: '59,130,246', // blue
@@ -849,12 +857,29 @@ const App: React.FC = () => {
   // on <html> so .bf-sidebar's var(--sidebar-bg-override, var(--bg-surface))
   // fallback chain resolves correctly (see index.css for why they're never
   // declared in the stylesheet itself).
-  const [sidebarBgColor, setSidebarBgColorState] = useState<string>(
-    () => localStorage.getItem('bf-sidebar-bg') || ''
+  //
+  // Saved per-theme (dark and light each keep their own customization) —
+  // these used to be a single shared value, so switching theme carried
+  // whichever color you'd picked for the OTHER theme along with it. Each
+  // color is tracked as a dark/light pair; `sidebarBgColor`/`sidebarTextColor`/
+  // `docHeaderTextColor` below are just the one matching the active theme,
+  // so the rest of the app (and the Settings-modal color pickers) can keep
+  // reading/writing them exactly as before — switching `theme` alone now
+  // swaps which saved color applies, with nothing else to change.
+  const [sidebarBgColorDark, setSidebarBgColorDarkState] = useState<string>(
+    () => localStorage.getItem('bf-sidebar-bg-dark') || localStorage.getItem('bf-sidebar-bg') || ''
   )
-  const [sidebarTextColor, setSidebarTextColorState] = useState<string>(
-    () => localStorage.getItem('bf-sidebar-text') || ''
+  const [sidebarBgColorLight, setSidebarBgColorLightState] = useState<string>(
+    () => localStorage.getItem('bf-sidebar-bg-light') || localStorage.getItem('bf-sidebar-bg') || ''
   )
+  const [sidebarTextColorDark, setSidebarTextColorDarkState] = useState<string>(
+    () => localStorage.getItem('bf-sidebar-text-dark') || localStorage.getItem('bf-sidebar-text') || ''
+  )
+  const [sidebarTextColorLight, setSidebarTextColorLightState] = useState<string>(
+    () => localStorage.getItem('bf-sidebar-text-light') || localStorage.getItem('bf-sidebar-text') || ''
+  )
+  const sidebarBgColor = theme === 'light' ? sidebarBgColorLight : sidebarBgColorDark
+  const sidebarTextColor = theme === 'light' ? sidebarTextColorLight : sidebarTextColorDark
   useEffect(() => {
     if (sidebarBgColor) document.documentElement.style.setProperty('--sidebar-bg-override', sidebarBgColor)
     else document.documentElement.style.removeProperty('--sidebar-bg-override')
@@ -865,10 +890,14 @@ const App: React.FC = () => {
   }, [sidebarTextColor])
 
   // Document header (Home / file path / Delete) text color — same
-  // override-variable pattern as the sidebar colors above.
-  const [docHeaderTextColor, setDocHeaderTextColorState] = useState<string>(
-    () => localStorage.getItem('bf-doc-header-text') || ''
+  // override-variable pattern (and per-theme pairing) as the sidebar colors above.
+  const [docHeaderTextColorDark, setDocHeaderTextColorDarkState] = useState<string>(
+    () => localStorage.getItem('bf-doc-header-text-dark') || localStorage.getItem('bf-doc-header-text') || ''
   )
+  const [docHeaderTextColorLight, setDocHeaderTextColorLightState] = useState<string>(
+    () => localStorage.getItem('bf-doc-header-text-light') || localStorage.getItem('bf-doc-header-text') || ''
+  )
+  const docHeaderTextColor = theme === 'light' ? docHeaderTextColorLight : docHeaderTextColorDark
   useEffect(() => {
     if (docHeaderTextColor) document.documentElement.style.setProperty('--doc-header-text-override', docHeaderTextColor)
     else document.documentElement.style.removeProperty('--doc-header-text-override')
@@ -910,22 +939,32 @@ const App: React.FC = () => {
   }
 
   const handleSetSidebarBgColor = (c: string) => {
-    setSidebarBgColorState(c)
-    localStorage.setItem('bf-sidebar-bg', c)
+    if (theme === 'light') {
+      setSidebarBgColorLightState(c)
+      localStorage.setItem('bf-sidebar-bg-light', c)
+    } else {
+      setSidebarBgColorDarkState(c)
+      localStorage.setItem('bf-sidebar-bg-dark', c)
+    }
     fetch(`${API_BASE}/api/settings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sidebar_bg_color: c }),
+      body: JSON.stringify(theme === 'light' ? { sidebar_bg_color_light: c } : { sidebar_bg_color_dark: c }),
     }).catch(e => console.error('Failed to save sidebar_bg_color', e))
   }
 
   const handleSetSidebarTextColor = (c: string) => {
-    setSidebarTextColorState(c)
-    localStorage.setItem('bf-sidebar-text', c)
+    if (theme === 'light') {
+      setSidebarTextColorLightState(c)
+      localStorage.setItem('bf-sidebar-text-light', c)
+    } else {
+      setSidebarTextColorDarkState(c)
+      localStorage.setItem('bf-sidebar-text-dark', c)
+    }
     fetch(`${API_BASE}/api/settings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sidebar_text_color: c }),
+      body: JSON.stringify(theme === 'light' ? { sidebar_text_color_light: c } : { sidebar_text_color_dark: c }),
     }).catch(e => console.error('Failed to save sidebar_text_color', e))
   }
 
@@ -1618,9 +1657,13 @@ const App: React.FC = () => {
           setAppBgImageState(data.app_bg_image)
           localStorage.setItem('bf-app-bg-image', data.app_bg_image)
         }
-        if (typeof data?.doc_header_text_color === 'string') {
-          setDocHeaderTextColorState(data.doc_header_text_color)
-          localStorage.setItem('bf-doc-header-text', data.doc_header_text_color)
+        if (typeof data?.doc_header_text_color_dark === 'string') {
+          setDocHeaderTextColorDarkState(data.doc_header_text_color_dark)
+          localStorage.setItem('bf-doc-header-text-dark', data.doc_header_text_color_dark)
+        }
+        if (typeof data?.doc_header_text_color_light === 'string') {
+          setDocHeaderTextColorLightState(data.doc_header_text_color_light)
+          localStorage.setItem('bf-doc-header-text-light', data.doc_header_text_color_light)
         }
         if (typeof data?.autosave_delay === 'number' && data.autosave_delay >= 100) {
           setAutosaveDelay(data.autosave_delay)
@@ -1630,13 +1673,21 @@ const App: React.FC = () => {
           setHistoryInterval(data.history_interval)
           setHistoryIntervalInput(data.history_interval.toString())
         }
-        if (typeof data?.sidebar_bg_color === 'string') {
-          setSidebarBgColorState(data.sidebar_bg_color)
-          localStorage.setItem('bf-sidebar-bg', data.sidebar_bg_color)
+        if (typeof data?.sidebar_bg_color_dark === 'string') {
+          setSidebarBgColorDarkState(data.sidebar_bg_color_dark)
+          localStorage.setItem('bf-sidebar-bg-dark', data.sidebar_bg_color_dark)
         }
-        if (typeof data?.sidebar_text_color === 'string') {
-          setSidebarTextColorState(data.sidebar_text_color)
-          localStorage.setItem('bf-sidebar-text', data.sidebar_text_color)
+        if (typeof data?.sidebar_bg_color_light === 'string') {
+          setSidebarBgColorLightState(data.sidebar_bg_color_light)
+          localStorage.setItem('bf-sidebar-bg-light', data.sidebar_bg_color_light)
+        }
+        if (typeof data?.sidebar_text_color_dark === 'string') {
+          setSidebarTextColorDarkState(data.sidebar_text_color_dark)
+          localStorage.setItem('bf-sidebar-text-dark', data.sidebar_text_color_dark)
+        }
+        if (typeof data?.sidebar_text_color_light === 'string') {
+          setSidebarTextColorLightState(data.sidebar_text_color_light)
+          localStorage.setItem('bf-sidebar-text-light', data.sidebar_text_color_light)
         }
         if (typeof data?.global_layout_override === 'string') {
           setGlobalLayoutOverride(data.global_layout_override)
@@ -1730,12 +1781,17 @@ const App: React.FC = () => {
   }
 
   const handleSetDocHeaderTextColor = (c: string) => {
-    setDocHeaderTextColorState(c)
-    localStorage.setItem('bf-doc-header-text', c)
+    if (theme === 'light') {
+      setDocHeaderTextColorLightState(c)
+      localStorage.setItem('bf-doc-header-text-light', c)
+    } else {
+      setDocHeaderTextColorDarkState(c)
+      localStorage.setItem('bf-doc-header-text-dark', c)
+    }
     fetch(`${API_BASE}/api/settings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ doc_header_text_color: c }),
+      body: JSON.stringify(theme === 'light' ? { doc_header_text_color_light: c } : { doc_header_text_color_dark: c }),
     }).catch(e => console.error('Failed to save doc_header_text_color', e))
   }
 
@@ -3457,7 +3513,7 @@ const App: React.FC = () => {
               exit={{ opacity: 0, y: 8 }}
               transition={{ duration: 0.18 }}
             >
-              <div className="max-w-md w-full bg-[#161b22]/40 border border-slate-800/80 rounded-2xl p-8 backdrop-blur-md shadow-2xl flex flex-col items-center text-center">
+              <div className="bf-popover-card max-w-md w-full bg-[#161b22]/40 border border-slate-800/80 rounded-2xl p-8 backdrop-blur-md shadow-2xl flex flex-col items-center text-center">
                 <div className="h-16 w-16 bg-rose-600/10 border border-rose-500/25 rounded-2xl flex items-center justify-center text-rose-400 shadow-xl shadow-rose-500/5 mb-6">
                   <LayoutGrid size={32} />
                 </div>
@@ -3592,7 +3648,7 @@ const App: React.FC = () => {
               exit={{ opacity: 0, y: 8 }}
               transition={{ duration: 0.18 }}
             >
-              <div className="max-w-md w-full bg-[#161b22]/40 border border-slate-800/80 rounded-2xl p-8 backdrop-blur-md shadow-2xl flex flex-col items-center text-center">
+              <div className="bf-popover-card max-w-md w-full bg-[#161b22]/40 border border-slate-800/80 rounded-2xl p-8 backdrop-blur-md shadow-2xl flex flex-col items-center text-center">
                 <div className="h-16 w-16 bg-violet-600/10 border border-violet-500/25 rounded-2xl flex items-center justify-center text-violet-400 shadow-xl shadow-violet-500/5 mb-6">
                   <Layers size={32} />
                 </div>
@@ -3678,7 +3734,7 @@ const App: React.FC = () => {
             transition={{ duration: 0.15 }}
           >
             <motion.div
-              className="bg-[#161b22] border border-slate-800 rounded-2xl max-w-md w-full shadow-2xl p-6 overflow-hidden"
+              className="bf-popover-card bg-[#161b22] border border-slate-800 rounded-2xl max-w-md w-full shadow-2xl p-6 overflow-hidden"
               initial={{ scale: 0.95, y: 10 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.95, y: 10 }}
@@ -3755,7 +3811,7 @@ const App: React.FC = () => {
           transition={{ duration: 0.15 }}
         >
           <motion.div
-            className="bg-[#161b22] border border-slate-800 rounded-2xl max-w-sm w-full shadow-2xl p-6"
+            className="bf-popover-card bg-[#161b22] border border-slate-800 rounded-2xl max-w-sm w-full shadow-2xl p-6"
             initial={{ scale: 0.95, y: 10 }}
             animate={{ scale: 1, y: 0 }}
             exit={{ scale: 0.95, y: 10 }}
@@ -3829,7 +3885,7 @@ const App: React.FC = () => {
           onKeyDown={(e) => { if (e.key === 'Escape') setAdminModalOpen(false) }}
         >
           <motion.div
-            className="bg-[#161b22] border border-slate-800 rounded-2xl max-w-2xl w-full shadow-2xl p-6 overflow-hidden text-slate-200 flex flex-col h-[480px] max-h-[85vh]"
+            className="bf-popover-card bg-[#161b22] border border-slate-800 rounded-2xl max-w-2xl w-full shadow-2xl p-6 overflow-hidden text-slate-200 flex flex-col h-[480px] max-h-[85vh]"
             initial={{ scale: 0.95, y: 10 }}
             animate={{ scale: 1, y: 0 }}
             exit={{ scale: 0.95, y: 10 }}
@@ -4369,7 +4425,8 @@ const App: React.FC = () => {
                                 onChange={e => {
                                   const v = e.target.value
                                   if (v === '' || /^#[0-9a-fA-F]{6}$/.test(v)) handleSetSidebarBgColor(v)
-                                  else setSidebarBgColorState(v)
+                                  else if (theme === 'light') setSidebarBgColorLightState(v)
+                                  else setSidebarBgColorDarkState(v)
                                 }}
                                 className="w-full bg-[#0d1220] border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-violet-500 placeholder-slate-600 font-mono"
                               />
@@ -4403,7 +4460,8 @@ const App: React.FC = () => {
                                 onChange={e => {
                                   const v = e.target.value
                                   if (v === '' || /^#[0-9a-fA-F]{6}$/.test(v)) handleSetSidebarTextColor(v)
-                                  else setSidebarTextColorState(v)
+                                  else if (theme === 'light') setSidebarTextColorLightState(v)
+                                  else setSidebarTextColorDarkState(v)
                                 }}
                                 className="w-full bg-[#0d1220] border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-violet-500 placeholder-slate-600 font-mono"
                               />
@@ -4470,7 +4528,8 @@ const App: React.FC = () => {
                             onChange={e => {
                               const v = e.target.value
                               if (v === '' || /^#[0-9a-fA-F]{6}$/.test(v)) handleSetDocHeaderTextColor(v)
-                              else setDocHeaderTextColorState(v)
+                              else if (theme === 'light') setDocHeaderTextColorLightState(v)
+                              else setDocHeaderTextColorDarkState(v)
                             }}
                             className="w-full bg-[#0d1220] border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-violet-500 placeholder-slate-600 font-mono"
                           />
@@ -4655,7 +4714,7 @@ const App: React.FC = () => {
 
                   {/* Scroll-for-more hint — only shown while there's unscrolled content below */}
                   {settingsScrollable && (
-                    <div className="pointer-events-none absolute bottom-0 left-0 right-1 h-10 flex items-end justify-center pb-1 bg-gradient-to-t from-[#161b22] to-transparent">
+                    <div className="pointer-events-none absolute bottom-0 left-0 right-1 h-10 flex items-end justify-center pb-1 bg-gradient-to-t from-[var(--bg-elevated)] to-transparent">
                       <ChevronsDown size={13} className="text-slate-500 animate-bounce" />
                     </div>
                   )}
@@ -4700,7 +4759,7 @@ const App: React.FC = () => {
             exit={{ opacity: 0, scale: 0.94, y: -4 }}
             transition={{ duration: 0.1, ease: 'easeOut' }}
             style={{ position: 'fixed', top: `${contextMenu.y}px`, left: `${contextMenu.x}px`, zIndex: 99999 }}
-            className="w-52 bg-[#161b22] border border-slate-800 rounded-xl shadow-2xl p-1.5 flex flex-col space-y-0.5 no-scrollbar select-none"
+            className="bf-popover-card w-52 bg-[#161b22] border border-slate-800 rounded-xl shadow-2xl p-1.5 flex flex-col space-y-0.5 no-scrollbar select-none"
             onContextMenu={e => e.preventDefault()}
           >
             <div className="px-2.5 py-1 text-[9px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-850/60 mb-1 truncate">
@@ -4811,7 +4870,7 @@ const App: React.FC = () => {
           onMouseDown={() => setSearchOpen(false)}
         >
           <motion.div
-            className="bg-[#161b22] border border-slate-800 rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden flex flex-col max-h-[500px]"
+            className="bf-popover-card bg-[#161b22] border border-slate-800 rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden flex flex-col max-h-[500px]"
             initial={{ scale: 0.96, y: -12 }}
             animate={{ scale: 1, y: 0 }}
             exit={{ scale: 0.96, y: -12 }}
@@ -4973,7 +5032,7 @@ const App: React.FC = () => {
           onClick={() => setRenameWorkspaceTarget(null)}
         >
           <motion.div
-            className="bg-[#1c2433] border border-slate-700 rounded-2xl shadow-2xl p-6 w-80"
+            className="bf-popover-card bg-[#1c2433] border border-slate-700 rounded-2xl shadow-2xl p-6 w-80"
             initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
             onClick={e => e.stopPropagation()}
           >
@@ -5015,7 +5074,7 @@ const App: React.FC = () => {
           onClick={() => setNewWorkspaceModal(false)}
         >
           <motion.div
-            className="bg-[#1c2433] border border-slate-700 rounded-2xl shadow-2xl p-6 w-80"
+            className="bf-popover-card bg-[#1c2433] border border-slate-700 rounded-2xl shadow-2xl p-6 w-80"
             initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
             onClick={e => e.stopPropagation()}
           >

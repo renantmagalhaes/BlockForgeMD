@@ -1982,7 +1982,7 @@ const Kanban: React.FC<KanbanProps> = ({
               onChange={e => setBoardNameVal(e.target.value)}
               onBlur={saveBoardName}
               onKeyDown={e => { if (e.key === 'Enter') saveBoardName(); if (e.key === 'Escape') setEditingBoardName(false) }}
-              className="text-2xl font-bold bg-transparent border-b border-violet-500 outline-none text-slate-100 w-64"
+              className="text-2xl font-bold bg-transparent border-b border-violet-500 outline-none text-[var(--txt-1)] w-64"
             />
           ) : (
             <h1

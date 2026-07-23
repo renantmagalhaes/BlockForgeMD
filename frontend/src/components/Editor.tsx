@@ -4726,7 +4726,7 @@ const CalendarPopover: React.FC<{
         left: anchorRect.left,
         zIndex: 9999
       }}
-      className="w-64 bg-[#161b22] border border-slate-700/80 rounded-xl shadow-2xl p-3 select-none animate-in fade-in zoom-in-95 duration-100"
+      className="bf-popover-card w-64 bg-[#161b22] border border-slate-700/80 rounded-xl shadow-2xl p-3 select-none animate-in fade-in zoom-in-95 duration-100"
     >
       <div className="flex items-center justify-between mb-2 px-0.5">
         <button
@@ -11942,7 +11942,7 @@ export const Editor: React.FC<
                           (o) => !o
                         )
                       }
-                      className="no-print text-[11px] px-2 py-1 bg-slate-800/60 text-slate-500 hover:text-slate-300 rounded-lg transition cursor-pointer"
+                      className="no-print text-[11px] px-2 py-1 bg-[var(--bg-elevated)] text-[var(--txt-3)] hover:text-[var(--txt-1)] rounded-lg transition cursor-pointer"
                     >
                       + icon
                     </button>
@@ -12039,7 +12039,7 @@ export const Editor: React.FC<
                     ).blur();
                   }
                 }}
-                className="w-full bg-transparent text-slate-100 outline-none border-b-2 border-violet-500"
+                className="w-full bg-transparent text-[var(--txt-1)] outline-none border-b-2 border-violet-500"
                 style={{
                   fontSize: "2rem",
                   fontWeight: 800,
@@ -12061,7 +12061,7 @@ export const Editor: React.FC<
                     ? "Double-click to rename"
                     : undefined
                 }
-                className={`text-slate-100 select-none ${onTitleChange ? "cursor-text" : ""}`}
+                className={`text-[var(--txt-1)] select-none ${onTitleChange ? "cursor-text" : ""}`}
                 style={{
                   fontSize: "2rem",
                   fontWeight: 800,
@@ -13749,7 +13749,7 @@ export const Editor: React.FC<
                 left: `${Math.min(mathEdit.x, window.innerWidth - 340)}px`,
                 zIndex: 10000
               }}
-              className="w-80 bg-[#161b22] border border-violet-500/40 rounded-xl shadow-2xl p-3 animate-in fade-in zoom-in-95 duration-100"
+              className="bf-popover-card w-80 bg-[#161b22] border border-violet-500/40 rounded-xl shadow-2xl p-3 animate-in fade-in zoom-in-95 duration-100"
               onMouseDown={(e) =>
                 e.stopPropagation()
               }
@@ -13866,7 +13866,7 @@ export const Editor: React.FC<
                 left: `${Math.min(dateEdit.x, window.innerWidth - 260)}px`,
                 zIndex: 10000
               }}
-              className="w-60 bg-[#161b22] border border-violet-500/40 rounded-xl shadow-2xl p-3 animate-in fade-in zoom-in-95 duration-100"
+              className="bf-popover-card w-60 bg-[#161b22] border border-violet-500/40 rounded-xl shadow-2xl p-3 animate-in fade-in zoom-in-95 duration-100"
               onMouseDown={(e) =>
                 e.stopPropagation()
               }
@@ -13962,7 +13962,7 @@ export const Editor: React.FC<
             }}
             ref={commandListRef}
             data-editor-popover="true"
-            className="w-64 max-h-72 overflow-y-auto bg-[#161b22] border border-slate-700/80 rounded-xl shadow-2xl p-1.5 flex flex-col space-y-0.5 no-scrollbar select-none"
+            className="bf-popover-card w-64 max-h-72 overflow-y-auto bg-[#161b22] border border-slate-700/80 rounded-xl shadow-2xl p-1.5 flex flex-col space-y-0.5 no-scrollbar select-none"
           >
             <div className="px-2.5 py-1.5 text-[9px] font-bold text-slate-500 uppercase tracking-wider">
               Basic Blocks
@@ -14480,7 +14480,7 @@ export const Editor: React.FC<
             left: `${pasteInfo.x}px`,
             zIndex: 9999
           }}
-          className="bg-[#1e2330] border border-slate-700/80 rounded-xl shadow-2xl p-1 px-1.5 text-xs text-slate-200 select-none animate-in fade-in zoom-in-95 duration-100 flex flex-col space-y-0.5"
+          className="bf-popover-card bg-[#1e2330] border border-slate-700/80 rounded-xl shadow-2xl p-1 px-1.5 text-xs text-slate-200 select-none animate-in fade-in zoom-in-95 duration-100 flex flex-col space-y-0.5"
         >
           <div className="px-2 py-1 text-[9px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-800 mb-1 truncate max-w-[200px]">
             {pasteInfo.url}
