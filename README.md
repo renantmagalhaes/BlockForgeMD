@@ -8,13 +8,13 @@
 
 ## Screenshots
 
-| Document editor | Kanban board |
-| --- | --- |
-| ![Document editor with callouts, task lists, and tables](docs/screenshots/document.png) | ![Kanban board with columns, priorities, and tags](docs/screenshots/kanban.png) |
+| Document editor                                                                                                                                              | Kanban board                                                                                                                                            |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <img src="docs/screenshots/document.png" alt="Document editor with callouts, task lists, and tables" width="480" height="270" style="object-fit: cover;" /> | <img src="docs/screenshots/kanban-1.png" alt="Kanban board with columns, priorities, and tags" width="480" height="270" style="object-fit: cover;" /> |
 
-| Mind map | Canvas |
-| --- | --- |
-| ![Mind map view](docs/screenshots/mindmap.png) | ![Canvas / Excalidraw whiteboard](docs/screenshots/canvas.png) |
+| Mind map                                                                                                            | Canvas                                                                                                                                    |
+| -------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| <img src="docs/screenshots/mindmap.png" alt="Mind map view" width="480" height="270" style="object-fit: cover;" /> | <img src="docs/screenshots/canvas.png" alt="Canvas / Excalidraw whiteboard" width="480" height="270" style="object-fit: cover;" /> |
 
 ---
 
@@ -217,7 +217,7 @@ Your content here, in standard Markdown.
 
 Kanban boards, canvases, mind maps, and diagrams embed their data as a fenced code block inside the same `.md` file — so you can read, diff, and version-control everything with git.
 
-**Known limitation — non-Latin titles:** the on-disk filename is derived from the title by stripping everything except `a-z A-Z 0-9`, spaces, and hyphens. A title written entirely in a non-Latin script or in emoji (e.g. fully Japanese, Chinese, Cyrillic, Arabic, or emoji-only) has nothing left after stripping, so creating that page currently fails silently — no file is written and no error is shown. This only affects the generated *filename*; it's unrelated to git, GitHub, or NAS sync, which are fully Unicode-safe and store file content byte-for-byte regardless of what's inside it.
+**Known limitation — non-Latin titles:** the on-disk filename is derived from the title by stripping everything except `a-z A-Z 0-9`, spaces, and hyphens. A title written entirely in a non-Latin script or in emoji (e.g. fully Japanese, Chinese, Cyrillic, Arabic, or emoji-only) has nothing left after stripping, so creating that page currently fails silently — no file is written and no error is shown. This only affects the generated _filename_; it's unrelated to git, GitHub, or NAS sync, which are fully Unicode-safe and store file content byte-for-byte regardless of what's inside it.
 
 ---
 
