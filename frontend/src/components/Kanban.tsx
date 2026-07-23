@@ -1966,6 +1966,21 @@ const Kanban: React.FC<KanbanProps> = ({
     await onRenameBoard?.(trimmed)
   }
 
+  // Board description — a free-text blurb explaining what the board is for,
+  // stored in the board file's own front matter (same mechanism already used
+  // for columnColors/priorities/etc.) rather than the old static hint text.
+  const boardDescription = boardFrontMatter?.description ?? ''
+  const [editingDescription, setEditingDescription] = useState(false)
+  const [descriptionVal, setDescriptionVal] = useState(boardDescription)
+  useEffect(() => { setDescriptionVal(boardDescription) }, [boardDescription])
+
+  const saveDescription = async () => {
+    setEditingDescription(false)
+    const trimmed = descriptionVal.trim()
+    if (trimmed === boardDescription) return
+    await onUpdateBoardFrontMatter?.({ description: trimmed })
+  }
+
   return (
     <div className="relative flex flex-col h-auto md:h-full bf-kanban rounded-xl overflow-visible md:overflow-hidden p-2 md:p-6">
       {/* ── Header ──
@@ -1973,8 +1988,8 @@ const Kanban: React.FC<KanbanProps> = ({
           modal (CardDetailPanel, below) is rendered as a sibling INSIDE this
           same root div, not a separate tree — hiding the root would take the
           open modal down with it when exporting from inside a card. */}
-      <div className="no-print mb-4 flex justify-between items-center">
-        <div>
+      <div className="no-print mb-4 flex justify-between items-center gap-4">
+        <div className="flex-1 min-w-0">
           {editingBoardName ? (
             <input
               autoFocus
@@ -1991,9 +2006,29 @@ const Kanban: React.FC<KanbanProps> = ({
               title="Double-click to rename"
             >{boardName}</h1>
           )}
-          <p className="bf-kanban-hint text-xs mt-0.5">
-            Drag to move · Double-click board title or column to rename · Click priority badge to change
-          </p>
+          {editingDescription ? (
+            <textarea
+              autoFocus
+              value={descriptionVal}
+              onChange={e => setDescriptionVal(e.target.value)}
+              onBlur={saveDescription}
+              onKeyDown={e => {
+                if (e.key === 'Escape') { setDescriptionVal(boardDescription); setEditingDescription(false) }
+                else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); (e.target as HTMLTextAreaElement).blur() }
+              }}
+              placeholder="Add a description…"
+              rows={2}
+              className="bf-kanban-hint text-xs mt-0.5 w-full max-w-3xl bg-transparent border-b border-violet-500 outline-none resize-none"
+            />
+          ) : (
+            <p
+              className="bf-kanban-hint text-xs mt-0.5 cursor-text hover:opacity-80 max-w-3xl whitespace-pre-wrap"
+              onDoubleClick={() => setEditingDescription(true)}
+              title="Double-click to edit description"
+            >
+              {boardDescription || 'Add a description…'}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button
