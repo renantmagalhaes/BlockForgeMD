@@ -1790,6 +1790,7 @@ const CalloutComponent = (
         {emojiPickerOpen && (
           <div
             ref={emojiPickerRef}
+            className="no-print"
             style={{
               position: "absolute",
               top: "100%",
@@ -1902,6 +1903,7 @@ const CalloutComponent = (
         {fullEmojiPickerOpen && (
           <div
             ref={emojiPickerRef}
+            className="no-print"
             style={{
               position: "absolute",
               top: "100%",
@@ -1927,6 +1929,7 @@ const CalloutComponent = (
         {colorPickerOpen && (
           <div
             ref={colorPickerRef}
+            className="no-print"
             style={{
               position: "absolute",
               top: "100%",
@@ -2081,6 +2084,7 @@ const CalloutComponent = (
 
       {/* Editable body content */}
       <NodeViewContent
+        className="bf-callout-body"
         style={{
           color: "#cbd5e1",
           fontSize: "14px",
@@ -3383,7 +3387,7 @@ const CodeBlockComponent = (
           </span>
           <button
             onClick={handleCopy}
-            className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold border transition duration-150 cursor-pointer ${
+            className={`no-print flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold border transition duration-150 cursor-pointer ${
               copied
                 ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
                 : "bg-slate-800/35 text-slate-400 border-transparent hover:border-slate-700 hover:text-slate-200 hover:bg-slate-800/70"
@@ -3427,9 +3431,21 @@ const CodeBlockComponent = (
 const CustomCodeBlock =
   CodeBlockLowlight.extend({
     addAttributes() {
+      // Only override the *default* — replacing the whole `language` entry
+      // wholesale (as this used to) discards the parent's parseHTML, which
+      // is what reads the actual `class="language-xxx"` off the parsed
+      // <code> element. Without it every loaded code block silently lost
+      // its language and fell back to "markdown", regardless of what was
+      // actually fenced (```bash, ```js, ...) — which also meant lowlight
+      // had nothing valid to highlight against, so saved/reloaded code
+      // blocks always rendered as plain, unhighlighted text.
+      const parentAttrs =
+        (this.parent?.() ??
+          {}) as any;
       return {
-        ...this.parent?.(),
+        ...parentAttrs,
         language: {
+          ...parentAttrs.language,
           default: "markdown"
         }
       };
@@ -4383,6 +4399,23 @@ const AutoPair = Extension.create({
             if (text.length !== 1)
               return false;
             const { state } = view;
+            // Never touch code — auto-inserted closers and smart quotes are
+            // silent corruption there (e.g. a bash `"$(id -u)"` check
+            // becomes invalid once the quotes turn curly). Applies to both
+            // fenced code blocks and inline `code` spans.
+            const $from =
+              state.selection.$from;
+            const codeMark =
+              state.schema.marks.code;
+            if (
+              $from.parent.type.spec
+                .code ||
+              (codeMark &&
+                codeMark.isInSet(
+                  $from.marks()
+                ))
+            )
+              return false;
             const hasSelection =
               from !== to;
             const docSize =
@@ -10287,7 +10320,7 @@ export const Editor: React.FC<
             </div>
           )}
           {/* File path breadcrumbs */}
-          <div className="text-[10px] text-slate-500 font-mono mb-4 uppercase tracking-wider select-none">
+          <div className="text-[10px] text-slate-500 font-mono mb-4 uppercase tracking-wider select-none no-print">
             {filePath}
           </div>
 
@@ -11794,7 +11827,7 @@ export const Editor: React.FC<
                   />
                   {onUpdateFrontMatter &&
                     !coverRepositioning && (
-                      <div className="absolute top-2 right-3 flex gap-1.5 z-10">
+                      <div className="no-print absolute top-2 right-3 flex gap-1.5 z-10">
                         <button
                           onClick={() =>
                             setCoverRepositioning(
@@ -11825,7 +11858,7 @@ export const Editor: React.FC<
             ) : (
               onUpdateFrontMatter && (
                 <div
-                  className="-mx-4 mb-2 border border-dashed border-slate-700/60 rounded-xl mx-0 flex items-center justify-center gap-3 py-3 text-slate-500 hover:border-slate-500 hover:text-slate-400 transition-colors group/coveradd cursor-pointer"
+                  className="no-print -mx-4 mb-2 border border-dashed border-slate-700/60 rounded-xl mx-0 flex items-center justify-center gap-3 py-3 text-slate-500 hover:border-slate-500 hover:text-slate-400 transition-colors group/coveradd cursor-pointer"
                   onClick={() =>
                     coverInputRef.current?.click()
                   }
@@ -11909,7 +11942,7 @@ export const Editor: React.FC<
                           (o) => !o
                         )
                       }
-                      className="text-[11px] px-2 py-1 bg-slate-800/60 text-slate-500 hover:text-slate-300 rounded-lg transition cursor-pointer"
+                      className="no-print text-[11px] px-2 py-1 bg-slate-800/60 text-slate-500 hover:text-slate-300 rounded-lg transition cursor-pointer"
                     >
                       + icon
                     </button>
@@ -11917,14 +11950,14 @@ export const Editor: React.FC<
                   {iconPickerOpen && (
                     <>
                       <div
-                        className="fixed inset-0 z-40"
+                        className="no-print fixed inset-0 z-40"
                         onClick={() =>
                           setIconPickerOpen(
                             false
                           )
                         }
                       />
-                      <div className="absolute top-12 left-0 z-50">
+                      <div className="no-print absolute top-12 left-0 z-50">
                         <EmojiPicker
                           theme={
                             Theme.DARK
@@ -14740,7 +14773,7 @@ export const Editor: React.FC<
           in production. Rendering outside the container (same fix as the
           Link Paste popup below) keeps them truly viewport-fixed. */}
       {tableGutter && createPortal(
-        <>
+        <div className="no-print" style={{ display: "contents" }}>
           {tableGutter.rows.map((r, i) => (
             <button
               key={`row-${i}`}
@@ -14863,13 +14896,13 @@ export const Editor: React.FC<
           >
             <Plus size={12} />
           </button>
-        </>,
+        </div>,
         document.body
       )}
       {/* Row/column gutter menu — opened by clicking a grip above.
           Portaled for the same reason as the gutters themselves above. */}
       {tableGutterMenu && createPortal(
-        <>
+        <div className="no-print" style={{ display: "contents" }}>
           <div
             className="fixed inset-0 z-[9998]"
             onMouseDown={() => setTableGutterMenu(null)}
@@ -14987,7 +15020,7 @@ export const Editor: React.FC<
               </>
             )}
           </div>
-        </>,
+        </div>,
         document.body
       )}
       {/* Floating cell background color picker — kept selection-driven
@@ -14998,7 +15031,7 @@ export const Editor: React.FC<
           Portaled for the same containing-block reason as the gutters
           above — this is also position:fixed inside .editor-root-container. */}
       {activeTableRect && createPortal(
-        <>
+        <div className="no-print" style={{ display: "contents" }}>
           {/* Cell background color picker */}
           <div
             style={{
@@ -15084,14 +15117,14 @@ export const Editor: React.FC<
               </>
             )}
           </div>
-        </>,
+        </div>,
         document.body
       )}
       {/* Attachment image hover preview bubble */}
       {imgPreviewUrl &&
         imgPreviewPos && (
           <div
-            className="fixed z-[9999] pointer-events-none rounded-lg overflow-hidden shadow-2xl border border-slate-700/80 bg-slate-900"
+            className="no-print fixed z-[9999] pointer-events-none rounded-lg overflow-hidden shadow-2xl border border-slate-700/80 bg-slate-900"
             style={{
               top: imgPreviewPos.top,
               left: imgPreviewPos.left,

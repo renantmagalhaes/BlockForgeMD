@@ -272,7 +272,7 @@ const ColorPalette: React.FC<{
   return (
     <div
       data-card-detail-panel="true"
-      className="p-2 bf-kanban-popover rounded-xl w-[176px]"
+      className="no-print p-2 bf-kanban-popover rounded-xl w-[176px]"
       style={{ position: 'fixed', zIndex: 9999, ...style }}
       onClick={e => e.stopPropagation()}
       onContextMenu={e => e.preventDefault()}
@@ -363,7 +363,7 @@ const BoardSettingsModal: React.FC<{
   }
 
   return (
-    <div data-card-detail-panel="true" className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose} onContextMenu={e => e.preventDefault()}>
+    <div data-card-detail-panel="true" className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm no-print" onClick={onClose} onContextMenu={e => e.preventDefault()}>
       <div
         className="bf-kanban-modal bf-board-settings-modal rounded-2xl w-full max-w-md mx-4 overflow-hidden"
         onClick={e => e.stopPropagation()}
@@ -873,7 +873,7 @@ const CardContextMenu: React.FC<{
     <div
       ref={ref}
       data-card-detail-panel="true"
-      className="fixed z-[9999] bf-kanban-popover rounded-xl overflow-hidden shadow-2xl"
+      className="no-print fixed z-[9999] bf-kanban-popover rounded-xl overflow-hidden shadow-2xl"
       style={{ top: pos.y, left: pos.x, minWidth: 210 }}
       onClick={e => e.stopPropagation()}
       // This menu can end up covering an adjacent card (it's tall and
@@ -1243,7 +1243,7 @@ const CardDetailPanel: React.FC<{
   }
 
   const toolbar = (
-    <div className="flex items-center justify-between px-4 py-2.5 border-b border-[var(--border-1)] shrink-0 bf-kanban-col-header">
+    <div className="flex items-center justify-between px-4 py-2.5 border-b border-[var(--border-1)] shrink-0 bf-kanban-col-header no-print">
       {isMobile ? <div /> : (
         <div className="flex items-center gap-0.5 p-0.5 bf-kanban-filter-mode-track rounded-lg">
           {(['modal', 'fullscreen'] as const).map(m => (
@@ -1275,7 +1275,7 @@ const CardDetailPanel: React.FC<{
   ) : loadErr ? (
     <div className="flex-1 flex items-center justify-center text-red-400 text-sm">Failed to load card content.</div>
   ) : (
-    <div className={`flex-1 overflow-hidden transition-opacity duration-200 ease-in-out ${contentVisible ? 'opacity-100' : 'opacity-0'}`}>
+    <div className={`bf-kanban-card-editor-area flex-1 overflow-hidden transition-opacity duration-200 ease-in-out ${contentVisible ? 'opacity-100' : 'opacity-0'}`}>
       <Editor
         key={task.path}
         filePath={task.path}
@@ -1968,8 +1968,12 @@ const Kanban: React.FC<KanbanProps> = ({
 
   return (
     <div className="relative flex flex-col h-auto md:h-full bf-kanban rounded-xl overflow-visible md:overflow-hidden p-2 md:p-6">
-      {/* ── Header ── */}
-      <div className="mb-4 flex justify-between items-center">
+      {/* ── Header ──
+          no-print here (not on the .bf-kanban root above): the card detail
+          modal (CardDetailPanel, below) is rendered as a sibling INSIDE this
+          same root div, not a separate tree — hiding the root would take the
+          open modal down with it when exporting from inside a card. */}
+      <div className="no-print mb-4 flex justify-between items-center">
         <div>
           {editingBoardName ? (
             <input
@@ -2010,30 +2014,32 @@ const Kanban: React.FC<KanbanProps> = ({
       </div>
 
       {/* ── Filter bar ── */}
-      <KanbanFilterBar
-        allTags={allBoardTags}
-        allAssignees={allBoardAssignees}
-        hasDueDates={boardHasDueDates}
-        priorities={priorities}
-        tagColors={tagColors}
-        filterTags={filterTags}
-        filterPriorities={filterPriorities}
-        filterAssignees={filterAssignees}
-        filterDueDate={filterDueDate}
-        filterMode={filterMode}
-        searchText={searchText}
-        onTagToggle={handleTagToggle}
-        onPriorityToggle={handlePriorityToggle}
-        onAssigneeToggle={handleAssigneeToggle}
-        onDueDateChange={setFilterDueDate}
-        onModeChange={setFilterMode}
-        onSearchChange={setSearchText}
-        onClear={handleClearFilters}
-      />
+      <div className="no-print">
+        <KanbanFilterBar
+          allTags={allBoardTags}
+          allAssignees={allBoardAssignees}
+          hasDueDates={boardHasDueDates}
+          priorities={priorities}
+          tagColors={tagColors}
+          filterTags={filterTags}
+          filterPriorities={filterPriorities}
+          filterAssignees={filterAssignees}
+          filterDueDate={filterDueDate}
+          filterMode={filterMode}
+          searchText={searchText}
+          onTagToggle={handleTagToggle}
+          onPriorityToggle={handlePriorityToggle}
+          onAssigneeToggle={handleAssigneeToggle}
+          onDueDateChange={setFilterDueDate}
+          onModeChange={setFilterMode}
+          onSearchChange={setSearchText}
+          onClear={handleClearFilters}
+        />
+      </div>
 
       {/* ── Board grid ── */}
       <DragDropContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-      <div ref={boardScrollRef} className="flex gap-4 flex-1 overflow-x-auto overflow-y-visible md:overflow-y-hidden pb-4 items-start bf-kanban-board-scroll">
+      <div ref={boardScrollRef} className="no-print flex gap-4 flex-1 overflow-x-auto overflow-y-visible md:overflow-y-hidden pb-4 items-start bf-kanban-board-scroll">
         {boardColumns.map(col => {
           const colIdx  = boardColumns.indexOf(col)
           const accent  = getColumnColor(col)
@@ -2513,7 +2519,7 @@ const Kanban: React.FC<KanbanProps> = ({
       {priorityPicker && (
         <div
           data-card-detail-panel="true"
-          className="fixed z-[9999] bf-kanban-popover rounded-xl py-1.5 min-w-[160px]"
+          className="no-print fixed z-[9999] bf-kanban-popover rounded-xl py-1.5 min-w-[160px]"
           style={{ top: priorityPicker.y, left: priorityPicker.x }}
           onClick={e => e.stopPropagation()}
           onContextMenu={e => e.preventDefault()}

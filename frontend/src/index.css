@@ -768,11 +768,48 @@ body {
   .no-print { display: none !important; }
   @page { margin: 1.5cm !important; }
 
-  html, body, #root, .app-layout-root, .main-content-pane, .editor-root-container {
+  html, body, #root, .app-layout-root, .bf-main, .main-content-pane, .editor-root-container {
     background: white !important; color: black !important; display: block !important;
-    height: auto !important; min-height: 0 !important; overflow: visible !important;
+    position: static !important;
+    height: auto !important; min-height: 0 !important; max-height: none !important; overflow: visible !important;
     margin: 0 !important; padding: 0 !important; width: 100% !important;
     border: none !important; box-shadow: none !important;
+  }
+
+  /* Floating editor chrome portaled straight to document.body — bubble/drag
+     menus, dropdowns, the alert/confirm/prompt dialog host, the image
+     markup modal, the slideshow overlay. None of these are part of the
+     document itself, and being outside #root they escape the structural
+     reset above entirely, so they need to be hidden explicitly. */
+  [data-editor-popover="true"], [data-image-editor-modal="true"] {
+    display: none !important;
+  }
+
+  /* The board itself (.bf-kanban) is hidden piece-by-piece above rather than
+     as a whole, since the card detail modal is rendered as its sibling
+     inside the very same root div — but that root div still carries its
+     own dark background/border/shadow, which painted as a big black box
+     behind the (now emptied-out) board once its children were hidden. */
+  .bf-kanban {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+
+  /* The kanban card modal is position:fixed with a clipped viewport-relative
+     size — that clipping is fine on screen but truncates/blanks it out for
+     print, since print pagination still respects an ancestor's overflow and
+     bounded height. Un-fix it so its embedded Editor (and that Editor's own
+     .editor-root-container/.print-document-container reset above) can flow
+     and paginate normally. */
+  [data-card-detail-panel="true"], .bf-kanban-card-editor-area {
+    position: static !important; inset: auto !important;
+    left: auto !important; right: auto !important; top: auto !important; bottom: auto !important;
+    width: 100% !important; height: auto !important; max-height: none !important;
+    overflow: visible !important; opacity: 1 !important; transform: none !important;
+    background: white !important; box-shadow: none !important; border: none !important;
+    z-index: auto !important; pointer-events: auto !important;
   }
 
   .print-document-container {
@@ -788,14 +825,22 @@ body {
     color: black !important; width: 100% !important;
   }
 
-  .print-document-container h1 { font-size: 14pt !important; margin-top: 0.5cm !important; margin-bottom: 0.25cm !important; font-weight: 700 !important; }
-  .print-document-container h2 { font-size: 12pt !important; margin-top: 0.4cm !important; margin-bottom: 0.2cm !important; font-weight: 600 !important; }
-  .print-document-container h3 { font-size: 11pt !important; margin-top: 0.3cm !important; margin-bottom: 0.15cm !important; font-weight: 600 !important; }
+  /* h1/h2/h3 (both the page-title heading and in-content ProseMirror
+     headings) get their color from var(--txt-1)/Tailwind text-slate-100 —
+     built for a dark background — which nothing above resets, so titles
+     were printing as near-invisible light-gray-on-white. */
+  .print-document-container h1 { font-size: 14pt !important; margin-top: 0.5cm !important; margin-bottom: 0.25cm !important; font-weight: 700 !important; color: black !important; }
+  .print-document-container h2 { font-size: 12pt !important; margin-top: 0.4cm !important; margin-bottom: 0.2cm !important; font-weight: 600 !important; color: black !important; }
+  .print-document-container h3 { font-size: 11pt !important; margin-top: 0.3cm !important; margin-bottom: 0.15cm !important; font-weight: 600 !important; color: black !important; }
 
-  .print-document-container p,
-  .print-document-container li,
-  .print-document-container span,
-  .print-document-container div {
+  /* :not([data-callout="true"] *) carves out callouts, which set their own
+     accent-colored text via inline styles (label, icon) — flattening those
+     to #222 along with ordinary body text lost the whole point of a colored
+     callout. Ordinary text still gets the readable print palette below. */
+  .print-document-container p:not([data-callout="true"] *),
+  .print-document-container li:not([data-callout="true"] *),
+  .print-document-container span:not([data-callout="true"] *),
+  .print-document-container div:not([data-callout="true"] *) {
     font-size: 9.5pt !important;
     line-height: 1.4 !important;
     color: #222 !important;
@@ -813,7 +858,159 @@ body {
     border-color: #d0d7de !important;
   }
 
-  .ProseMirror table, .code-block-container, .callout-box { page-break-inside: avoid; }
+  /* Syntax highlighting: the color rule above is a flat fallback for any
+     plain code text, but as !important it was also beating every .hljs-*
+     span's own (non-important) color — and so was the generic
+     `span:not([data-callout] *) { color: #222 !important }` rule further up
+     to the same effect, since as a `span` + `:not()` selector it actually
+     out-specifies a plain `.hljs-xxx` class selector. Both flattened
+     highlighted code to one color. Scoping these under `.code-block-container`
+     makes them specific enough to beat both. Re-applies the app's own
+     light-theme hljs palette (index.css:721-735, otherwise gated behind
+     [data-theme="light"]) unconditionally for print, since the page is white
+     regardless of which theme is active on screen — so printed code keeps
+     the same highlighting as the editor shows in light theme. The rest
+     (keyword/section/literal/attr) reuse the base dark-palette colors
+     (index.css:751-762) since those already read fine on white too — light
+     theme doesn't override them either. */
+  .print-document-container .code-block-container .hljs-string,
+  .print-document-container .code-block-container .hljs-regexp,
+  .print-document-container .code-block-container .hljs-addition,
+  .print-document-container .code-block-container .hljs-attribute,
+  .print-document-container .code-block-container .hljs-meta .hljs-string { color: #22863a !important; }
+  .print-document-container .code-block-container .hljs-built_in,
+  .print-document-container .code-block-container .hljs-class .hljs-title,
+  .print-document-container .code-block-container .hljs-title.class_ { color: #b08800 !important; }
+  .print-document-container .code-block-container .hljs-symbol,
+  .print-document-container .code-block-container .hljs-bullet,
+  .print-document-container .code-block-container .hljs-link,
+  .print-document-container .code-block-container .hljs-meta .hljs-keyword,
+  .print-document-container .code-block-container .hljs-selector-pseudo { color: #0366d6 !important; }
+  .print-document-container .code-block-container .hljs-comment,
+  .print-document-container .code-block-container .hljs-quote { color: #6a737d !important; font-style: italic; }
+  .print-document-container .code-block-container .hljs-doctag,
+  .print-document-container .code-block-container .hljs-keyword,
+  .print-document-container .code-block-container .hljs-formula { color: #c678dd !important; }
+  .print-document-container .code-block-container .hljs-section,
+  .print-document-container .code-block-container .hljs-name,
+  .print-document-container .code-block-container .hljs-selector-tag,
+  .print-document-container .code-block-container .hljs-deletion,
+  .print-document-container .code-block-container .hljs-subst { color: #e06c75 !important; }
+  .print-document-container .code-block-container .hljs-literal { color: #56b6c2 !important; }
+  .print-document-container .code-block-container .hljs-attr,
+  .print-document-container .code-block-container .hljs-variable,
+  .print-document-container .code-block-container .hljs-template-variable,
+  .print-document-container .code-block-container .hljs-type,
+  .print-document-container .code-block-container .hljs-selector-class,
+  .print-document-container .code-block-container .hljs-selector-id,
+  .print-document-container .code-block-container .hljs-selector-attr,
+  .print-document-container .code-block-container .hljs-number,
+  .print-document-container .code-block-container .hljs-meta { color: #d19a66 !important; }
+  .print-document-container .code-block-container .hljs-emphasis { font-style: italic; }
+  .print-document-container .code-block-container .hljs-strong { font-weight: bold; }
+
+  /* Callouts: keep the accent border/background gradient (inline styles,
+     untouched by the rules above) but force the body text — authored for a
+     dark editor background — to something readable on paper. */
+  [data-callout="true"] {
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+    break-inside: avoid; page-break-inside: avoid;
+  }
+  [data-callout="true"] .bf-callout-body,
+  [data-callout="true"] .bf-callout-body * {
+    color: #333 !important;
+    font-size: 10pt !important;
+    line-height: 1.6 !important;
+  }
+
+  /* Tables: header background/border colors come from dark-theme CSS
+     variables (var(--bg-elevated)/var(--border-1)) that are never reset for
+     print, so headers were printing as dark, low-contrast boxes. */
+  .print-document-container th {
+    background: #f1f3f5 !important;
+    color: #111 !important;
+  }
+  .ProseMirror .selectedCell:after { display: none !important; }
+
+  /* border-collapse merges each pair of adjacent cells' borders into one
+     shared line — on screen that's fine, but Chromium's print/PDF rasterizer
+     unreliably drops *some* of those shared lines (which ones varied between
+     documents/reloads: sometimes the header/first-row seam, sometimes an
+     edge), since a collapsed border isn't "owned" by any single cell's box
+     for the rasterizer to place consistently. Separate borders make every
+     cell draw its own full border independently — a little thicker at the
+     shared seams, but nothing to drop. */
+  .print-document-container table {
+    border-collapse: separate !important;
+    border-spacing: 0 !important;
+  }
+  .print-document-container th,
+  .print-document-container td {
+    border: 1px solid #999 !important;
+  }
+
+  /* Column resizing (prosemirror-tables) bakes an inline pixel width/
+     min-width straight onto <table> and each <col> once any column has been
+     dragged, measured off the wide on-screen editor — those px values beat
+     the class-based width:100% rule via specificity and don't shrink for a
+     narrower printed page, so the table just overflows/clips instead of
+     scaling down. Resetting both to auto lets table-layout:fixed redistribute
+     columns evenly across the actual printed width. */
+  .print-document-container .tableWrapper,
+  .print-document-container .ProseMirror table {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    /* border-collapse merges the table's outer border with the first row's
+       into one line sitting exactly on the box edge; left as overflow:hidden
+       (the screen default), Chromium's print rasterizer clips that merged
+       edge away, so only the first couple of rows appeared borderless. */
+    overflow: visible !important;
+  }
+  .print-document-container .ProseMirror table col {
+    width: auto !important;
+  }
+
+  /* Image captions: an empty caption is a real <input> with a placeholder
+     ("Add a caption…") for the editing UI — on paper an empty one should
+     show nothing at all, not the editing hint. :placeholder-shown only
+     matches while the input is empty, so a caption the user actually typed
+     is untouched by the hide rule below. The generic pre/code/select/input
+     print rule above is meant for code blocks — it was also catching this
+     input and giving a plain caption a code-editor-style box, dark text and
+     all, instead of small, subtle gray text. */
+  .print-document-container .image-caption-wrapper input:placeholder-shown {
+    display: none !important;
+  }
+  .print-document-container .image-caption-wrapper input {
+    background: transparent !important;
+    border: none !important;
+    color: #666 !important;
+    font-size: 9pt !important;
+  }
+
+  /* Code blocks: same issue as tables — the wrapper/header bar are dark
+     Tailwind colors meant for the editor, not overridden by the pre/code
+     rule above (which only targets the actual code text, not its chrome). */
+  .print-document-container .code-block-container {
+    background: #f6f8fa !important;
+    border-color: #d0d7de !important;
+  }
+  .print-document-container .code-block-container > div:first-child {
+    background: #eaeef2 !important;
+    border-color: #d0d7de !important;
+  }
+  .print-document-container .code-block-container select {
+    color: #57606a !important;
+  }
+
+  /* Deliberately NOT page-break-inside: avoid on tables/code blocks: if one
+     doesn't fit in whatever vertical space is left on the current page,
+     "avoid" pushes the *entire* block onto the next page instead of
+     splitting it — which for anything longer than a few lines (a table with
+     several rows, a multi-line code block) leaves a large blank gap at the
+     bottom of the previous page. Letting them split across the page break
+     is visually rougher on the seam but never produces that gap. */
 }
 
 /* ══════════════════════════════════════════════════════
