@@ -8,12 +8,12 @@
 
 ## Screenshots
 
-| Document editor                                                                                                                                              | Kanban board                                                                                                                                            |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| <img src="docs/screenshots/document.png" alt="Document editor with callouts, task lists, and tables" width="480" height="270" style="object-fit: cover;" /> | <img src="docs/screenshots/kanban-1.png" alt="Kanban board with columns, priorities, and tags" width="480" height="270" style="object-fit: cover;" /> |
+| Document editor                                                                                                                                             | Kanban board                                                                                                                                          |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <img src="docs/screenshots/document.png" alt="Document editor with callouts, task lists, and tables" width="480" height="270" style="object-fit: cover;" /> | <img src="docs/screenshots/kanban-2.png" alt="Kanban board with columns, priorities, and tags" width="480" height="270" style="object-fit: cover;" /> |
 
-| Mind map                                                                                                            | Canvas                                                                                                                                    |
-| -------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Mind map                                                                                                           | Canvas                                                                                                                             |
+| ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
 | <img src="docs/screenshots/mindmap.png" alt="Mind map view" width="480" height="270" style="object-fit: cover;" /> | <img src="docs/screenshots/canvas.png" alt="Canvas / Excalidraw whiteboard" width="480" height="270" style="object-fit: cover;" /> |
 
 ---
