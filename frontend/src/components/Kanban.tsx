@@ -36,20 +36,24 @@ interface FileRecord {
   // board cards can show checklist progress without the bulk /api/files
   // listing having to ship every file's full content — see checklistGroups
   // usage below for the client-side fallback when content IS present.
-  checklistGroups?: { done: boolean; text: string }[][]
+  checklistGroups?: { done: boolean; text: string; indent: number }[][]
 }
 
 // Groups checkbox lines into separate checklists — each contiguous run of
 // `- [ ]` lines (broken by any non-checkbox line: blank, heading, paragraph,
 // ...) becomes its own checklist, shown on the card as its own progress bar
 // and toggle rather than one big list mixing unrelated checklists together.
-const parseChecklistGroups = (content: string): { done: boolean; text: string }[][] => {
-  const groups: { done: boolean; text: string }[][] = []
-  let current: { done: boolean; text: string }[] = []
+// `indent` is the raw leading-whitespace character count (tabs expanded),
+// used to render nested sub-tasks at the right depth — see indentRank in
+// the render below, which maps these raw counts to 0/1/2/... levels.
+const parseChecklistGroups = (content: string): { done: boolean; text: string; indent: number }[][] => {
+  const groups: { done: boolean; text: string; indent: number }[][] = []
+  let current: { done: boolean; text: string; indent: number }[] = []
   content.split('\n').forEach(line => {
     const m = line.match(/^[\s>-]*\[([x ])\]\s+(.+)/i)
     if (m) {
-      current.push({ done: m[1].toLowerCase() === 'x', text: m[2].trim() })
+      const indent = (line.match(/^\s*/)?.[0] ?? '').replace(/\t/g, '    ').length
+      current.push({ done: m[1].toLowerCase() === 'x', text: m[2].trim(), indent })
     } else if (current.length > 0) {
       groups.push(current)
       current = []
@@ -1405,9 +1409,15 @@ const Kanban: React.FC<KanbanProps> = ({
   const [filterMode, setFilterMode]             = useState<'hide' | 'highlight'>('highlight')
   const [searchText, setSearchText]             = useState('')
   const [collapsedCols, setCollapsedCols]       = useState<Set<string>>(new Set())
-  // Guards the one-time collapsedCols restore below against firing before
-  // `files` (and thus boardFrontMatter) has actually loaded — see that effect.
+  // Guards the one-time collapsedCols/expandedChecklists restores below
+  // against firing before `files` (and thus boardFrontMatter) has actually
+  // loaded — see that effect.
   const restoredCollapseForBoardRef = useRef<string | null>(null)
+  // Saved on the board's own front matter (same mechanism as
+  // collapsedColumns/completedColumns below) rather than localStorage, so
+  // which checklists you've expanded syncs across devices/browsers instead
+  // of being local to whichever one you last toggled it on. Keyed by
+  // `${task.path}::${groupIdx}`.
   const [expandedChecklists, setExpandedChecklists] = useState<Set<string>>(new Set())
 
   // ── Edge auto-scroll while dragging a card ─────────────────────────────────
@@ -1924,6 +1934,8 @@ const Kanban: React.FC<KanbanProps> = ({
     restoredCollapseForBoardRef.current = boardPath
     const stored = parseJSON<string[] | null>(boardFrontMatter?.collapsedColumns, null)
     setCollapsedCols(new Set(Array.isArray(stored) ? stored : []))
+    const storedExpanded = parseJSON<string[] | null>(boardFrontMatter?.expandedChecklists, null)
+    setExpandedChecklists(new Set(Array.isArray(storedExpanded) ? storedExpanded : []))
   }, [boardPath, boardFrontMatter])
 
   // Close floating popovers on outside click
@@ -2442,9 +2454,10 @@ const Kanban: React.FC<KanbanProps> = ({
                               className="flex items-center gap-2 w-full cursor-pointer"
                               onClick={e => {
                                 e.stopPropagation()
-                                setExpandedChecklists(prev => {
-                                  const s = new Set(prev); s.has(groupKey) ? s.delete(groupKey) : s.add(groupKey); return s
-                                })
+                                const next = new Set(expandedChecklists)
+                                next.has(groupKey) ? next.delete(groupKey) : next.add(groupKey)
+                                setExpandedChecklists(next)
+                                onUpdateBoardFrontMatter?.({ expandedChecklists: Array.from(next) })
                               }}
                             >
                               <ListChecks size={11} className="shrink-0 bf-kanban-hint" />
@@ -2457,18 +2470,34 @@ const Kanban: React.FC<KanbanProps> = ({
                               <span className="text-[10px] bf-kanban-hint font-medium tabular-nums shrink-0">{done}/{total}</span>
                               <ChevronDown size={10} className={`bf-kanban-hint shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                             </button>
-                            {isExpanded && (
-                              <div className="mt-2 space-y-1.5">
-                                {items.map((item, idx) => (
-                                  <div key={idx} className={`flex items-start gap-2 text-[11px] ${item.done ? 'opacity-50' : ''}`}>
-                                    <div className={`mt-0.5 w-3 h-3 rounded border shrink-0 flex items-center justify-center transition-colors ${item.done ? 'bg-emerald-500 border-emerald-500' : 'border-current opacity-40'}`}>
-                                      {item.done && <Check size={8} className="text-white" />}
-                                    </div>
-                                    <span className={`leading-snug break-words min-w-0 ${item.done ? 'line-through' : 'bf-kanban-modal-text'}`}>{item.text}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
+                            {isExpanded && (() => {
+                              // Map each item's raw indentation (a leading-
+                              // whitespace character count) to a 0/1/2/...
+                              // depth level by rank among the group's own
+                              // distinct indent widths — robust to whatever
+                              // indent width the source markdown actually
+                              // used (2 spaces, 4 spaces, tabs, ...).
+                              const levels = Array.from(new Set(items.map(i => i.indent))).sort((a, b) => a - b)
+                              return (
+                                <div className="mt-2 space-y-1.5">
+                                  {items.map((item, idx) => {
+                                    const depth = levels.indexOf(item.indent)
+                                    return (
+                                      <div
+                                        key={idx}
+                                        className={`flex items-start gap-2 text-[11px] ${item.done ? 'opacity-50' : ''}`}
+                                        style={{ marginLeft: depth * 14 }}
+                                      >
+                                        <div className={`mt-0.5 w-3 h-3 rounded border shrink-0 flex items-center justify-center transition-colors ${item.done ? 'bg-emerald-500 border-emerald-500' : 'border-current opacity-40'}`}>
+                                          {item.done && <Check size={8} className="text-white" />}
+                                        </div>
+                                        <span className={`leading-snug break-words min-w-0 ${item.done ? 'line-through' : 'bf-kanban-modal-text'}`}>{item.text}</span>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              )
+                            })()}
                           </div>
                         )
                       })}

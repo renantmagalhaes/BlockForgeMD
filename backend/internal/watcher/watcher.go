@@ -109,7 +109,11 @@ func (w *Watcher) isLocked(relPath string) bool {
 // optimization: don't re-parse/re-upsert files whose content hasn't
 // changed) would leave every already-indexed, untouched file's checklist
 // column empty forever, since their hash still matches what's on disk.
-const checklistBackfillSetting = "checklist_backfill_v1"
+// Bump the version suffix (v1 -> v2 -> ...) whenever a later change alters
+// what gets computed into that column — e.g. adding per-item Indent — so
+// already-cached rows from before get backfilled with the new shape too,
+// not just rows that were missing the column outright.
+const checklistBackfillSetting = "checklist_backfill_v2"
 
 func (w *Watcher) initialIndex() {
 	log.Printf("Starting initial workspace indexing of %s...", w.rootPath)

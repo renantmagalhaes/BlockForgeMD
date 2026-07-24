@@ -170,9 +170,12 @@ func parseChecklistGroups(lines []string) [][]db.ChecklistItem {
 	var current []db.ChecklistItem
 	for _, line := range lines {
 		if match := checklistLineRegexp.FindStringSubmatch(line); len(match) > 2 {
+			leading := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+			indent := len(strings.ReplaceAll(leading, "\t", "    "))
 			current = append(current, db.ChecklistItem{
-				Done: strings.ToLower(match[1]) == "x",
-				Text: strings.TrimSpace(match[2]),
+				Done:   strings.ToLower(match[1]) == "x",
+				Text:   strings.TrimSpace(match[2]),
+				Indent: indent,
 			})
 		} else if len(current) > 0 {
 			groups = append(groups, current)

@@ -656,12 +656,35 @@ body {
 }
 
 /* Task lists */
-.ProseMirror ul[data-type="taskList"] { list-style: none; padding: 0; }
+/* margin: 0 here matters as much as the padding/list-style reset — the
+   browser's own default <ul> margin (~1rem block) was never overridden, so
+   every taskList ul (nested ones included) was still carrying it. Same
+   flex-item trapping problem as the p/li fixes below: a nested ul's own
+   default margin gets stuck inside its ancestor's row instead of collapsing
+   away, adding another ~16px per level of nesting on top of everything
+   else already fixed here. */
+.ProseMirror ul[data-type="taskList"] { list-style: none; padding: 0; margin: 0; }
 .ProseMirror ul[data-type="taskList"] li { display: flex; align-items: flex-start; margin-bottom: 0.3rem; }
 .ProseMirror ul[data-type="taskList"] li > label { margin-right: 0.5rem; user-select: none; display: flex; align-items: center; height: 1.5rem; }
 .ProseMirror ul[data-type="taskList"] li > div { flex: 1; }
 .ProseMirror ul[data-type="taskList"] input[type="checkbox"] { cursor: pointer; width: 1.1em; height: 1.1em; accent-color: var(--accent); }
 .ProseMirror ul[data-type="taskList"] li[data-checked="true"] > div { text-decoration: line-through; color: var(--txt-3); }
+/* Each task item's own text sits in a <p> (global rule: margin-bottom: 1rem)
+   inside `li > div` — a flex item (flex: 1 above), which forms its own
+   formatting context, so that 1rem can't collapse away through the div's
+   edge like a paragraph's margin normally would. It just adds to the row's
+   rendered height instead. Row-to-row spacing is already handled by the
+   li's own margin-bottom right below, so the paragraph doesn't need (and
+   visually shouldn't have) a margin of its own here — left at the global
+   1rem, this is the dominant reason nesting a sub-task under a sub-task
+   made the gap before the next item balloon: every level of nesting traps
+   another full 1rem inside its ancestor's row, so a task 4 levels deep
+   could add ~4rem of invisible height above whatever comes next. */
+.ProseMirror ul[data-type="taskList"] li > div > p { margin-bottom: 0; }
+/* Smaller version of the same trap: a *nested* sublist's own last item's
+   li margin-bottom (0.3rem) is trapped the same way — much less visible
+   than the paragraph margin above, but still adds up once per level. */
+.ProseMirror ul[data-type="taskList"] ul[data-type="taskList"] li:last-child { margin-bottom: 0; }
 
 /* Toggle / details blocks */
 .ProseMirror div[data-type="details"] {

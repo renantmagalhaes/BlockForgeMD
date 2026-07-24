@@ -32,6 +32,11 @@ type FileRecord struct {
 type ChecklistItem struct {
 	Done bool   `json:"done"`
 	Text string `json:"text"`
+	// Indent is the raw leading-whitespace character count (tabs expanded)
+	// on the item's source line — the frontend ranks these by distinct
+	// value within a group to render nested sub-tasks at the right depth,
+	// rather than relying on a specific indent width.
+	Indent int `json:"indent"`
 }
 
 type PositionUpdate struct {
