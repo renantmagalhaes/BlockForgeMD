@@ -2248,6 +2248,36 @@ const App: React.FC = () => {
     }
   }
 
+  // Every sidebar section (Documents/Boards/Canvas/MindMaps) filters by folder
+  // path AND frontmatter `type` together (see getCategoryChildren /
+  // getBoardChildren below) — so a file whose `type` no longer matches the
+  // section its folder belongs to becomes invisible in every tree, reachable
+  // only via search. Used by handleUpdateFrontMatter to detect that case when
+  // the Doc Type field (Editor.tsx "Page Attributes" panel) changes a file's
+  // type out from under it.
+  const isPathVisibleForType = (path: string, type: string): boolean => {
+    const boardsRoot = `${W('Boards')}/`
+    const tasksRoot = `${W('Tasks')}/`
+    switch (type) {
+      case 'document': return path.startsWith(`${W('Documents')}/`)
+      case 'task': return path.startsWith(boardsRoot) || path.startsWith(tasksRoot)
+      case 'board': return path.startsWith(boardsRoot) || path.startsWith(tasksRoot)
+      case 'canvas': return path.startsWith(`${W('Canvas')}/`)
+      case 'mindmap': return path.startsWith(`${W('MindMaps')}/`)
+      default: return true
+    }
+  }
+
+  const getDefaultFolderForType = (type: string): string => {
+    switch (type) {
+      case 'task': return W('Tasks')
+      case 'board': return W('Boards')
+      case 'canvas': return W('Canvas')
+      case 'mindmap': return W('MindMaps')
+      default: return W('Documents')
+    }
+  }
+
   const handleUpdateFrontMatter = async (path: string, updates: Record<string, any>) => {
     try {
       await fetch(`${API_BASE}/api/file/front-matter`, {
@@ -2268,6 +2298,13 @@ const App: React.FC = () => {
           const data = await res.json()
           setCurrentFrontMatterStr(splitFrontMatter(data.content).frontMatterStr)
         }
+      }
+      // Changing the Doc Type can strand a file outside any section it's
+      // visible in (e.g. a Kanban task at Boards/X/task.md switched to
+      // "document") — relocate it into the new type's default folder so it
+      // stays reachable instead of only turning up in search.
+      if (typeof updates.type === 'string' && !isPathVisibleForType(path, updates.type)) {
+        await handleMoveToSectionRoot(path, getDefaultFolderForType(updates.type))
       }
     } catch (e) { console.error('Error updating front matter', e) }
   }
