@@ -1743,9 +1743,17 @@ const Kanban: React.FC<KanbanProps> = ({
 
   const handleDragEnd = (result: DropResult) => {
     stopEdgeScroll()
-    const { source, destination, draggableId } = result
+    const { source, destination, draggableId, type } = result
     if (!destination) return
     if (source.droppableId === destination.droppableId && source.index === destination.index) return
+
+    if (type === 'COLUMN') {
+      const next = [...boardColumns]
+      const [moved] = next.splice(source.index, 1)
+      next.splice(destination.index, 0, moved)
+      onUpdateColumns?.(next)
+      return
+    }
 
     const movingTask = tasks.find(t => t.path === draggableId)
     if (!movingTask) return
@@ -2091,7 +2099,16 @@ const Kanban: React.FC<KanbanProps> = ({
 
       {/* ── Board grid ── */}
       <DragDropContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-      <div ref={boardScrollRef} className="no-print flex gap-4 flex-1 overflow-x-auto overflow-y-visible md:overflow-y-hidden pb-4 items-start bf-kanban-board-scroll">
+      <Droppable droppableId="__board_columns__" type="COLUMN" direction="horizontal">
+        {(boardDropProvided) => (
+      <div
+        ref={el => {
+          (boardScrollRef as React.MutableRefObject<HTMLDivElement | null>).current = el
+          boardDropProvided.innerRef(el)
+        }}
+        {...boardDropProvided.droppableProps}
+        className="no-print flex gap-4 flex-1 overflow-x-auto overflow-y-visible md:overflow-y-hidden pb-4 items-start bf-kanban-board-scroll"
+      >
         {boardColumns.map(col => {
           const colIdx  = boardColumns.indexOf(col)
           const accent  = getColumnColor(col)
@@ -2100,7 +2117,15 @@ const Kanban: React.FC<KanbanProps> = ({
           if (isCollapsed) {
             const count = getTasksByColumn(col).length
             return (
-              <Droppable droppableId={col} key={col}>
+              <Draggable draggableId={col} index={colIdx} key={col} isDragDisabled={!onUpdateColumns}>
+                {(colDragProvided) => (
+                  <div
+                    ref={colDragProvided.innerRef}
+                    {...colDragProvided.draggableProps}
+                    {...(colDragProvided.dragHandleProps ?? {})}
+                    style={colDragProvided.draggableProps.style}
+                  >
+              <Droppable droppableId={col}>
                 {(dropProvided, dropSnapshot) => (
                   <div
                     ref={dropProvided.innerRef}
@@ -2140,6 +2165,9 @@ const Kanban: React.FC<KanbanProps> = ({
                   </div>
                 )}
               </Droppable>
+                  </div>
+                )}
+              </Draggable>
             )
           }
 
@@ -2148,16 +2176,28 @@ const Kanban: React.FC<KanbanProps> = ({
           const isCompleted = completedColumns.some(c => c.toLowerCase() === col.toLowerCase())
 
           return (
+            <Draggable draggableId={col} index={colIdx} key={col} isDragDisabled={!onUpdateColumns}>
+              {(colDragProvided) => (
             <div
-              key={col}
+              ref={colDragProvided.innerRef}
+              {...colDragProvided.draggableProps}
               className="flex flex-col rounded-xl min-h-[500px] md:min-h-[180px] max-h-none md:max-h-full w-[272px] shrink-0 transition-all duration-200 bf-kanban-col"
               style={{
+                ...(colDragProvided.draggableProps.style as React.CSSProperties),
                 borderTop: `3px solid ${accent}`,
                 background: `color-mix(in srgb, ${accent} 7%, var(--bg-surface))`,
               }}
             >
-              {/* Column header */}
-              <div className="flex justify-between items-center px-3 py-3 bf-kanban-col-header shrink-0 select-none">
+              {/* Column header — also the drag handle for reordering columns
+                  (disabled while renaming so the input can be interacted with
+                  normally). @hello-pangea/dnd only starts a drag once the
+                  pointer moves past a small threshold, so plain clicks and
+                  double-clicks on the label/buttons inside still pass through
+                  untouched — same pattern the cards below already rely on. */}
+              <div
+                className="flex justify-between items-center px-3 py-3 bf-kanban-col-header shrink-0 select-none cursor-grab active:cursor-grabbing"
+                {...(!isEditing ? (colDragProvided.dragHandleProps ?? {}) : {})}
+              >
                 {isEditing ? (
                   <div className="flex items-center gap-1 flex-1 mr-1">
                     <input
@@ -2579,9 +2619,14 @@ const Kanban: React.FC<KanbanProps> = ({
                 )}
               </div>
             </div>
+              )}
+            </Draggable>
           )
         })}
+        {boardDropProvided.placeholder}
       </div>
+        )}
+      </Droppable>
       </DragDropContext>
 
       {/* ── Fixed-position popovers ── */}

@@ -2285,14 +2285,26 @@ const App: React.FC = () => {
   }
 
   const handleUpdateBoardColumns = async (path: string, newColumns: string[]) => {
+    // Optimistic update — avoids a visible snap-back while the column drag
+    // (or reorder-arrow click) waits on the PATCH round trip. No explicit
+    // fetchFiles() on the success path: this PATCH broadcasts an SSE
+    // file_update event (unlike the position-only reorder endpoint), which
+    // the listener below already turns into its own fetchFiles() call — an
+    // extra one here just re-renders the same result a beat later, which is
+    // what caused the drop-then-flicker.
+    filesSeqRef.current++
+    const columnsJson = JSON.stringify(newColumns)
+    setFiles(prev => prev.map(f => f.path === path ? { ...f, frontMatter: { ...f.frontMatter, columns: columnsJson } } : f))
     try {
       await fetch(`${API_BASE}/api/file/front-matter`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path, updates: { columns: newColumns } }),
       })
+    } catch (e) {
+      console.error('Error updating board columns', e)
       fetchFiles()
-    } catch (e) { console.error('Error updating board columns', e) }
+    }
   }
 
   const handleCreateFile = (
