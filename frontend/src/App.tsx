@@ -1233,6 +1233,20 @@ const App: React.FC = () => {
 
   const defaultColumns = ['Todo', 'In Progress', 'Done']
 
+  // Tasks live in `Boards/BoardName/*.md`, alongside `Boards/BoardName.board.md`.
+  // When a task is opened as a standalone document (not through the Kanban
+  // board view), its Status dropdown still needs that board's actual column
+  // names — otherwise it falls back to the generic defaults even though the
+  // board itself may have different/renamed columns.
+  const findBoardColumnsForTask = (taskPath: string): string[] => {
+    const lastSlash = taskPath.lastIndexOf('/')
+    if (lastSlash === -1) return defaultColumns
+    const boardPath = taskPath.slice(0, lastSlash) + '.board.md'
+    const board = files.find(f => f.path === boardPath)
+    if (!board?.frontMatter?.columns) return defaultColumns
+    try { return JSON.parse(board.frontMatter.columns) } catch { return defaultColumns }
+  }
+
   const subpageCallbackRef = useRef<((newPath: string, title: string) => string) | null>(null)
 
   const [createModal, setCreateModal] = useState<{
@@ -3632,7 +3646,7 @@ const App: React.FC = () => {
                     frontMatter={activeFile?.frontMatter}
                     onUpdateFrontMatter={(updates) => handleUpdateFrontMatter(selectedPath, updates)}
                     onTitleChange={async (newTitle) => { await handleRenameFile(selectedPath, newTitle) }}
-                    boardColumns={defaultColumns}
+                    boardColumns={findBoardColumnsForTask(selectedPath)}
                     onCreateSubPage={(parentPath, onCreated) => handleCreateFile('document', parentPath, onCreated, ['document'], 'Sub Page')}
                     onSelectFile={fetchFileContent}
                     files={files}
