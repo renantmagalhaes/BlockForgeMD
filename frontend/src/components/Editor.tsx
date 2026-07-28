@@ -11029,6 +11029,10 @@ export const Editor: React.FC<
                             useState(
                               false
                             );
+                          const [
+                            assigneeHighlight,
+                            setAssigneeHighlight
+                          ] = useState(0);
                           const assigneeRef =
                             useRef<HTMLDivElement>(
                               null
@@ -11100,17 +11104,42 @@ export const Editor: React.FC<
                             assigneeOpen
                           ]);
 
-                          const filtered =
-                            assigneeUsers.filter(
-                              (u) =>
-                                u
-                                  .toLowerCase()
-                                  .includes(
-                                    assigneeVal.toLowerCase()
-                                  ) &&
-                                u !==
-                                  assigneeVal
+                          // Includes an exact (case-insensitive) match too —
+                          // excluding it here used to be what made typing a
+                          // full, already-valid username (not just a prefix)
+                          // show "No matching users" instead of confirming
+                          // the match, since it was the only possible result.
+                          const assigneeList =
+                            assigneeVal === ""
+                              ? assigneeUsers
+                              : assigneeUsers.filter(
+                                  (u) =>
+                                    u
+                                      .toLowerCase()
+                                      .includes(
+                                        assigneeVal.toLowerCase()
+                                      )
+                                );
+
+                          // Re-clamp (not reset to 0) whenever the visible
+                          // list changes, so highlight doesn't jump back to
+                          // the top while arrowing/typing.
+                          useEffect(() => {
+                            setAssigneeHighlight(
+                              (h) =>
+                                assigneeList.length ===
+                                0
+                                  ? 0
+                                  : Math.min(
+                                      h,
+                                      assigneeList.length -
+                                        1
+                                    )
                             );
+                          }, [
+                            assigneeList.length,
+                            assigneeVal
+                          ]);
 
                           return (
                             <div
@@ -11160,10 +11189,91 @@ export const Editor: React.FC<
                                     if (
                                       e.key ===
                                       "Escape"
-                                    )
+                                    ) {
                                       setAssigneeOpen(
                                         false
                                       );
+                                      (
+                                        e.target as HTMLInputElement
+                                      ).blur();
+                                      return;
+                                    }
+                                    if (
+                                      e.key ===
+                                      "Enter"
+                                    ) {
+                                      // Confirms whatever's typed (a
+                                      // highlighted suggestion if the
+                                      // dropdown is open, otherwise the
+                                      // free-typed value as-is) and blurs —
+                                      // without this, Enter used to do
+                                      // nothing when there was no exact
+                                      // suggestion highlighted, leaving the
+                                      // field focused and editable, which
+                                      // read as "nothing happened".
+                                      e.preventDefault();
+                                      const picked =
+                                        assigneeOpen
+                                          ? assigneeList[
+                                              assigneeHighlight
+                                            ]
+                                          : undefined;
+                                      if (
+                                        picked
+                                      ) {
+                                        onUpdateFrontMatter(
+                                          {
+                                            assignee:
+                                              picked
+                                          }
+                                        );
+                                      }
+                                      setAssigneeOpen(
+                                        false
+                                      );
+                                      (
+                                        e.target as HTMLInputElement
+                                      ).blur();
+                                      return;
+                                    }
+                                    if (
+                                      !assigneeOpen ||
+                                      assigneeList.length ===
+                                        0
+                                    )
+                                      return;
+                                    if (
+                                      e.key ===
+                                      "ArrowDown"
+                                    ) {
+                                      e.preventDefault();
+                                      setAssigneeHighlight(
+                                        (
+                                          h
+                                        ) =>
+                                          Math.min(
+                                            h +
+                                              1,
+                                            assigneeList.length -
+                                              1
+                                          )
+                                      );
+                                    } else if (
+                                      e.key ===
+                                      "ArrowUp"
+                                    ) {
+                                      e.preventDefault();
+                                      setAssigneeHighlight(
+                                        (
+                                          h
+                                        ) =>
+                                          Math.max(
+                                            h -
+                                              1,
+                                            0
+                                          )
+                                      );
+                                    }
                                   }}
                                   className="w-full bg-transparent hover:bg-slate-800/40 focus:bg-slate-900 border border-transparent focus:border-slate-800 rounded px-2.5 py-1 text-slate-200 outline-none transition"
                                 />
@@ -11171,19 +11281,21 @@ export const Editor: React.FC<
                                   assigneeUsers.length >
                                     0 && (
                                     <div className="absolute top-full left-0 right-0 mt-1 bg-[#1c2330] border border-slate-700 rounded-lg shadow-xl z-50 overflow-hidden">
-                                      {(assigneeVal ===
-                                      ""
-                                        ? assigneeUsers
-                                        : filtered
-                                      ).map(
+                                      {assigneeList.map(
                                         (
-                                          u
+                                          u,
+                                          i
                                         ) => (
                                           <button
                                             key={
                                               u
                                             }
                                             type="button"
+                                            onMouseEnter={() =>
+                                              setAssigneeHighlight(
+                                                i
+                                              )
+                                            }
                                             onMouseDown={(
                                               e
                                             ) => {
@@ -11198,7 +11310,7 @@ export const Editor: React.FC<
                                                 false
                                               );
                                             }}
-                                            className={`w-full text-left px-3 py-2 text-xs hover:bg-slate-700 transition ${u === assigneeVal ? "text-indigo-400 bg-indigo-500/10" : "text-slate-300"}`}
+                                            className={`w-full text-left px-3 py-2 text-xs transition ${i === assigneeHighlight ? "bg-slate-700 text-slate-100" : u === assigneeVal ? "text-indigo-400 bg-indigo-500/10" : "text-slate-300 hover:bg-slate-700"}`}
                                           >
                                             {
                                               u
@@ -11208,7 +11320,7 @@ export const Editor: React.FC<
                                       )}
                                       {assigneeVal !==
                                         "" &&
-                                        filtered.length ===
+                                        assigneeList.length ===
                                           0 && (
                                           <div className="px-3 py-2 text-xs text-slate-500 italic">
                                             No
