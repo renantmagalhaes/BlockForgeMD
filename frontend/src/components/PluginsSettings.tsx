@@ -17,6 +17,8 @@ type GCalConfig = {
   clientId: string
   hasClientSecret: boolean
   pollIntervalSeconds: number
+  workspaces: string[]
+  productionConfirmed: boolean
   redirectUri: string
   isPrivateHost: boolean
 }
@@ -121,6 +123,13 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
   const [clientId, setClientId] = useState('')
   const [clientSecret, setClientSecret] = useState('')
   const [pollIntervalMinutes, setPollIntervalMinutes] = useState(2)
+  const [allWorkspaces, setAllWorkspaces] = useState<string[]>([])
+  const [selectedWorkspaces, setSelectedWorkspaces] = useState<string[]>([])
+  // Tracked separately from selectedWorkspaces: an empty selection is
+  // ambiguous on its own (it's also what "All workspaces" looks like on the
+  // wire), so this is what actually drives showing the per-workspace
+  // checkboxes vs. the "All workspaces" state.
+  const [restrictWorkspaces, setRestrictWorkspaces] = useState(false)
   const [savingConfig, setSavingConfig] = useState(false)
   const [configMsg, setConfigMsg] = useState('')
   const [syncing, setSyncing] = useState(false)
@@ -135,7 +144,16 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
         setConfig(d)
         setClientId(d.clientId ?? '')
         if (d.pollIntervalSeconds) setPollIntervalMinutes(Math.round(d.pollIntervalSeconds / 60) || 1)
+        setSelectedWorkspaces(d.workspaces ?? [])
+        setRestrictWorkspaces((d.workspaces ?? []).length > 0)
       })
+      .catch(() => {})
+  }
+
+  function reloadWorkspaceList() {
+    fetch('/api/workspaces', { credentials: 'include' })
+      .then(r => r.json())
+      .then(d => setAllWorkspaces(d.workspaces ?? []))
       .catch(() => {})
   }
 
@@ -156,7 +174,7 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
       .catch(() => {})
   }
 
-  useEffect(() => { reloadConfig(); reloadStatus() }, [])
+  useEffect(() => { reloadConfig(); reloadStatus(); reloadWorkspaceList() }, [])
 
   async function changeCalendar(calendarId: string) {
     setSwitchingCalendar(true)
@@ -180,7 +198,11 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
       const res = await fetch('/api/plugins/google-calendar/config', {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId, clientSecret, pollIntervalSeconds: Math.max(1, pollIntervalMinutes) * 60 }),
+        body: JSON.stringify({
+          clientId, clientSecret,
+          pollIntervalSeconds: Math.max(1, pollIntervalMinutes) * 60,
+          workspaces: selectedWorkspaces,
+        }),
       })
       if (res.ok) {
         setConfigMsg('Saved.')
@@ -192,6 +214,26 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
     } finally {
       setSavingConfig(false)
     }
+  }
+
+  // Dismisses the Testing-vs-Production reminder banner permanently. Resends
+  // the currently-loaded clientId/pollInterval/workspaces (clientSecret blank
+  // = "leave unchanged", same as a normal save) alongside the new flag,
+  // rather than a bespoke endpoint — there's no way to verify the app is
+  // actually in Production (Google doesn't expose that to a Calendar-scoped
+  // token), so this is only ever a manual acknowledgment.
+  async function dismissProductionWarning() {
+    await fetch('/api/plugins/google-calendar/config', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        clientId, clientSecret: '',
+        pollIntervalSeconds: Math.max(1, pollIntervalMinutes) * 60,
+        workspaces: selectedWorkspaces,
+        productionConfirmed: true,
+      }),
+    })
+    reloadConfig()
   }
 
   async function connect() {
@@ -261,12 +303,28 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
           Create an OAuth Client in Google Cloud Console and register the redirect URI below, then paste the Client ID/Secret here. This is shared instance-wide — each user still connects their own Google account below.
         </p>
 
-        <div className="flex items-start gap-2 bg-amber-950/30 border border-amber-700/40 rounded-lg px-3 py-2.5 text-[11px] text-amber-300">
-          <AlertTriangle size={14} className="shrink-0 mt-0.5" />
-          <span>
-            <strong>Publish the app to Production before connecting.</strong> In Google Auth Platform → <strong>Audience</strong> tab, click <strong>Publish app</strong> to switch from Testing to Production. Skip this and every connected account will silently stop syncing and need to be reconnected every 7 days — Google forcibly expires refresh tokens while an app sits in Testing. Publishing to Production doesn't require completing Google's verification process.
-          </span>
-        </div>
+        {!config?.productionConfirmed && (
+          <div className="flex items-center gap-1.5 bg-amber-950/30 border border-amber-700/40 rounded-lg px-2.5 py-1.5 text-[11px] text-amber-300">
+            <AlertTriangle size={12} className="shrink-0" />
+            <span className="flex-1 truncate">Publish this app to Production, or connections expire every 7 days.</span>
+            <a
+              href={GOOGLE_CALENDAR_DOCS_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline hover:text-amber-100 shrink-0"
+            >
+              Docs
+            </a>
+            <span className="text-amber-700 shrink-0">·</span>
+            <button
+              type="button"
+              onClick={dismissProductionWarning}
+              className="underline hover:text-amber-100 shrink-0 cursor-pointer"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
 
         {config && (
           <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2">
@@ -312,13 +370,52 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
           Only affects picking up changes made directly in Google Calendar — edits made here sync out immediately regardless of this setting.
         </p>
 
+        <div className="space-y-1.5 pt-1">
+          <span className="text-[10px] text-slate-500">Sync workspaces</span>
+          <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={!restrictWorkspaces}
+              onChange={e => {
+                setRestrictWorkspaces(!e.target.checked)
+                // Unchecking starts from nothing selected — the user opts
+                // individual workspaces back in, rather than starting with
+                // everything checked and having to opt out.
+                setSelectedWorkspaces([])
+              }}
+              className="cursor-pointer"
+            />
+            All workspaces (default)
+          </label>
+          {restrictWorkspaces && (
+            <div className="pl-5 space-y-1">
+              {allWorkspaces.map(ws => (
+                <label key={ws} className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedWorkspaces.includes(ws)}
+                    onChange={e => setSelectedWorkspaces(prev =>
+                      e.target.checked ? [...prev, ws] : prev.filter(w => w !== ws)
+                    )}
+                    className="cursor-pointer"
+                  />
+                  {ws}
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+        <p className="text-[10px] text-slate-600">
+          This applies to every user — it's a shared, instance-wide setting, same as the credentials above. Narrowing it removes already-synced events (for everyone) outside the new scope; newly-included workspaces pick up on the next sync check.
+        </p>
+
         {configMsg && <p className="text-[10px] text-slate-400">{configMsg}</p>}
         <button
           type="submit"
           disabled={savingConfig || !clientId}
           className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-lg px-3 py-2 text-xs font-medium transition cursor-pointer"
         >
-          {savingConfig ? 'Saving…' : 'Save credentials'}
+          {savingConfig ? 'Saving…' : 'Save settings'}
         </button>
         <p className="text-[10px] text-slate-600">
           If Google shows an "unverified app" warning on connect, that's expected for a self-hosted instance — click Advanced → proceed.

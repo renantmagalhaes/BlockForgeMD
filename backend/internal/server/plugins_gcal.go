@@ -107,6 +107,8 @@ func (s *Server) handleGCalGetConfig(w http.ResponseWriter, r *http.Request) {
 		"clientId":            cfg.ClientID,
 		"hasClientSecret":     cfg.HasClientSecret,
 		"pollIntervalSeconds": cfg.PollIntervalSeconds,
+		"workspaces":          cfg.Workspaces,
+		"productionConfirmed": cfg.ProductionConfirmed,
 		"redirectUri":         s.gcalRedirectURI(r),
 		"isPrivateHost":       isPrivateIPHost(gcalRequestHost(r)),
 	})
@@ -115,15 +117,17 @@ func (s *Server) handleGCalGetConfig(w http.ResponseWriter, r *http.Request) {
 // POST /api/plugins/google-calendar/config
 func (s *Server) handleGCalSetConfig(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ClientID            string `json:"clientId"`
-		ClientSecret        string `json:"clientSecret"`
-		PollIntervalSeconds *int   `json:"pollIntervalSeconds"`
+		ClientID            string   `json:"clientId"`
+		ClientSecret        string   `json:"clientSecret"`
+		PollIntervalSeconds *int     `json:"pollIntervalSeconds"`
+		Workspaces          []string `json:"workspaces"`
+		ProductionConfirmed *bool    `json:"productionConfirmed"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if err := s.gcalPlugin().SetConfig(req.ClientID, req.ClientSecret, req.PollIntervalSeconds); err != nil {
+	if err := s.gcalPlugin().SetConfig(r.Context(), req.ClientID, req.ClientSecret, req.PollIntervalSeconds, req.Workspaces, req.ProductionConfirmed); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}

@@ -150,6 +150,13 @@ func (p *Plugin) pushFile(ctx context.Context, acct db.GCalAccount, relPath stri
 		title = file.Title
 	}
 
+	// A page outside the configured workspace scope is treated exactly like
+	// one with no due date — same cleanup-if-previously-synced path below,
+	// just triggered by scope instead of an empty dueDate.
+	if !p.workspaceAllowed(relPath) {
+		dueDate = ""
+	}
+
 	if dueDate == "" {
 		// File deleted, or its dueDate was cleared — remove the mapped event, if any.
 		if state == nil {

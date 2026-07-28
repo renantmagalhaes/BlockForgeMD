@@ -8,8 +8,10 @@ package googlecalendar
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +24,22 @@ const ID = "google-calendar"
 
 const defaultPollInterval = 2 * time.Minute
 const pollIntervalSettingKey = "plugin_gcal_poll_interval_seconds"
+
+// workspacesSettingKey stores a JSON array of workspace names in sync scope.
+// An empty/absent value means "all workspaces" — the default, so upgrading
+// doesn't silently narrow anyone's existing sync scope.
+const workspacesSettingKey = "plugin_gcal_workspaces"
+
+// productionConfirmedSettingKey records that someone has confirmed the
+// Google OAuth Client is published to Production (not left in Testing,
+// which forces every connection to expire and reconnect every 7 days).
+// There's no way to verify this via API — Google doesn't expose OAuth
+// consent screen publishing status to a Calendar-scoped token, and querying
+// it at all would require the much broader cloud-platform scope plus GCP
+// project admin rights, disproportionate to what this plugin needs and not
+// available to most users anyway — so this is a manual acknowledgment, used
+// only to stop showing the reminder banner once someone has confirmed it.
+const productionConfirmedSettingKey = "plugin_gcal_production_confirmed"
 
 // AppBaseURLSettingKey stores the public origin (scheme + host) this
 // instance is reached at, captured by the server package as a side effect of
@@ -139,6 +157,114 @@ func (p *Plugin) SetPollIntervalSeconds(seconds int) error {
 		return fmt.Errorf("poll interval must be at least %d seconds", minSeconds)
 	}
 	return p.db.SetSetting(pollIntervalSettingKey, strconv.Itoa(seconds))
+}
+
+// workspaceOf returns the workspace name a vault-relative path belongs to —
+// the first path segment (e.g. "Default/Boards/board/task.md" -> "Default").
+func workspaceOf(relPath string) string {
+	if idx := strings.Index(relPath, "/"); idx >= 0 {
+		return relPath[:idx]
+	}
+	return relPath
+}
+
+// AllowedWorkspaces returns the configured workspace allowlist. An empty
+// slice means "all workspaces" (the default) — this is instance-wide, shared
+// by every user, same as the Client ID/Secret and poll interval.
+func (p *Plugin) AllowedWorkspaces() []string {
+	raw, _ := p.db.GetSetting(workspacesSettingKey, "")
+	if raw == "" {
+		return nil
+	}
+	var list []string
+	if err := json.Unmarshal([]byte(raw), &list); err != nil {
+		return nil
+	}
+	return list
+}
+
+func (p *Plugin) workspaceAllowed(relPath string) bool {
+	allowed := p.AllowedWorkspaces()
+	if len(allowed) == 0 {
+		return true // unrestricted — the default
+	}
+	ws := workspaceOf(relPath)
+	for _, w := range allowed {
+		if w == ws {
+			return true
+		}
+	}
+	return false
+}
+
+// SetAllowedWorkspaces updates which workspaces are in sync scope. If this
+// narrows the scope, it best-effort cleans up every already-synced event
+// (across every connected user, since this setting is shared instance-wide)
+// whose page now falls outside it — mirroring how SetCalendar cleans up
+// before switching calendars, so narrowing the scope doesn't leave orphaned
+// events sitting untracked in anyone's Google Calendar. Newly *included*
+// workspaces aren't proactively pushed here; they pick up on the next
+// periodic sync pass (or an explicit Sync now), same as SetCalendar.
+func (p *Plugin) SetAllowedWorkspaces(ctx context.Context, workspaces []string) error {
+	if workspaces == nil {
+		workspaces = []string{}
+	}
+	encoded, err := json.Marshal(workspaces)
+	if err != nil {
+		return err
+	}
+	if err := p.db.SetSetting(workspacesSettingKey, string(encoded)); err != nil {
+		return err
+	}
+	if len(workspaces) == 0 {
+		return nil // now unrestricted — nothing could have fallen out of scope
+	}
+
+	allowed := make(map[string]bool, len(workspaces))
+	for _, w := range workspaces {
+		allowed[w] = true
+	}
+
+	accounts, err := p.db.ListGCalAccounts()
+	if err != nil {
+		return nil // best-effort cleanup — don't fail the settings save over this
+	}
+	for _, acct := range accounts {
+		mappings, err := p.db.ListGCalSyncState(acct.UserID)
+		if err != nil {
+			continue
+		}
+		client, cerr := p.httpClientForUser(ctx, &acct)
+		if cerr != nil {
+			logf("could not build client to clean up out-of-scope events for user %s: %v", acct.UserID, cerr)
+			continue
+		}
+		for _, m := range mappings {
+			if allowed[workspaceOf(m.FilePath)] {
+				continue
+			}
+			if derr := DeleteEvent(ctx, client, acct.CalendarID, m.GoogleEventID); derr != nil {
+				logf("failed to delete event %s while narrowing workspace scope for user %s: %v", m.GoogleEventID, acct.UserID, derr)
+			}
+			_ = p.db.DeleteGCalSyncStateByPath(acct.UserID, m.FilePath)
+		}
+	}
+	return nil
+}
+
+// ProductionConfirmed reports whether someone has acknowledged publishing
+// the OAuth Client to Production (see productionConfirmedSettingKey).
+func (p *Plugin) ProductionConfirmed() bool {
+	raw, _ := p.db.GetSetting(productionConfirmedSettingKey, "")
+	return raw == "true"
+}
+
+func (p *Plugin) SetProductionConfirmed(confirmed bool) error {
+	value := "false"
+	if confirmed {
+		value = "true"
+	}
+	return p.db.SetSetting(productionConfirmedSettingKey, value)
 }
 
 // OnFileChanged pushes a single changed page's dueDate to every connected

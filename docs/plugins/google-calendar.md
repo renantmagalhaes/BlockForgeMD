@@ -4,6 +4,8 @@ Two-way sync between any page's `dueDate` (task, note, or document — anything 
 
 Each BlockForgeMD user connects their own Google account. To enable the plugin at all, you first need to create a Google OAuth Client (Client ID + Secret) and paste it into **Settings → Plugins → Google Calendar** — this is a one-time, instance-wide setup step.
 
+**Important:** only the Google account connection is per-user. Everything else — the Client ID/Secret, the poll interval, and which workspaces sync — is shared across every user on this instance, since all users currently hit the same plugin configuration. Whoever sets these up is setting them up for everyone; see [docs/plugins/README.md](README.md).
+
 > ## ⚠️ Requirement: BlockForgeMD must be reachable at a real hostname, not a private IP
 >
 > **This plugin cannot work if you access BlockForgeMD at a private/LAN IP address** — e.g. `http://10.0.10.10:8080`, `http://192.168.1.50:8080`, or `http://172.16.x.x:8080` (any RFC1918 range). Google's OAuth rejects private IP addresses as redirect URIs outright, failing with a confusing `Error 400: invalid_request` / *"device_id and device_name are required for private IP"* message that has nothing to do with BlockForgeMD itself — it's Google refusing the request before it ever reaches this app.
@@ -73,3 +75,9 @@ With the app published (step 3) and a connection established, it's effectively p
 ## Choosing which calendar to sync to
 
 By default, events sync to your Google account's primary calendar. To use a different one (e.g. a dedicated "BlockForgeMD" calendar), open **Settings → Plugins → Google Calendar** and pick from the **Sync to calendar** dropdown — it lists every calendar your account can write to. Switching calendars deletes previously synced events from the old calendar and recreates them on the newly selected one on the next sync pass, so nothing is left duplicated.
+
+## Choosing which workspaces sync
+
+By default, **all workspaces** in the vault sync — this is the default for backward compatibility, so nothing changes for anyone until they touch this setting. To restrict sync to specific workspaces, open **Settings → Plugins → Google Calendar**, uncheck **All workspaces**, and pick individual ones from the list.
+
+This is a **shared, instance-wide setting** — like the OAuth Client ID/Secret and the poll interval, it applies the same way to every connected user, not per-account (see the note in [docs/plugins/README.md](README.md) about plugin config being shared across users). Narrowing the scope best-effort deletes already-synced events (across every connected user) for pages that fall outside the new selection; newly-included workspaces aren't pushed immediately — they pick up on the next sync check, or via **Sync now**.

@@ -19,9 +19,11 @@ import (
 
 // ConfigResult is returned to the frontend's instance-wide config panel.
 type ConfigResult struct {
-	ClientID            string `json:"clientId"`
-	HasClientSecret     bool   `json:"hasClientSecret"`
-	PollIntervalSeconds int    `json:"pollIntervalSeconds"`
+	ClientID            string   `json:"clientId"`
+	HasClientSecret     bool     `json:"hasClientSecret"`
+	PollIntervalSeconds int      `json:"pollIntervalSeconds"`
+	Workspaces          []string `json:"workspaces"`          // empty = all workspaces (default)
+	ProductionConfirmed bool     `json:"productionConfirmed"` // hides the Testing-mode reminder banner once true
 }
 
 func (p *Plugin) GetConfig() (ConfigResult, error) {
@@ -29,16 +31,26 @@ func (p *Plugin) GetConfig() (ConfigResult, error) {
 	if err != nil {
 		return ConfigResult{}, err
 	}
+	workspaces := p.AllowedWorkspaces()
+	if workspaces == nil {
+		workspaces = []string{}
+	}
 	return ConfigResult{
 		ClientID:            clientID,
 		HasClientSecret:     hasSecret,
 		PollIntervalSeconds: p.PollIntervalSeconds(),
+		Workspaces:          workspaces,
+		ProductionConfirmed: p.ProductionConfirmed(),
 	}, nil
 }
 
-// SetConfig saves the shared Client ID/Secret and, if pollIntervalSeconds is
-// non-nil, updates the background sync interval too.
-func (p *Plugin) SetConfig(clientID, clientSecret string, pollIntervalSeconds *int) error {
+// SetConfig saves the shared Client ID/Secret, and if pollIntervalSeconds or
+// productionConfirmed are non-nil, updates those too. workspaces replaces the
+// full workspace allowlist every time (nil/empty means "all workspaces") —
+// unlike clientSecret there's no masking concern, so the frontend always
+// round-trips the complete current selection rather than needing partial-
+// update semantics.
+func (p *Plugin) SetConfig(ctx context.Context, clientID, clientSecret string, pollIntervalSeconds *int, workspaces []string, productionConfirmed *bool) error {
 	if err := p.SaveClientCredentials(clientID, clientSecret); err != nil {
 		return err
 	}
@@ -46,6 +58,14 @@ func (p *Plugin) SetConfig(clientID, clientSecret string, pollIntervalSeconds *i
 		if err := p.SetPollIntervalSeconds(*pollIntervalSeconds); err != nil {
 			return err
 		}
+	}
+	if productionConfirmed != nil {
+		if err := p.SetProductionConfirmed(*productionConfirmed); err != nil {
+			return err
+		}
+	}
+	if err := p.SetAllowedWorkspaces(ctx, workspaces); err != nil {
+		return err
 	}
 	return nil
 }
