@@ -10576,17 +10576,15 @@ export const Editor: React.FC<
                                 )[1]
                               : "";
 
-                          const parseH12 =
+                          // 24-hour ("military time") — no AM/PM concept.
+                          const parseTime =
                             (
                               t: string
                             ) => {
                               if (!t)
                                 return {
                                   h: 9,
-                                  m: 0,
-                                  ampm: "AM" as
-                                    | "AM"
-                                    | "PM"
+                                  m: 0
                                 };
                               const [
                                 hh,
@@ -10599,54 +10597,23 @@ export const Editor: React.FC<
                                   Number
                                 );
                               return {
-                                h:
-                                  hh %
-                                    12 ||
-                                  12,
-                                m: mm,
-                                ampm: (hh >=
-                                12
-                                  ? "PM"
-                                  : "AM") as
-                                  | "AM"
-                                  | "PM"
+                                h: hh,
+                                m: mm
                               };
                             };
                           const {
                             h: selH,
-                            m: selM,
-                            ampm: selAp
-                          } = parseH12(
+                            m: selM
+                          } = parseTime(
                             timePart
                           );
 
-                          const toH24 =
-                            (
-                              h: number,
-                              ap:
-                                | "AM"
-                                | "PM"
-                            ) =>
-                              ap ===
-                              "PM"
-                                ? h ===
-                                  12
-                                  ? 12
-                                  : h +
-                                    12
-                                : h ===
-                                    12
-                                  ? 0
-                                  : h;
                           const buildTime =
                             (
                               h: number,
-                              m: number,
-                              ap:
-                                | "AM"
-                                | "PM"
+                              m: number
                             ) =>
-                              `${String(toH24(h, ap)).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+                              `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
                           const setDue =
                             (
                               d: string,
@@ -10849,7 +10816,7 @@ export const Editor: React.FC<
                                         }
                                       />
                                       {hasTime
-                                        ? `${selH}:${String(selM).padStart(2, "0")} ${selAp}`
+                                        ? `${String(selH).padStart(2, "0")}:${String(selM).padStart(2, "0")}`
                                         : "Time"}
                                     </button>
                                   )}
@@ -10874,14 +10841,14 @@ export const Editor: React.FC<
                                                   .target
                                                   .value
                                               ),
-                                              selM,
-                                              selAp
+                                              selM
                                             )
                                           )
                                         }
                                         className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-300 text-xs outline-none cursor-pointer"
                                       >
                                         {[
+                                          0,
                                           1,
                                           2,
                                           3,
@@ -10893,7 +10860,18 @@ export const Editor: React.FC<
                                           9,
                                           10,
                                           11,
-                                          12
+                                          12,
+                                          13,
+                                          14,
+                                          15,
+                                          16,
+                                          17,
+                                          18,
+                                          19,
+                                          20,
+                                          21,
+                                          22,
+                                          23
                                         ].map(
                                           (
                                             h
@@ -10906,9 +10884,12 @@ export const Editor: React.FC<
                                                 h
                                               }
                                             >
-                                              {
+                                              {String(
                                                 h
-                                              }
+                                              ).padStart(
+                                                2,
+                                                "0"
+                                              )}
                                             </option>
                                           )
                                         )}
@@ -10931,8 +10912,7 @@ export const Editor: React.FC<
                                                 e
                                                   .target
                                                   .value
-                                              ),
-                                              selAp
+                                              )
                                             )
                                           )
                                         }
@@ -10973,40 +10953,6 @@ export const Editor: React.FC<
                                           )
                                         )}
                                       </select>
-                                      <div className="flex rounded overflow-hidden border border-slate-700 text-xs">
-                                        {(
-                                          [
-                                            "AM",
-                                            "PM"
-                                          ] as const
-                                        ).map(
-                                          (
-                                            ap
-                                          ) => (
-                                            <button
-                                              key={
-                                                ap
-                                              }
-                                              type="button"
-                                              onClick={() =>
-                                                setDue(
-                                                  datePart,
-                                                  buildTime(
-                                                    selH,
-                                                    selM,
-                                                    ap
-                                                  )
-                                                )
-                                              }
-                                              className={`px-2.5 py-1 transition ${selAp === ap ? "bg-violet-600 text-white" : "bg-slate-800 text-slate-400 hover:text-slate-200"}`}
-                                            >
-                                              {
-                                                ap
-                                              }
-                                            </button>
-                                          )
-                                        )}
-                                      </div>
                                     </div>
                                   )}
                               </div>
