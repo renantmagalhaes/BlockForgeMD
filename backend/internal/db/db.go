@@ -140,6 +140,36 @@ func (db *DB) createTables() error {
 			last_used_at DATETIME,
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 		);`,
+		`CREATE TABLE IF NOT EXISTS plugin_secrets (
+			key TEXT PRIMARY KEY,
+			value_enc BLOB NOT NULL,
+			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		);`,
+		`CREATE TABLE IF NOT EXISTS plugin_gcal_accounts (
+			user_id TEXT PRIMARY KEY,
+			google_email TEXT,
+			access_token_enc BLOB,
+			refresh_token_enc BLOB NOT NULL,
+			token_expiry DATETIME,
+			calendar_id TEXT NOT NULL DEFAULT 'primary',
+			sync_token TEXT,
+			last_sync_at DATETIME,
+			last_sync_error TEXT,
+			connected_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		);`,
+		`CREATE TABLE IF NOT EXISTS plugin_gcal_sync_state (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			file_path TEXT NOT NULL,
+			google_event_id TEXT NOT NULL,
+			last_due_date TEXT,
+			local_content_hash TEXT,
+			last_synced_at DATETIME,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			UNIQUE (user_id, file_path),
+			UNIQUE (user_id, google_event_id)
+		);`,
 	}
 
 	for _, q := range queries {

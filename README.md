@@ -1,4 +1,4 @@
-# BlockForgeMD `v0.9`
+# BlockForgeMD `v1.0`
 
 > A local-first knowledge base built on plain Markdown. Your notes live as files on disk -> portable, integrable with any tool, and independent of any cloud service.
 
@@ -175,6 +175,17 @@ The full interactive API reference is built in and served at:
 ```text
 http://localhost:8080/docs
 ```
+
+---
+
+## Plugins
+
+A plugin store (**Settings → Plugins**) for connecting external tools, calendars, and AI providers directly into your workspace.
+
+- **Google Calendar** — 2-way sync between any page's due date and events on your Google Calendar. See [docs/plugins/google-calendar.md](docs/plugins/google-calendar.md) for setup (creating a Google OAuth Client, etc).
+- **MCP Servers**, **LLM Providers** — coming soon.
+
+See [docs/plugins/](docs/plugins/) for the full list and setup guides.
 
 ---
 

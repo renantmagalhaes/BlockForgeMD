@@ -8,10 +8,12 @@ require (
 	github.com/go-chi/chi/v5 v5.3.0
 	github.com/mattn/go-sqlite3 v1.14.47
 	golang.org/x/crypto v0.53.0
+	golang.org/x/oauth2 v0.36.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
+	cloud.google.com/go/compute/metadata v0.3.0 // indirect
 	github.com/chromedp/cdproto v0.0.0-20260321001828-e3e3800016bc // indirect
 	github.com/chromedp/sysutil v1.1.0 // indirect
 	github.com/go-json-experiment/json v0.0.0-20260214004413-d219187c3433 // indirect

@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"blockforgemd/internal/cryptoutil"
 	"blockforgemd/internal/db"
 	"blockforgemd/internal/server"
 	"blockforgemd/internal/watcher"
@@ -65,8 +66,19 @@ func main() {
 		log.Fatalf("Failed to start file watcher: %v", err)
 	}
 
+	// Load (or generate) the encryption key used to store plugin secrets
+	// (OAuth client secrets, per-user refresh/access tokens) at rest.
+	encKey, err := cryptoutil.LoadOrCreateKey(workspacePath)
+	if err != nil {
+		log.Fatalf("Failed to load plugin encryption key: %v", err)
+	}
+
 	// Initialize HTTP and SSE Server
-	apiServer := server.NewServer(workspacePath, cacheDB, fsWatcher)
+	apiServer := server.NewServer(workspacePath, cacheDB, fsWatcher, encKey)
+	defer func() {
+		log.Printf("Stopping plugins...")
+		apiServer.StopPlugins()
+	}()
 
 	// In production, we'll embed the frontend assets and serve them.
 	// For local dev, Vite runs on its own port, so we only need to host the API.

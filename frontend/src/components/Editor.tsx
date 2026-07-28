@@ -10657,7 +10657,17 @@ export const Editor: React.FC<
                                   dueDate:
                                     t
                                       ? `${d}T${t}`
-                                      : d
+                                      : d,
+                                  // Recorded alongside dueDate only when a
+                                  // time is set, so the Google Calendar
+                                  // plugin can place the event at the right
+                                  // wall-clock time instead of assuming UTC.
+                                  // Cleared (null) for date-only due dates.
+                                  dueTimeZone:
+                                    t
+                                      ? Intl.DateTimeFormat().resolvedOptions()
+                                          .timeZone
+                                      : null
                                 }
                               );
 

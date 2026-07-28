@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,8 @@ import (
 
 	"blockforgemd/internal/db"
 	"blockforgemd/internal/parser"
+	"blockforgemd/internal/plugins"
+	"blockforgemd/internal/plugins/googlecalendar"
 	"blockforgemd/internal/watcher"
 
 	"github.com/go-chi/chi/v5"
@@ -32,15 +35,24 @@ type Server struct {
 	clients   map[chan string]bool
 	clientsMu sync.Mutex
 	router    *chi.Mux
+	plugins   *plugins.Registry
 }
 
-func NewServer(rootPath string, database *db.DB, w *watcher.Watcher) *Server {
+func NewServer(rootPath string, database *db.DB, w *watcher.Watcher, encKey [32]byte) *Server {
 	s := &Server{
 		db:       database,
 		watcher:  w,
 		rootPath: rootPath,
 		clients:  make(map[chan string]bool),
 		router:   chi.NewRouter(),
+		plugins:  plugins.NewRegistry(),
+	}
+
+	s.plugins.Register(googlecalendar.New(database, s, encKey))
+	s.plugins.RegisterComingSoon(plugins.Meta{ID: "mcp-servers", Name: "MCP Servers", Category: "mcp"})
+	s.plugins.RegisterComingSoon(plugins.Meta{ID: "llm-providers", Name: "LLM Providers", Category: "llm"})
+	if err := s.plugins.StartAll(context.Background()); err != nil {
+		log.Printf("plugins: failed to start: %v", err)
 	}
 
 	s.setupRoutes()
@@ -48,6 +60,13 @@ func NewServer(rootPath string, database *db.DB, w *watcher.Watcher) *Server {
 	s.startTrashCleanup()
 
 	return s
+}
+
+// StopPlugins cancels every registered plugin's background work and waits
+// for it to unwind — called during graceful shutdown alongside the file
+// watcher and DB connection.
+func (s *Server) StopPlugins() {
+	s.plugins.StopAll()
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -128,7 +147,22 @@ func (s *Server) setupRoutes() {
 		r.Get("/keys", s.handleListAPIKeys)
 		r.Post("/keys", s.handleCreateAPIKey)
 		r.Delete("/keys/{id}", s.handleDeleteAPIKey)
+
+		r.Get("/plugins", s.handleListPlugins)
+		r.Get("/plugins/google-calendar/config", s.handleGCalGetConfig)
+		r.Post("/plugins/google-calendar/config", s.handleGCalSetConfig)
+		r.Get("/plugins/google-calendar/oauth/start", s.handleGCalOAuthStart)
+		r.Post("/plugins/google-calendar/disconnect", s.handleGCalDisconnect)
+		r.Get("/plugins/google-calendar/status", s.handleGCalStatus)
+		r.Post("/plugins/google-calendar/sync-now", s.handleGCalSyncNow)
+		r.Get("/plugins/google-calendar/calendars", s.handleGCalListCalendars)
+		r.Post("/plugins/google-calendar/calendar", s.handleGCalSetCalendar)
 	})
+
+	// Google's OAuth redirect lands here with the bare browser (no session
+	// cookie context useful to us), so this can't sit behind requireAuth like
+	// the rest of /api — the signed `state` param is what authenticates it.
+	s.router.Get("/api/plugins/google-calendar/oauth/callback", s.handleGCalOAuthCallback)
 
 	// API reference docs page
 	s.router.Get("/docs", s.handleGetDocs)
@@ -155,6 +189,8 @@ func (s *Server) listenForWatcherUpdates() {
 }
 
 func (s *Server) broadcastEvent(path string) {
+	s.plugins.NotifyFileChanged(path)
+
 	s.clientsMu.Lock()
 	defer s.clientsMu.Unlock()
 	for clientChan := range s.clients {
@@ -415,31 +451,39 @@ func (s *Server) handleUpdateFrontMatter(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	s.watcher.LockPath(req.Path)
-	defer s.watcher.UnlockPath(req.Path)
-
-	newHash, err := parser.UpdateFrontMatterInFile(s.rootPath, req.Path, req.Updates)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to update front matter: %v", err), http.StatusInternalServerError)
+	if err := s.UpdateFrontMatter(req.Path, req.Updates); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	respondJSON(w, map[string]interface{}{"status": "success"})
+}
 
-	// Re-index file metadata
-	res, err := parser.ParseFile(s.rootPath, req.Path)
+// UpdateFrontMatter applies a front-matter patch to a file through the same
+// locking / reindexing / SSE-broadcast path handleUpdateFrontMatter uses over
+// HTTP. Exported so plugins (e.g. googlecalendar.Plugin, via the LocalWriter
+// interface) can safely write back page changes driven by an external event,
+// such as a Google Calendar event's date changing.
+func (s *Server) UpdateFrontMatter(relPath string, updates map[string]interface{}) error {
+	s.watcher.LockPath(relPath)
+	defer s.watcher.UnlockPath(relPath)
+
+	newHash, err := parser.UpdateFrontMatterInFile(s.rootPath, relPath, updates)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to parse file: %v", err), http.StatusInternalServerError)
-		return
+		return fmt.Errorf("failed to update front matter: %w", err)
+	}
+
+	res, err := parser.ParseFile(s.rootPath, relPath)
+	if err != nil {
+		return fmt.Errorf("failed to parse file: %w", err)
 	}
 	res.Record.ContentHash = newHash
 
-	err = s.db.UpsertFile(res.Record, res.FrontMatter, res.Tasks)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to update cache: %v", err), http.StatusInternalServerError)
-		return
+	if err := s.db.UpsertFile(res.Record, res.FrontMatter, res.Tasks); err != nil {
+		return fmt.Errorf("failed to update cache: %w", err)
 	}
 
-	s.broadcastEvent(req.Path)
-	respondJSON(w, map[string]interface{}{"status": "success", "file": res.Record})
+	s.broadcastEvent(relPath)
+	return nil
 }
 
 // handleUpdateTaskStatus toggles standard markdown checklist tasks status on save

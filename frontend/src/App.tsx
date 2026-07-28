@@ -43,6 +43,7 @@ import {
   Image as ImageIcon,
   Upload,
   Palette,
+  Puzzle,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import Editor from './components/Editor'
@@ -53,6 +54,7 @@ import MindMap from './components/MindMap'
 import TrashPanel from './components/TrashPanel'
 import { GraphView } from './components/GraphView'
 import LoginScreen from './components/LoginScreen'
+import PluginsSettings from './components/PluginsSettings'
 import { useIsMobile } from './lib/useIsMobile'
 import { DialogHost, alertDialog, confirmDialog } from './lib/dialog'
 import { splitFrontMatter } from './lib/frontMatter'
@@ -104,7 +106,7 @@ interface TreeNode {
   frontMatter?: Record<string, string>
 }
 
-const APP_VERSION = '0.9'
+const APP_VERSION = '1.0'
 
 // Safely embeds a string as a YAML double-quoted scalar. New-file/rename
 // content is built as hand-written frontmatter templates (not run through a
@@ -1399,7 +1401,7 @@ const App: React.FC = () => {
   const [authStatus, setAuthStatus] = useState<'loading' | 'bootstrap' | 'unauthenticated' | 'authenticated'>('loading')
   const [currentUser, setCurrentUser] = useState<{ id: string; username: string } | null>(null)
   const [adminModalOpen, setAdminModalOpen] = useState(false)
-  const [settingsTab, setSettingsTab] = useState<'general' | 'appearance' | 'editor' | 'history' | 'about' | 'users' | 'access'>('general')
+  const [settingsTab, setSettingsTab] = useState<'general' | 'appearance' | 'editor' | 'history' | 'about' | 'users' | 'access' | 'plugins'>('general')
   const settingsScrollRef = useRef<HTMLDivElement>(null)
   const [settingsScrollable, setSettingsScrollable] = useState(false)
   const checkSettingsScroll = () => {
@@ -3981,6 +3983,7 @@ const App: React.FC = () => {
                     { id: 'history'    as const, label: 'Backups & History', icon: <HistoryIcon size={14} className="text-rose-400" /> },
                     { id: 'users'      as const, label: 'Users',             icon: <Users size={14} className="text-cyan-400" /> },
                     { id: 'access'     as const, label: 'API Keys',          icon: <Key size={14} className="text-yellow-400" /> },
+                    { id: 'plugins'    as const, label: 'Plugins',          icon: <Puzzle size={14} className="text-pink-400" /> },
                     { id: 'about'      as const, label: 'About & System',   icon: <Layers size={14} className="text-blue-400" /> },
                   ].map((tab) => (
                     <button
@@ -4772,6 +4775,10 @@ const App: React.FC = () => {
 
                   {settingsTab === 'access' && (
                     <AccessTab currentUserId={currentUser?.id ?? ''} />
+                  )}
+
+                  {settingsTab === 'plugins' && (
+                    <PluginsSettings />
                   )}
                   </div>
 

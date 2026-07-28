@@ -39,7 +39,8 @@ func TestSaveFileBackupAndPruning(t *testing.T) {
 	defer w.Close()
 
 	// Initialize server
-	s := NewServer(tempDir, database, w)
+	var encKey [32]byte
+	s := NewServer(tempDir, database, w, encKey)
 
 	relPath := "test-note.md"
 	fullPath := filepath.Join(tempDir, relPath)
@@ -136,7 +137,8 @@ func newTestServer(t *testing.T) (*Server, string) {
 	}
 	t.Cleanup(func() { w.Close() })
 
-	return NewServer(tempDir, database, w), tempDir
+	var encKey [32]byte
+	return NewServer(tempDir, database, w, encKey), tempDir
 }
 
 // noteWithRelativeAsset writes a note plus a physical asset under it,
