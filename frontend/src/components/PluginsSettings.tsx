@@ -74,7 +74,7 @@ export default function PluginsSettings() {
   return (
     <div className="space-y-5 animate-in fade-in duration-150">
       <h4 className="font-bold text-sm text-slate-100">Plugins</h4>
-      <p className="text-xs text-slate-500 -mt-3">
+      <p className="text-xs text-slate-500 -mt-3 break-words">
         Connect external tools, calendars, and AI providers directly into your workspace.
       </p>
 
@@ -264,28 +264,28 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
         <ChevronLeft size={14} /> Back to Plugins
       </button>
 
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Calendar size={18} className="text-blue-400" />
-          <h4 className="font-bold text-sm text-slate-100">Google Calendar</h4>
+      <div className="flex items-center flex-wrap gap-2 justify-between">
+        <div className="flex items-center gap-2 min-w-0">
+          <Calendar size={18} className="text-blue-400 shrink-0" />
+          <h4 className="font-bold text-sm text-slate-100 truncate">Google Calendar</h4>
         </div>
         <a
           href={GOOGLE_CALENDAR_DOCS_URL}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center gap-1.5 text-[11px] text-violet-400 hover:text-violet-300 transition"
+          className="flex items-center gap-1.5 text-[11px] text-violet-400 hover:text-violet-300 transition shrink-0 whitespace-nowrap"
         >
-          <BookOpen size={12} /> Setup guide
+          <BookOpen size={12} className="shrink-0" /> Setup guide
         </a>
       </div>
-      <p className="text-xs text-slate-500 -mt-3">
+      <p className="text-xs text-slate-500 -mt-3 break-words">
         Any page with a due date syncs both ways with your Google Calendar. Sync runs automatically on the interval below, or on demand.
       </p>
 
       {config?.isPrivateHost && (
         <div className="flex items-start gap-2 bg-amber-950/30 border border-amber-700/40 rounded-lg px-3 py-2.5 text-[11px] text-amber-300">
           <AlertTriangle size={14} className="shrink-0 mt-0.5" />
-          <span>
+          <span className="min-w-0 flex-1">
             <strong>This won't work from here.</strong> You're accessing BlockForgeMD at a private IP address. Google's OAuth
             rejects private IP addresses as redirect URIs, so connecting will always fail. Access the app via a hostname
             instead (e.g. add an entry to your hosts file mapping a name to this address), then reload this page — see the{' '}
@@ -296,17 +296,17 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
         </div>
       )}
 
-      {/* Instance-wide OAuth config */}
+      {/* Per-user OAuth config */}
       <form onSubmit={saveConfig} className="space-y-2 border-t border-slate-800 pt-4">
         <p className="text-xs font-semibold text-slate-400">Google OAuth credentials</p>
-        <p className="text-[10px] text-slate-500">
-          Create an OAuth Client in Google Cloud Console and register the redirect URI below, then paste the Client ID/Secret here. This is shared instance-wide — each user still connects their own Google account below.
+        <p className="text-[10px] text-slate-500 break-words">
+          Create your own OAuth Client in Google Cloud Console and register the redirect URI below, then paste your Client ID/Secret here. This is just for your account — nothing here is shared with other users on this instance.
         </p>
 
         {!config?.productionConfirmed && (
-          <div className="flex items-center gap-1.5 bg-amber-950/30 border border-amber-700/40 rounded-lg px-2.5 py-1.5 text-[11px] text-amber-300">
+          <div className="flex items-center flex-wrap gap-x-1.5 gap-y-1 bg-amber-950/30 border border-amber-700/40 rounded-lg px-2.5 py-1.5 text-[11px] text-amber-300">
             <AlertTriangle size={12} className="shrink-0" />
-            <span className="flex-1 truncate">Publish this app to Production, or connections expire every 7 days.</span>
+            <span className="flex-1 min-w-[12rem]">Publish this app to Production, or connections expire every 7 days.</span>
             <a
               href={GOOGLE_CALENDAR_DOCS_URL}
               target="_blank"
@@ -328,7 +328,7 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
 
         {config && (
           <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2">
-            <code className="flex-1 text-[10px] text-slate-300 truncate">{config.redirectUri}</code>
+            <code className="flex-1 min-w-0 text-[10px] text-slate-300 truncate">{config.redirectUri}</code>
             <button
               type="button"
               onClick={() => navigator.clipboard.writeText(config.redirectUri)}
@@ -366,7 +366,7 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
           />
           <span className="text-[10px] text-slate-500">minute{pollIntervalMinutes === 1 ? '' : 's'}</span>
         </div>
-        <p className="text-[10px] text-slate-600">
+        <p className="text-[10px] text-slate-600 break-words">
           Only affects picking up changes made directly in Google Calendar — edits made here sync out immediately regardless of this setting.
         </p>
 
@@ -397,16 +397,16 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
                     onChange={e => setSelectedWorkspaces(prev =>
                       e.target.checked ? [...prev, ws] : prev.filter(w => w !== ws)
                     )}
-                    className="cursor-pointer"
+                    className="cursor-pointer shrink-0"
                   />
-                  {ws}
+                  <span className="min-w-0 truncate">{ws}</span>
                 </label>
               ))}
             </div>
           )}
         </div>
-        <p className="text-[10px] text-slate-600">
-          This applies to every user — it's a shared, instance-wide setting, same as the credentials above. Narrowing it removes already-synced events (for everyone) outside the new scope; newly-included workspaces pick up on the next sync check.
+        <p className="text-[10px] text-slate-600 break-words">
+          This only affects your own sync — other users' sync scope is unaffected. Narrowing it removes your own already-synced events outside the new scope; newly-included workspaces pick up on the next sync check.
         </p>
 
         {configMsg && <p className="text-[10px] text-slate-400">{configMsg}</p>}
@@ -417,7 +417,7 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
         >
           {savingConfig ? 'Saving…' : 'Save settings'}
         </button>
-        <p className="text-[10px] text-slate-600">
+        <p className="text-[10px] text-slate-600 break-words">
           If Google shows an "unverified app" warning on connect, that's expected for a self-hosted instance — click Advanced → proceed.
         </p>
       </form>
@@ -440,19 +440,17 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
             {connectError && (
               <div className="flex items-start gap-1.5 bg-red-950/30 border border-red-800/40 rounded-lg px-3 py-2 text-[10px] text-red-300">
                 <XCircle size={12} className="shrink-0 mt-0.5" />
-                <span>{connectError}</span>
+                <span className="min-w-0 flex-1">{connectError}</span>
               </div>
             )}
           </>
         )}
         {status && status.connected && (
           <div className="space-y-3">
-            <div className="flex items-center justify-between px-3 py-2 bg-slate-900/50 rounded-lg text-xs text-slate-300">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 size={13} className="text-emerald-400" />
-                <span className="font-medium">{status.googleEmail}</span>
-              </div>
-              <span className="text-slate-500">{status.syncedPageCount} pages synced</span>
+            <div className="flex items-center gap-2 px-3 py-2 bg-slate-900/50 rounded-lg text-xs text-slate-300">
+              <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
+              <span className="font-medium min-w-0 truncate">{status.googleEmail}</span>
+              <span className="text-slate-500 shrink-0 ml-auto">{status.syncedPageCount} pages synced</span>
             </div>
 
             <div className="flex items-center gap-2">
@@ -469,7 +467,7 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
                 ))}
               </select>
             </div>
-            <p className="text-[10px] text-slate-600 -mt-1">
+            <p className="text-[10px] text-slate-600 -mt-1 break-words">
               Switching calendars removes previously synced events from the old one and recreates them on the new one.
             </p>
 
@@ -479,7 +477,7 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
             {status.lastSyncError && (
               <div className="flex items-start gap-1.5 bg-red-950/30 border border-red-800/40 rounded-lg px-3 py-2 text-[10px] text-red-300">
                 <XCircle size={12} className="shrink-0 mt-0.5" />
-                <span>{status.lastSyncError}</span>
+                <span className="min-w-0 flex-1">{status.lastSyncError}</span>
               </div>
             )}
             <div className="flex gap-2">

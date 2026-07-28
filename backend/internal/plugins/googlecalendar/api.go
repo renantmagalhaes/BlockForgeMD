@@ -17,7 +17,7 @@ import (
 // encoding themselves, so this package stays free of any HTTP-framework
 // dependency (chi, etc).
 
-// ConfigResult is returned to the frontend's instance-wide config panel.
+// ConfigResult is returned to the frontend's per-user config panel.
 type ConfigResult struct {
 	ClientID            string   `json:"clientId"`
 	HasClientSecret     bool     `json:"hasClientSecret"`
@@ -26,45 +26,45 @@ type ConfigResult struct {
 	ProductionConfirmed bool     `json:"productionConfirmed"` // hides the Testing-mode reminder banner once true
 }
 
-func (p *Plugin) GetConfig() (ConfigResult, error) {
-	clientID, _, hasSecret, err := p.ClientCredentials()
+func (p *Plugin) GetConfig(userID string) (ConfigResult, error) {
+	clientID, _, hasSecret, err := p.ClientCredentialsForUser(userID)
 	if err != nil {
 		return ConfigResult{}, err
 	}
-	workspaces := p.AllowedWorkspaces()
+	workspaces := p.AllowedWorkspaces(userID)
 	if workspaces == nil {
 		workspaces = []string{}
 	}
 	return ConfigResult{
 		ClientID:            clientID,
 		HasClientSecret:     hasSecret,
-		PollIntervalSeconds: p.PollIntervalSeconds(),
+		PollIntervalSeconds: p.PollIntervalSeconds(userID),
 		Workspaces:          workspaces,
-		ProductionConfirmed: p.ProductionConfirmed(),
+		ProductionConfirmed: p.ProductionConfirmed(userID),
 	}, nil
 }
 
-// SetConfig saves the shared Client ID/Secret, and if pollIntervalSeconds or
-// productionConfirmed are non-nil, updates those too. workspaces replaces the
-// full workspace allowlist every time (nil/empty means "all workspaces") —
-// unlike clientSecret there's no masking concern, so the frontend always
-// round-trips the complete current selection rather than needing partial-
-// update semantics.
-func (p *Plugin) SetConfig(ctx context.Context, clientID, clientSecret string, pollIntervalSeconds *int, workspaces []string, productionConfirmed *bool) error {
-	if err := p.SaveClientCredentials(clientID, clientSecret); err != nil {
+// SetConfig saves userID's own Client ID/Secret, and if pollIntervalSeconds
+// or productionConfirmed are non-nil, updates those too. workspaces replaces
+// the full workspace allowlist every time (nil/empty means "all
+// workspaces") — unlike clientSecret there's no masking concern, so the
+// frontend always round-trips the complete current selection rather than
+// needing partial-update semantics.
+func (p *Plugin) SetConfig(ctx context.Context, userID, clientID, clientSecret string, pollIntervalSeconds *int, workspaces []string, productionConfirmed *bool) error {
+	if err := p.SaveClientCredentialsForUser(userID, clientID, clientSecret); err != nil {
 		return err
 	}
 	if pollIntervalSeconds != nil {
-		if err := p.SetPollIntervalSeconds(*pollIntervalSeconds); err != nil {
+		if err := p.SetPollIntervalSeconds(userID, *pollIntervalSeconds); err != nil {
 			return err
 		}
 	}
 	if productionConfirmed != nil {
-		if err := p.SetProductionConfirmed(*productionConfirmed); err != nil {
+		if err := p.SetProductionConfirmed(userID, *productionConfirmed); err != nil {
 			return err
 		}
 	}
-	if err := p.SetAllowedWorkspaces(ctx, workspaces); err != nil {
+	if err := p.SetAllowedWorkspaces(ctx, userID, workspaces); err != nil {
 		return err
 	}
 	return nil
@@ -83,7 +83,7 @@ func (p *Plugin) HandleOAuthCallback(ctx context.Context, state, code, redirectU
 		return err
 	}
 
-	token, err := p.ExchangeCode(ctx, code, redirectURL)
+	token, err := p.ExchangeCode(ctx, userID, code, redirectURL)
 	if err != nil {
 		return fmt.Errorf("token exchange failed: %w", err)
 	}

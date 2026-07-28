@@ -39,14 +39,21 @@ func (p *Plugin) buildEventDescription(relPath string) string {
 }
 
 // syncAllAccounts runs one full sync pass (pull + push safety net) for every
-// connected user. Called on each poll tick.
+// connected user whose own poll interval has elapsed since their last sync.
+// Called on a fixed, short cadence (see Start) — actual per-user throttling
+// happens here, since poll interval is a per-user setting.
 func (p *Plugin) syncAllAccounts(ctx context.Context) {
 	accounts, err := p.db.ListGCalAccounts()
 	if err != nil {
 		logf("failed to list accounts: %v", err)
 		return
 	}
+	now := time.Now()
 	for _, acct := range accounts {
+		interval := time.Duration(p.PollIntervalSeconds(acct.UserID)) * time.Second
+		if acct.LastSyncAt != nil && now.Sub(*acct.LastSyncAt) < interval {
+			continue // this user's own poll interval hasn't elapsed yet
+		}
 		if err := p.syncAccount(ctx, acct); err != nil {
 			logf("sync failed for user %s: %v", acct.UserID, err)
 			_ = p.db.UpdateGCalSyncStatus(acct.UserID, time.Now(), err.Error())
@@ -143,17 +150,24 @@ func (p *Plugin) pushFile(ctx context.Context, acct db.GCalAccount, relPath stri
 		return err
 	}
 
-	var dueDate, dueTimeZone, title string
+	var dueDate, dueTimeZone, title, assignee string
 	if file != nil {
 		dueDate = file.FrontMatter["dueDate"]
 		dueTimeZone = file.FrontMatter["dueTimeZone"]
 		title = file.Title
+		assignee = file.FrontMatter["assignee"]
 	}
 
-	// A page outside the configured workspace scope is treated exactly like
-	// one with no due date — same cleanup-if-previously-synced path below,
-	// just triggered by scope instead of an empty dueDate.
-	if !p.workspaceAllowed(relPath) {
+	// A page outside the configured workspace scope, or not assigned to this
+	// account's own user, is treated exactly like one with no due date — same
+	// cleanup-if-previously-synced path below, just triggered by scope/
+	// assignee instead of an empty dueDate. The assignee check is gated
+	// behind dueDate != "" so the extra username lookup is skipped entirely
+	// for the common "already empty, nothing to reconcile" case.
+	if !p.workspaceAllowed(acct.UserID, relPath) {
+		dueDate = ""
+	}
+	if dueDate != "" && !p.assigneeMatches(acct.UserID, assignee) {
 		dueDate = ""
 	}
 

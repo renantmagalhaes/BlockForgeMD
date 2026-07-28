@@ -21,35 +21,37 @@ const scopeCalendarEvents = "https://www.googleapis.com/auth/calendar.events"
 // events sync to" picker. calendar.events alone doesn't cover this endpoint.
 const scopeCalendarList = "https://www.googleapis.com/auth/calendar.calendarlist.readonly"
 
-const settingKeyClientID = "plugin_google_client_id"
-const secretKeyClientSecret = "google_client_secret"
-
-// ClientCredentials returns the shared, instance-wide Google OAuth Client
+// ClientCredentialsForUser returns this user's own Google OAuth Client
 // ID/Secret, decrypting the secret with the plugin's encryption key.
 // hasSecret is false if no secret has ever been saved (distinct from an
 // empty string, which would otherwise be indistinguishable from "not set").
-func (p *Plugin) ClientCredentials() (clientID, clientSecret string, hasSecret bool, err error) {
-	clientID, _ = p.db.GetSetting(settingKeyClientID, "")
-	encSecret, err := p.db.GetEncryptedSecret(secretKeyClientSecret)
+// There is no shared/instance-wide fallback — every user brings their own
+// Google Cloud OAuth Client.
+func (p *Plugin) ClientCredentialsForUser(userID string) (clientID, clientSecret string, hasSecret bool, err error) {
+	cfg, err := p.db.GetGCalUserConfig(userID)
 	if err != nil {
 		return "", "", false, err
 	}
-	if encSecret == nil {
+	if cfg == nil || cfg.ClientSecretEnc == nil {
+		clientID := ""
+		if cfg != nil {
+			clientID = cfg.ClientID
+		}
 		return clientID, "", false, nil
 	}
-	plain, err := cryptoutil.Decrypt(p.encKey, encSecret)
+	plain, err := cryptoutil.Decrypt(p.encKey, cfg.ClientSecretEnc)
 	if err != nil {
 		return "", "", false, fmt.Errorf("failed to decrypt client secret: %w", err)
 	}
-	return clientID, string(plain), true, nil
+	return cfg.ClientID, string(plain), true, nil
 }
 
-// SaveClientCredentials stores the shared Client ID (plain) and, if
-// clientSecret is non-empty, a newly encrypted Client Secret. Passing an
+// SaveClientCredentialsForUser stores this user's own Client ID (plain) and,
+// if clientSecret is non-empty, a newly encrypted Client Secret. Passing an
 // empty clientSecret leaves the previously stored secret untouched, so the
 // Client ID can be updated on its own.
-func (p *Plugin) SaveClientCredentials(clientID, clientSecret string) error {
-	if err := p.db.SetSetting(settingKeyClientID, clientID); err != nil {
+func (p *Plugin) SaveClientCredentialsForUser(userID, clientID, clientSecret string) error {
+	if err := p.db.SetGCalClientID(userID, clientID); err != nil {
 		return err
 	}
 	if clientSecret == "" {
@@ -59,16 +61,16 @@ func (p *Plugin) SaveClientCredentials(clientID, clientSecret string) error {
 	if err != nil {
 		return err
 	}
-	return p.db.SetEncryptedSecret(secretKeyClientSecret, enc)
+	return p.db.SetGCalClientSecretEnc(userID, enc)
 }
 
-func (p *Plugin) baseOAuthConfig() (*oauth2.Config, error) {
-	clientID, clientSecret, hasSecret, err := p.ClientCredentials()
+func (p *Plugin) baseOAuthConfigForUser(userID string) (*oauth2.Config, error) {
+	clientID, clientSecret, hasSecret, err := p.ClientCredentialsForUser(userID)
 	if err != nil {
 		return nil, err
 	}
 	if clientID == "" || !hasSecret {
-		return nil, fmt.Errorf("google calendar plugin is not configured: set a client ID and secret first")
+		return nil, fmt.Errorf("you haven't added your own Google OAuth Client ID/Secret yet — add one in Settings → Plugins → Google Calendar first")
 	}
 	return &oauth2.Config{
 		ClientID:     clientID,
@@ -82,7 +84,7 @@ func (p *Plugin) baseOAuthConfig() (*oauth2.Config, error) {
 // ApprovalForce + AccessTypeOffline ensure a refresh token is issued even if
 // this user previously connected and revoked access.
 func (p *Plugin) BuildAuthorizeURL(userID, redirectURL string) (string, error) {
-	cfg, err := p.baseOAuthConfig()
+	cfg, err := p.baseOAuthConfigForUser(userID)
 	if err != nil {
 		return "", err
 	}
@@ -91,9 +93,10 @@ func (p *Plugin) BuildAuthorizeURL(userID, redirectURL string) (string, error) {
 	return cfg.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.ApprovalForce), nil
 }
 
-// ExchangeCode trades an authorization code for tokens.
-func (p *Plugin) ExchangeCode(ctx context.Context, code, redirectURL string) (*oauth2.Token, error) {
-	cfg, err := p.baseOAuthConfig()
+// ExchangeCode trades an authorization code for tokens, using userID's own
+// Client ID/Secret.
+func (p *Plugin) ExchangeCode(ctx context.Context, userID, code, redirectURL string) (*oauth2.Token, error) {
+	cfg, err := p.baseOAuthConfigForUser(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +108,7 @@ func (p *Plugin) ExchangeCode(ctx context.Context, code, redirectURL string) (*o
 // given user's access token as needed, persisting any newly minted access
 // token back to the DB so the next call doesn't need to refresh again.
 func (p *Plugin) httpClientForUser(ctx context.Context, acct *db.GCalAccount) (*http.Client, error) {
-	cfg, err := p.baseOAuthConfig()
+	cfg, err := p.baseOAuthConfigForUser(acct.UserID)
 	if err != nil {
 		return nil, err
 	}

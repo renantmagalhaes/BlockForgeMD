@@ -238,3 +238,74 @@ func (db *DB) DeleteGCalSyncStateByEventID(userID, eventID string) error {
 	_, err := db.Conn.Exec("DELETE FROM plugin_gcal_sync_state WHERE user_id = ? AND google_event_id = ?;", userID, eventID)
 	return err
 }
+
+// --- plugin_gcal_user_config: every user's own Google Calendar plugin
+// configuration (OAuth Client ID/Secret, poll interval, workspace scope,
+// production-confirmed dismiss flag) — there is no shared/instance-wide
+// config anymore, each user brings their own Google Cloud OAuth Client.
+
+type GCalUserConfig struct {
+	UserID              string
+	ClientID            string
+	ClientSecretEnc     []byte // nil if never set
+	PollIntervalSeconds int    // 0 = not set, caller should use the default
+	Workspaces          string // raw JSON array; "" = all workspaces
+	ProductionConfirmed bool
+}
+
+// GetGCalUserConfig returns (nil, nil) if this user has never touched
+// Settings > Plugins > Google Calendar.
+func (db *DB) GetGCalUserConfig(userID string) (*GCalUserConfig, error) {
+	row := db.Conn.QueryRow(`
+		SELECT user_id, client_id, client_secret_enc, poll_interval_seconds, workspaces, production_confirmed
+		FROM plugin_gcal_user_config WHERE user_id = ?;
+	`, userID)
+	var c GCalUserConfig
+	if err := row.Scan(&c.UserID, &c.ClientID, &c.ClientSecretEnc, &c.PollIntervalSeconds, &c.Workspaces, &c.ProductionConfirmed); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &c, nil
+}
+
+func (db *DB) SetGCalClientID(userID, clientID string) error {
+	_, err := db.Conn.Exec(`
+		INSERT INTO plugin_gcal_user_config (user_id, client_id) VALUES (?, ?)
+		ON CONFLICT(user_id) DO UPDATE SET client_id = excluded.client_id;
+	`, userID, clientID)
+	return err
+}
+
+func (db *DB) SetGCalClientSecretEnc(userID string, enc []byte) error {
+	_, err := db.Conn.Exec(`
+		INSERT INTO plugin_gcal_user_config (user_id, client_secret_enc) VALUES (?, ?)
+		ON CONFLICT(user_id) DO UPDATE SET client_secret_enc = excluded.client_secret_enc;
+	`, userID, enc)
+	return err
+}
+
+func (db *DB) SetGCalPollIntervalSeconds(userID string, seconds int) error {
+	_, err := db.Conn.Exec(`
+		INSERT INTO plugin_gcal_user_config (user_id, poll_interval_seconds) VALUES (?, ?)
+		ON CONFLICT(user_id) DO UPDATE SET poll_interval_seconds = excluded.poll_interval_seconds;
+	`, userID, seconds)
+	return err
+}
+
+func (db *DB) SetGCalWorkspaces(userID, workspacesJSON string) error {
+	_, err := db.Conn.Exec(`
+		INSERT INTO plugin_gcal_user_config (user_id, workspaces) VALUES (?, ?)
+		ON CONFLICT(user_id) DO UPDATE SET workspaces = excluded.workspaces;
+	`, userID, workspacesJSON)
+	return err
+}
+
+func (db *DB) SetGCalProductionConfirmed(userID string, confirmed bool) error {
+	_, err := db.Conn.Exec(`
+		INSERT INTO plugin_gcal_user_config (user_id, production_confirmed) VALUES (?, ?)
+		ON CONFLICT(user_id) DO UPDATE SET production_confirmed = excluded.production_confirmed;
+	`, userID, confirmed)
+	return err
+}

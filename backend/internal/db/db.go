@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -170,6 +171,15 @@ func (db *DB) createTables() error {
 			UNIQUE (user_id, file_path),
 			UNIQUE (user_id, google_event_id)
 		);`,
+		`CREATE TABLE IF NOT EXISTS plugin_gcal_user_config (
+			user_id TEXT PRIMARY KEY,
+			client_id TEXT NOT NULL DEFAULT '',
+			client_secret_enc BLOB,
+			poll_interval_seconds INTEGER NOT NULL DEFAULT 0,
+			workspaces TEXT NOT NULL DEFAULT '',
+			production_confirmed BOOLEAN NOT NULL DEFAULT 0,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		);`,
 	}
 
 	for _, q := range queries {
@@ -185,6 +195,69 @@ func (db *DB) createTables() error {
 	_, _ = db.Conn.Exec("UPDATE files SET position = rowid WHERE position = 0 OR position IS NULL;")
 	_, _ = db.Conn.Exec("INSERT OR IGNORE INTO settings (key, value) VALUES ('history_limit', '50');")
 
+	if err := db.migrateSharedGCalConfigToPerUser(); err != nil {
+		return fmt.Errorf("failed to migrate shared google calendar config: %w", err)
+	}
+
+	return nil
+}
+
+// migrateSharedGCalConfigToPerUser is a one-time, idempotent backfill: the
+// Google Calendar plugin used to have one shared, instance-wide Client
+// ID/Secret/poll-interval/workspace-scope; now every user has their own. This
+// copies whatever shared value already existed into every existing user's
+// new per-user row, once, so whoever already did the real work of creating a
+// Google Cloud OAuth Client isn't forced to redo it, and existing connected
+// accounts keep working unmodified (many Google accounts can authenticate
+// against the same OAuth Client, so sharing the starting point is harmless).
+// Guarded by "does plugin_gcal_user_config already have any rows" so it only
+// ever runs once — never re-copies after someone has customized their own
+// per-user config away from the inherited defaults.
+func (db *DB) migrateSharedGCalConfigToPerUser() error {
+	var already int
+	if err := db.Conn.QueryRow(`SELECT COUNT(*) FROM plugin_gcal_user_config;`).Scan(&already); err != nil {
+		return err
+	}
+	if already > 0 {
+		return nil
+	}
+
+	clientID, _ := db.GetSetting("plugin_google_client_id", "")
+	if clientID == "" {
+		return nil // nothing shared was ever configured — fresh instance, nothing to migrate
+	}
+	secretEnc, err := db.GetEncryptedSecret("google_client_secret")
+	if err != nil {
+		return err
+	}
+	pollRaw, _ := db.GetSetting("plugin_gcal_poll_interval_seconds", "")
+	pollSecs, _ := strconv.Atoi(pollRaw)
+	workspaces, _ := db.GetSetting("plugin_gcal_workspaces", "")
+	prodConfirmed, _ := db.GetSetting("plugin_gcal_production_confirmed", "")
+
+	rows, err := db.Conn.Query(`SELECT id FROM users;`)
+	if err != nil {
+		return err
+	}
+	var userIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err == nil {
+			userIDs = append(userIDs, id)
+		}
+	}
+	rows.Close()
+
+	for _, id := range userIDs {
+		_, err := db.Conn.Exec(`
+			INSERT INTO plugin_gcal_user_config
+				(user_id, client_id, client_secret_enc, poll_interval_seconds, workspaces, production_confirmed)
+			VALUES (?, ?, ?, ?, ?, ?);
+		`, id, clientID, secretEnc, pollSecs, workspaces, prodConfirmed == "true")
+		if err != nil {
+			return fmt.Errorf("failed to backfill user %s: %w", id, err)
+		}
+	}
 	return nil
 }
 

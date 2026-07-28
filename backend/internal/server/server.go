@@ -424,6 +424,30 @@ func (s *Server) handleSaveFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Auto-assign the creator as owner: brand-new pages with no explicit
+	// `assignee` get one set automatically, so due-dated pages are
+	// immediately routed to the right person's calendar (see the Google
+	// Calendar plugin's assignee-based sync) without manual bookkeeping.
+	// Enforced here (not just in the frontend's creation modal) so it also
+	// covers the public /api/file REST API path. Only applies going forward
+	// — an explicit `assignee: ""` from a caller counts as already specified
+	// and is left alone.
+	if req.CreateOnly {
+		if _, hasAssignee := res.FrontMatter["assignee"]; !hasAssignee {
+			if user := userFromCtx(r); user != nil {
+				if _, err := parser.UpdateFrontMatterInFile(s.rootPath, req.Path, map[string]interface{}{"assignee": user.Username}); err != nil {
+					http.Error(w, fmt.Sprintf("failed to auto-assign creator: %v", err), http.StatusInternalServerError)
+					return
+				}
+				res, err = parser.ParseFile(s.rootPath, req.Path)
+				if err != nil {
+					http.Error(w, fmt.Sprintf("failed to parse file: %v", err), http.StatusInternalServerError)
+					return
+				}
+			}
+		}
+	}
+
 	err = s.db.UpsertFile(res.Record, res.FrontMatter, res.Tasks)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to update cache: %v", err), http.StatusInternalServerError)

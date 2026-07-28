@@ -4006,7 +4006,7 @@ const App: React.FC = () => {
               </div>
 
               {/* Settings Content Pane */}
-              <div className="flex-1 pl-6 flex flex-col min-h-0">
+              <div className="flex-1 min-w-0 pl-6 flex flex-col min-h-0">
                 <div className="relative flex-1 min-h-0">
                   <div
                     ref={settingsScrollRef}

@@ -2,9 +2,7 @@
 
 Two-way sync between any page's `dueDate` (task, note, or document — anything with a due date) and events on your Google Calendar. Sync runs automatically on a poll interval and can also be triggered on demand from **Settings → Plugins → Google Calendar**.
 
-Each BlockForgeMD user connects their own Google account. To enable the plugin at all, you first need to create a Google OAuth Client (Client ID + Secret) and paste it into **Settings → Plugins → Google Calendar** — this is a one-time, instance-wide setup step.
-
-**Important:** only the Google account connection is per-user. Everything else — the Client ID/Secret, the poll interval, and which workspaces sync — is shared across every user on this instance, since all users currently hit the same plugin configuration. Whoever sets these up is setting them up for everyone; see [docs/plugins/README.md](README.md).
+**Everything about this plugin is per-user — there is no shared/instance-wide configuration.** Each BlockForgeMD user creates their own Google Cloud project and OAuth Client (Client ID + Secret), sets their own poll interval and workspace scope, and connects their own Google account, all in **Settings → Plugins → Google Calendar**. Nothing you configure here affects any other user on this instance; see [docs/plugins/README.md](README.md).
 
 > ## ⚠️ Requirement: BlockForgeMD must be reachable at a real hostname, not a private IP
 >
@@ -54,7 +52,7 @@ From the Google Auth Platform dashboard, go to the **Clients** tab → **Create 
 
 ## 5. Paste them into BlockForgeMD
 
-Copy both into **Settings → Plugins → Google Calendar → Google OAuth credentials**, click **Save credentials**, then click **Connect Google Calendar** (per user — each person who wants sync connects their own Google account with this same shared Client ID/Secret).
+Copy both into **Settings → Plugins → Google Calendar → Google OAuth credentials**, click **Save settings**, then click **Connect Google Calendar**. Every person who wants sync repeats steps 1-5 for their own Google Cloud project and their own Client ID/Secret — there's nothing shared to reuse from someone else's setup.
 
 ## The "unverified app" warning
 
@@ -70,7 +68,8 @@ With the app published (step 3) and a connection established, it's effectively p
 - Changes made **directly in Google Calendar** (editing an event's time, deleting it) are only picked up on the next background poll, since a self-hosted instance has no guaranteed public HTTPS endpoint for Google to push changes to. The poll interval defaults to 2 minutes and is adjustable in **Settings → Plugins → Google Calendar → "Check for changes every ___ minutes"** (minimum 30 seconds) — or trigger one immediately with **Sync now**. A changed interval takes effect from the next check onward, no restart needed.
 - Deleting a page's due date (or the page itself — including moving it to Trash) removes the corresponding calendar event. Deleting the event in Google Calendar clears the page's due date, without deleting the page. Restoring a page from Trash recreates its calendar event if it still has a due date.
 - **Disconnecting** deletes every event that connection created before revoking access — it doesn't just make BlockForgeMD forget about them. If you disconnect and reconnect without this cleanup (e.g. on an older version), previously-synced events are left behind untracked, and reconnecting will push fresh duplicates of anything still due-dated.
-- If multiple users connect their own Google account, the same due-dated page currently syncs to each of their calendars independently (no per-page ownership/assignee filtering yet).
+- **A page only syncs to its assignee.** A due-dated page's `assignee` frontmatter field is matched (case-insensitively) against connected users' usernames — only the one matching account gets the event; everyone else's calendar is unaffected. If `assignee` doesn't match any real username (a typo, a client's name, left blank), the page doesn't sync to anyone. Reassigning a page moves the event: the old assignee's copy is removed and the new assignee's is created on the next sync.
+- **New pages get an owner automatically.** Whenever you create a page with no `assignee` already set, it's automatically assigned to you (the creator) — so a fresh task/document with a due date routes to your own calendar immediately, with nothing to configure. This only applies going forward; pages created before this existed keep whatever `assignee` they already have (often blank) until set manually.
 
 ## Choosing which calendar to sync to
 
@@ -78,6 +77,6 @@ By default, events sync to your Google account's primary calendar. To use a diff
 
 ## Choosing which workspaces sync
 
-By default, **all workspaces** in the vault sync — this is the default for backward compatibility, so nothing changes for anyone until they touch this setting. To restrict sync to specific workspaces, open **Settings → Plugins → Google Calendar**, uncheck **All workspaces**, and pick individual ones from the list.
+By default, **all workspaces** in the vault sync — this is the default for backward compatibility, so nothing changes until you touch this setting. To restrict sync to specific workspaces, open **Settings → Plugins → Google Calendar**, uncheck **All workspaces**, and pick individual ones from the list.
 
-This is a **shared, instance-wide setting** — like the OAuth Client ID/Secret and the poll interval, it applies the same way to every connected user, not per-account (see the note in [docs/plugins/README.md](README.md) about plugin config being shared across users). Narrowing the scope best-effort deletes already-synced events (across every connected user) for pages that fall outside the new selection; newly-included workspaces aren't pushed immediately — they pick up on the next sync check, or via **Sync now**.
+This is **entirely your own setting** — it only affects your own sync; other users' workspace scope is independent. Narrowing it best-effort deletes your own already-synced events for pages that fall outside the new selection; newly-included workspaces aren't pushed immediately — they pick up on your next sync check, or via **Sync now**.

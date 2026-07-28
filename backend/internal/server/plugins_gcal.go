@@ -98,7 +98,12 @@ func (s *Server) handleListPlugins(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/plugins/google-calendar/config
 func (s *Server) handleGCalGetConfig(w http.ResponseWriter, r *http.Request) {
-	cfg, err := s.gcalPlugin().GetConfig()
+	user := userFromCtx(r)
+	if user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	cfg, err := s.gcalPlugin().GetConfig(user.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -116,6 +121,11 @@ func (s *Server) handleGCalGetConfig(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/plugins/google-calendar/config
 func (s *Server) handleGCalSetConfig(w http.ResponseWriter, r *http.Request) {
+	user := userFromCtx(r)
+	if user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	var req struct {
 		ClientID            string   `json:"clientId"`
 		ClientSecret        string   `json:"clientSecret"`
@@ -127,7 +137,7 @@ func (s *Server) handleGCalSetConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if err := s.gcalPlugin().SetConfig(r.Context(), req.ClientID, req.ClientSecret, req.PollIntervalSeconds, req.Workspaces, req.ProductionConfirmed); err != nil {
+	if err := s.gcalPlugin().SetConfig(r.Context(), user.ID, req.ClientID, req.ClientSecret, req.PollIntervalSeconds, req.Workspaces, req.ProductionConfirmed); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
