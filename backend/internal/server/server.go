@@ -2345,10 +2345,17 @@ func (s *Server) restoreTrashBundle(workspace, id string) error {
 			continue
 		}
 		// Index immediately so fetchFiles() returns the restored file without delay.
+		// IndexFile already triggers a broadcast itself (it pushes onto
+		// watcher.Updates, which listenForWatcherUpdates drains into its own
+		// broadcastEvent call) — calling broadcastEvent again here used to
+		// double-fire every restore, which for the Google Calendar plugin
+		// meant two concurrent pushes racing to create the same page's
+		// event: both saw no existing mapping yet, so both created a
+		// separate Google event, and only one ever ended up tracked
+		// locally — the other became a permanent, undeletable orphan.
 		if idxErr := s.watcher.IndexFile(relPath); idxErr != nil {
 			log.Printf("restore: failed to index %s: %v", relPath, idxErr)
 		}
-		s.broadcastEvent(relPath)
 
 		// Bring the note's version history and asset log back too, if
 		// trashFiles packed them into this bundle — a restored note should

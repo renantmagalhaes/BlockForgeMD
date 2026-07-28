@@ -19,8 +19,9 @@ import (
 
 // ConfigResult is returned to the frontend's instance-wide config panel.
 type ConfigResult struct {
-	ClientID        string `json:"clientId"`
-	HasClientSecret bool   `json:"hasClientSecret"`
+	ClientID            string `json:"clientId"`
+	HasClientSecret     bool   `json:"hasClientSecret"`
+	PollIntervalSeconds int    `json:"pollIntervalSeconds"`
 }
 
 func (p *Plugin) GetConfig() (ConfigResult, error) {
@@ -28,11 +29,25 @@ func (p *Plugin) GetConfig() (ConfigResult, error) {
 	if err != nil {
 		return ConfigResult{}, err
 	}
-	return ConfigResult{ClientID: clientID, HasClientSecret: hasSecret}, nil
+	return ConfigResult{
+		ClientID:            clientID,
+		HasClientSecret:     hasSecret,
+		PollIntervalSeconds: p.PollIntervalSeconds(),
+	}, nil
 }
 
-func (p *Plugin) SetConfig(clientID, clientSecret string) error {
-	return p.SaveClientCredentials(clientID, clientSecret)
+// SetConfig saves the shared Client ID/Secret and, if pollIntervalSeconds is
+// non-nil, updates the background sync interval too.
+func (p *Plugin) SetConfig(clientID, clientSecret string, pollIntervalSeconds *int) error {
+	if err := p.SaveClientCredentials(clientID, clientSecret); err != nil {
+		return err
+	}
+	if pollIntervalSeconds != nil {
+		if err := p.SetPollIntervalSeconds(*pollIntervalSeconds); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // StartOAuth returns the Google consent-screen URL for the given user.
@@ -183,8 +198,13 @@ func (p *Plugin) SetCalendar(ctx context.Context, userID, calendarID string) err
 	return p.db.UpdateGCalCalendarID(userID, calendarID)
 }
 
-// Disconnect best-effort revokes the token with Google, then deletes the
-// account and all of its sync-state mappings.
+// Disconnect deletes every event this connection created (best-effort),
+// revokes the token with Google, then deletes the account and all of its
+// sync-state mappings. Cleaning up the actual events (not just the local
+// mappings) matters: otherwise disconnecting only makes BlockForgeMD forget
+// about them while they stay in Google Calendar forever, and reconnecting
+// later re-pushes everything still due-dated as brand new events —
+// duplicating whatever was already there from before the disconnect.
 func (p *Plugin) Disconnect(ctx context.Context, userID string) error {
 	acct, err := p.db.GetGCalAccount(userID)
 	if err != nil {
@@ -193,6 +213,18 @@ func (p *Plugin) Disconnect(ctx context.Context, userID string) error {
 	if acct == nil {
 		return nil
 	}
+
+	if client, cerr := p.httpClientForUser(ctx, acct); cerr == nil {
+		mappings, _ := p.db.ListGCalSyncState(userID)
+		for _, m := range mappings {
+			if derr := DeleteEvent(ctx, client, acct.CalendarID, m.GoogleEventID); derr != nil {
+				logf("failed to delete event %s while disconnecting user %s: %v", m.GoogleEventID, userID, derr)
+			}
+		}
+	} else {
+		logf("could not build client to clean up events while disconnecting user %s (token may already be invalid, continuing): %v", userID, cerr)
+	}
+
 	if refreshPlain, derr := cryptoutil.Decrypt(p.encKey, acct.RefreshTokenEnc); derr == nil {
 		if err := revokeToken(ctx, string(refreshPlain)); err != nil {
 			logf("token revoke failed for user %s (continuing with local disconnect): %v", userID, err)

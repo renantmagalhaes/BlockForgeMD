@@ -182,7 +182,7 @@ http://localhost:8080/docs
 
 A plugin store (**Settings → Plugins**) for connecting external tools, calendars, and AI providers directly into your workspace.
 
-- **Google Calendar** — 2-way sync between any page's due date and events on your Google Calendar. See [docs/plugins/google-calendar.md](docs/plugins/google-calendar.md) for setup (creating a Google OAuth Client, etc).
+- **Google Calendar** — 2-way sync between any page's due date and events on your Google Calendar. See [docs/plugins/google-calendar.md](docs/plugins/google-calendar.md) for setup (creating a Google OAuth Client, etc). **Requires BlockForgeMD to be reachable at a real hostname — Google's OAuth rejects private/LAN IP addresses (e.g. `10.x.x.x`, `192.168.x.x`) as redirect URIs outright.** See the doc's requirement callout if you only have a private IP.
 - **MCP Servers**, **LLM Providers** — coming soon.
 
 See [docs/plugins/](docs/plugins/) for the full list and setup guides.

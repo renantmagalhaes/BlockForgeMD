@@ -120,8 +120,14 @@ func (p *Plugin) syncAccount(ctx context.Context, acct db.GCalAccount) error {
 // creates/updates the mapped event if a dueDate is present, deletes it if
 // the dueDate was cleared or the file no longer exists. State-diffing (not
 // "interpret the edit type") keeps this correct across save / frontmatter
-// edit / move / restore / external watcher-detected edits alike.
+// edit / move / restore / external watcher-detected edits alike. Serialized
+// per (user, path) via p.pushLocks so two concurrent triggers for the same
+// page (see keyedMutex's doc comment) can't both read "no mapping yet" and
+// each create a separate Google event.
 func (p *Plugin) pushFile(ctx context.Context, acct db.GCalAccount, relPath string) error {
+	unlock := p.pushLocks.Lock(acct.UserID + "\x00" + relPath)
+	defer unlock()
+
 	client, err := p.httpClientForUser(ctx, &acct)
 	if err != nil {
 		return err

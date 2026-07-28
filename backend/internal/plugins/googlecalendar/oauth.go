@@ -2,6 +2,7 @@ package googlecalendar
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -128,6 +129,18 @@ func (p *Plugin) httpClientForUser(ctx context.Context, acct *db.GCalAccount) (*
 
 	newToken, err := cfg.TokenSource(ctx, token).Token()
 	if err != nil {
+		var retrieveErr *oauth2.RetrieveError
+		if errors.As(err, &retrieveErr) && retrieveErr.ErrorCode == "invalid_grant" {
+			// The refresh token itself is dead — expired (a common gotcha
+			// while the OAuth consent screen is still in "Testing"
+			// publishing status, which caps refresh tokens at 7 days),
+			// revoked from the Google Account's own permissions page, or
+			// past Google's 6-month unused-token expiry. Retrying
+			// wouldn't help; the account needs to go through the consent
+			// screen again, so say so plainly instead of surfacing a raw
+			// OAuth error code.
+			return nil, fmt.Errorf("Google rejected this account's saved sign-in (it may have expired or been revoked) — disconnect and reconnect this account in Settings → Plugins → Google Calendar to fix it")
+		}
 		return nil, fmt.Errorf("failed to refresh google token: %w", err)
 	}
 	if newToken.AccessToken != accessToken {

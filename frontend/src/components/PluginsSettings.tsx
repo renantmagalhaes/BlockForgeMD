@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Puzzle, Calendar, CheckCircle2, XCircle, Loader2, ChevronLeft, Copy, RefreshCw, BookOpen } from 'lucide-react'
+import { Puzzle, Calendar, CheckCircle2, XCircle, Loader2, ChevronLeft, Copy, RefreshCw, BookOpen, AlertTriangle } from 'lucide-react'
 
 // Setup guide for the Google Calendar plugin (creating a Google OAuth Client,
 // the "unverified app" warning, how sync works) — lives in the repo so it's
@@ -16,7 +16,9 @@ type PluginMeta = {
 type GCalConfig = {
   clientId: string
   hasClientSecret: boolean
+  pollIntervalSeconds: number
   redirectUri: string
+  isPrivateHost: boolean
 }
 
 type GCalStatus = {
@@ -118,16 +120,22 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
   const [status, setStatus] = useState<GCalStatus | null>(null)
   const [clientId, setClientId] = useState('')
   const [clientSecret, setClientSecret] = useState('')
+  const [pollIntervalMinutes, setPollIntervalMinutes] = useState(2)
   const [savingConfig, setSavingConfig] = useState(false)
   const [configMsg, setConfigMsg] = useState('')
   const [syncing, setSyncing] = useState(false)
   const [calendars, setCalendars] = useState<CalendarOption[]>([])
   const [switchingCalendar, setSwitchingCalendar] = useState(false)
+  const [connectError, setConnectError] = useState('')
 
   function reloadConfig() {
     fetch('/api/plugins/google-calendar/config', { credentials: 'include' })
       .then(r => r.json())
-      .then((d: GCalConfig) => { setConfig(d); setClientId(d.clientId ?? '') })
+      .then((d: GCalConfig) => {
+        setConfig(d)
+        setClientId(d.clientId ?? '')
+        if (d.pollIntervalSeconds) setPollIntervalMinutes(Math.round(d.pollIntervalSeconds / 60) || 1)
+      })
       .catch(() => {})
   }
 
@@ -172,7 +180,7 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
       const res = await fetch('/api/plugins/google-calendar/config', {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId, clientSecret }),
+        body: JSON.stringify({ clientId, clientSecret, pollIntervalSeconds: Math.max(1, pollIntervalMinutes) * 60 }),
       })
       if (res.ok) {
         setConfigMsg('Saved.')
@@ -187,10 +195,13 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
   }
 
   async function connect() {
+    setConnectError('')
     const res = await fetch('/api/plugins/google-calendar/oauth/start', { credentials: 'include' })
     if (res.ok) {
       const d = await res.json()
       window.location.href = d.authorizeUrl
+    } else {
+      setConnectError(await res.text() || 'Failed to start connecting.')
     }
   }
 
@@ -226,8 +237,22 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
         </a>
       </div>
       <p className="text-xs text-slate-500 -mt-3">
-        Any page with a due date syncs both ways with your Google Calendar. Sync runs automatically every few minutes, or on demand below.
+        Any page with a due date syncs both ways with your Google Calendar. Sync runs automatically on the interval below, or on demand.
       </p>
+
+      {config?.isPrivateHost && (
+        <div className="flex items-start gap-2 bg-amber-950/30 border border-amber-700/40 rounded-lg px-3 py-2.5 text-[11px] text-amber-300">
+          <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+          <span>
+            <strong>This won't work from here.</strong> You're accessing BlockForgeMD at a private IP address. Google's OAuth
+            rejects private IP addresses as redirect URIs, so connecting will always fail. Access the app via a hostname
+            instead (e.g. add an entry to your hosts file mapping a name to this address), then reload this page — see the{' '}
+            <a href={GOOGLE_CALENDAR_DOCS_URL} target="_blank" rel="noopener noreferrer" className="underline hover:text-amber-200">
+              setup guide
+            </a>.
+          </span>
+        </div>
+      )}
 
       {/* Instance-wide OAuth config */}
       <form onSubmit={saveConfig} className="space-y-2 border-t border-slate-800 pt-4">
@@ -235,6 +260,13 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
         <p className="text-[10px] text-slate-500">
           Create an OAuth Client in Google Cloud Console and register the redirect URI below, then paste the Client ID/Secret here. This is shared instance-wide — each user still connects their own Google account below.
         </p>
+
+        <div className="flex items-start gap-2 bg-amber-950/30 border border-amber-700/40 rounded-lg px-3 py-2.5 text-[11px] text-amber-300">
+          <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+          <span>
+            <strong>Publish the app to Production before connecting.</strong> In Google Auth Platform → <strong>Audience</strong> tab, click <strong>Publish app</strong> to switch from Testing to Production. Skip this and every connected account will silently stop syncing and need to be reconnected every 7 days — Google forcibly expires refresh tokens while an app sits in Testing. Publishing to Production doesn't require completing Google's verification process.
+          </span>
+        </div>
 
         {config && (
           <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2">
@@ -263,6 +295,23 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
           type="password"
           className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-indigo-500 transition font-mono"
         />
+
+        <div className="flex items-center gap-2 pt-1">
+          <span className="text-[10px] text-slate-500 shrink-0">Check for changes every</span>
+          <input
+            type="number"
+            min={1}
+            step={1}
+            value={pollIntervalMinutes}
+            onChange={e => setPollIntervalMinutes(Math.max(1, parseInt(e.target.value, 10) || 1))}
+            className="w-16 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white outline-none focus:border-indigo-500 transition"
+          />
+          <span className="text-[10px] text-slate-500">minute{pollIntervalMinutes === 1 ? '' : 's'}</span>
+        </div>
+        <p className="text-[10px] text-slate-600">
+          Only affects picking up changes made directly in Google Calendar — edits made here sync out immediately regardless of this setting.
+        </p>
+
         {configMsg && <p className="text-[10px] text-slate-400">{configMsg}</p>}
         <button
           type="submit"
@@ -283,13 +332,21 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
           <p className="text-xs text-slate-500 flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> Loading…</p>
         )}
         {status && !status.connected && (
-          <button
-            onClick={connect}
-            disabled={!config?.clientId || !config?.hasClientSecret}
-            className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed text-slate-100 rounded-lg px-3 py-2 text-xs font-medium transition cursor-pointer"
-          >
-            <Calendar size={13} /> Connect Google Calendar
-          </button>
+          <>
+            <button
+              onClick={connect}
+              disabled={!config?.clientId || !config?.hasClientSecret || config?.isPrivateHost}
+              className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed text-slate-100 rounded-lg px-3 py-2 text-xs font-medium transition cursor-pointer"
+            >
+              <Calendar size={13} /> Connect Google Calendar
+            </button>
+            {connectError && (
+              <div className="flex items-start gap-1.5 bg-red-950/30 border border-red-800/40 rounded-lg px-3 py-2 text-[10px] text-red-300">
+                <XCircle size={12} className="shrink-0 mt-0.5" />
+                <span>{connectError}</span>
+              </div>
+            )}
+          </>
         )}
         {status && status.connected && (
           <div className="space-y-3">

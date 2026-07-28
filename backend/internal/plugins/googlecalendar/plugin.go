@@ -8,6 +8,7 @@ package googlecalendar
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"sync"
 	"time"
@@ -44,11 +45,42 @@ type Plugin struct {
 	writer LocalWriter
 	encKey [32]byte
 
-	wg sync.WaitGroup
+	wg        sync.WaitGroup
+	pushLocks *keyedMutex
 }
 
 func New(database *db.DB, writer LocalWriter, encKey [32]byte) *Plugin {
-	return &Plugin{db: database, writer: writer, encKey: encKey}
+	return &Plugin{db: database, writer: writer, encKey: encKey, pushLocks: newKeyedMutex()}
+}
+
+// keyedMutex serializes pushFile calls per (userID, filePath). Two triggers
+// for the same page (an event-driven OnFileChanged racing the periodic
+// safety-net scan, or — as happened with trash restore — a single action
+// accidentally firing the change signal twice) can otherwise both read "no
+// mapping yet" and each create a separate Google event for the same page;
+// only one ever ends up tracked locally, leaving the other as a permanent,
+// undeletable orphan. Serializing makes the second call see the first one's
+// result instead of racing it.
+type keyedMutex struct {
+	mu    sync.Mutex
+	locks map[string]*sync.Mutex
+}
+
+func newKeyedMutex() *keyedMutex {
+	return &keyedMutex{locks: make(map[string]*sync.Mutex)}
+}
+
+func (k *keyedMutex) Lock(key string) (unlock func()) {
+	k.mu.Lock()
+	l, ok := k.locks[key]
+	if !ok {
+		l = &sync.Mutex{}
+		k.locks[key] = l
+	}
+	k.mu.Unlock()
+
+	l.Lock()
+	return l.Unlock
 }
 
 func (p *Plugin) Meta() plugins.Meta {
@@ -56,17 +88,19 @@ func (p *Plugin) Meta() plugins.Meta {
 }
 
 func (p *Plugin) Start(ctx context.Context) error {
-	interval := p.pollInterval()
 	p.wg.Add(1)
 	go func() {
 		defer p.wg.Done()
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
 		for {
+			// Re-read the interval each cycle (rather than fixing it once in
+			// a time.Ticker) so changing it in Settings takes effect from
+			// the next tick onward, with no restart needed.
+			timer := time.NewTimer(p.pollInterval())
 			select {
 			case <-ctx.Done():
+				timer.Stop()
 				return
-			case <-ticker.C:
+			case <-timer.C:
 				p.syncAllAccounts(ctx)
 			}
 		}
@@ -80,15 +114,31 @@ func (p *Plugin) Stop() error {
 }
 
 func (p *Plugin) pollInterval() time.Duration {
+	return time.Duration(p.PollIntervalSeconds()) * time.Second
+}
+
+// PollIntervalSeconds returns the current background sync interval, for
+// display/editing in Settings.
+func (p *Plugin) PollIntervalSeconds() int {
 	raw, _ := p.db.GetSetting(pollIntervalSettingKey, "")
 	if raw == "" {
-		return defaultPollInterval
+		return int(defaultPollInterval.Seconds())
 	}
 	secs, err := strconv.Atoi(raw)
 	if err != nil || secs <= 0 {
-		return defaultPollInterval
+		return int(defaultPollInterval.Seconds())
 	}
-	return time.Duration(secs) * time.Second
+	return secs
+}
+
+// SetPollIntervalSeconds updates how often the background sync loop checks
+// for changes. Enforces a floor to avoid hammering the Calendar API.
+func (p *Plugin) SetPollIntervalSeconds(seconds int) error {
+	const minSeconds = 30
+	if seconds < minSeconds {
+		return fmt.Errorf("poll interval must be at least %d seconds", minSeconds)
+	}
+	return p.db.SetSetting(pollIntervalSettingKey, strconv.Itoa(seconds))
 }
 
 // OnFileChanged pushes a single changed page's dueDate to every connected
@@ -103,7 +153,14 @@ func (p *Plugin) OnFileChanged(relPath string) {
 	ctx := context.Background()
 	for _, acct := range accounts {
 		if err := p.pushFile(ctx, acct, relPath); err != nil {
+			// Previously only logged server-side — invisible in the UI, so a
+			// failed delete/edit push (e.g. a stale token, a transient
+			// Calendar API error) looked like silent, unexplained drift
+			// between BlockForgeMD and Google Calendar. Surfacing it here
+			// means it shows up as lastSyncError immediately, not just after
+			// the next periodic pass (which also still runs as a safety net).
 			logf("push sync failed for user %s path %s: %v", acct.UserID, relPath, err)
+			_ = p.db.UpdateGCalSyncStatus(acct.UserID, time.Now(), err.Error())
 		}
 	}
 }
