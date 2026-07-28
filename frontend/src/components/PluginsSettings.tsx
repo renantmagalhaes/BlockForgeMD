@@ -216,26 +216,6 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
     }
   }
 
-  // Dismisses the Testing-vs-Production reminder banner permanently. Resends
-  // the currently-loaded clientId/pollInterval/workspaces (clientSecret blank
-  // = "leave unchanged", same as a normal save) alongside the new flag,
-  // rather than a bespoke endpoint — there's no way to verify the app is
-  // actually in Production (Google doesn't expose that to a Calendar-scoped
-  // token), so this is only ever a manual acknowledgment.
-  async function dismissProductionWarning() {
-    await fetch('/api/plugins/google-calendar/config', {
-      method: 'POST', credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        clientId, clientSecret: '',
-        pollIntervalSeconds: Math.max(1, pollIntervalMinutes) * 60,
-        workspaces: selectedWorkspaces,
-        productionConfirmed: true,
-      }),
-    })
-    reloadConfig()
-  }
-
   async function connect() {
     setConnectError('')
     const res = await fetch('/api/plugins/google-calendar/oauth/start', { credentials: 'include' })
@@ -302,29 +282,6 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
         <p className="text-[10px] text-slate-500 break-words">
           Create your own OAuth Client in Google Cloud Console and register the redirect URI below, then paste your Client ID/Secret here. This is just for your account — nothing here is shared with other users on this instance.
         </p>
-
-        {!config?.productionConfirmed && (
-          <div className="flex items-center flex-wrap gap-x-1.5 gap-y-1 bg-amber-950/30 border border-amber-700/40 rounded-lg px-2.5 py-1.5 text-[11px] text-amber-300">
-            <AlertTriangle size={12} className="shrink-0" />
-            <span className="flex-1 min-w-[12rem]">Publish this app to Production, or connections expire every 7 days.</span>
-            <a
-              href={GOOGLE_CALENDAR_DOCS_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline hover:text-amber-100 shrink-0"
-            >
-              Docs
-            </a>
-            <span className="text-amber-700 shrink-0">·</span>
-            <button
-              type="button"
-              onClick={dismissProductionWarning}
-              className="underline hover:text-amber-100 shrink-0 cursor-pointer"
-            >
-              Dismiss
-            </button>
-          </div>
-        )}
 
         {config && (
           <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2">
