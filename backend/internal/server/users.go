@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 
@@ -70,6 +71,17 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "cannot delete your own account", http.StatusBadRequest)
 		return
 	}
+
+	// Disconnect this user's Google Calendar first (best-effort): DeleteUser
+	// cascades and wipes plugin_gcal_accounts/plugin_gcal_sync_state for this
+	// user, which would otherwise permanently orphan any events already
+	// created on their Google Calendar — nothing left afterward could ever
+	// reference them to clean them up. A failure here (e.g. Google API
+	// hiccup) must not block removing the user account.
+	if err := s.gcalPlugin().Disconnect(r.Context(), id); err != nil {
+		log.Printf("failed to disconnect google calendar for user %s before deletion: %v", id, err)
+	}
+
 	if err := s.db.DeleteUser(id); err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
