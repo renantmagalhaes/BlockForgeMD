@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Puzzle, Calendar, CheckCircle2, XCircle, Loader2, ChevronLeft, Copy, RefreshCw, BookOpen, AlertTriangle } from 'lucide-react'
+import { Puzzle, Calendar, CheckCircle2, XCircle, Loader2, ChevronLeft, Copy, RefreshCw, BookOpen, AlertTriangle, Tags } from 'lucide-react'
 
 // Setup guide for the Google Calendar plugin (creating a Google OAuth Client,
 // the "unverified app" warning, how sync works) — lives in the repo so it's
@@ -55,7 +55,7 @@ function relativeTime(iso?: string): string {
 // coming-soon placeholders establishing the same store framing for later.
 export default function PluginsSettings() {
   const [plugins, setPlugins] = useState<PluginMeta[]>([])
-  const [view, setView] = useState<'grid' | 'google-calendar'>('grid')
+  const [view, setView] = useState<'grid' | 'google-calendar' | 'ollama-tagger'>('grid')
 
   useEffect(() => {
     fetch('/api/plugins', { credentials: 'include' })
@@ -67,8 +67,10 @@ export default function PluginsSettings() {
   if (view === 'google-calendar') {
     return <GoogleCalendarDetail onBack={() => setView('grid')} />
   }
+  if (view === 'ollama-tagger') return <OllamaTaggerDetail onBack={() => setView('grid')} />
 
   const googleCalendar = plugins.find(p => p.id === 'google-calendar')
+  const ollamaTagger = plugins.find(p => p.id === 'ollama-tagger')
   const comingSoon = plugins.filter(p => p.status === 'coming_soon')
 
   return (
@@ -91,6 +93,7 @@ export default function PluginsSettings() {
             <p className="text-[11px] text-slate-500">2-way sync between page due dates and your Google Calendar.</p>
           </button>
         )}
+        {ollamaTagger && <button onClick={() => setView('ollama-tagger')} className="text-left bg-slate-900/50 hover:bg-slate-900 border border-slate-800 hover:border-violet-500/40 rounded-xl p-4 space-y-2 transition cursor-pointer"><div className="flex items-center gap-2"><Tags size={16} className="text-violet-400" /><span className="text-sm font-semibold text-slate-100">{ollamaTagger.name}</span></div><p className="text-[11px] text-slate-500">Use your Ollama model to add and refresh contextual page tags.</p></button>}
 
         {comingSoon.map(p => (
           <div
@@ -114,6 +117,18 @@ export default function PluginsSettings() {
       </div>
     </div>
   )
+}
+
+type OllamaConfig = { endpoint: string; model: string; autoEnabled: boolean; recheckOnChange: boolean; pollIntervalSeconds: number; maxTags: number; workspaces: string[] }
+function OllamaTaggerDetail({ onBack }: { onBack: () => void }) {
+  const [c,setC]=useState<OllamaConfig>({endpoint:'http://10.0.10.11:11434',model:'',autoEnabled:false,recheckOnChange:true,pollIntervalSeconds:900,maxTags:5,workspaces:[]}); const [msg,setMsg]=useState(''); const [saving,setSaving]=useState(false)
+  const [models,setModels]=useState<string[]>([]); const [loadingModels,setLoadingModels]=useState(false)
+  const [allWorkspaces,setAllWorkspaces]=useState<string[]>([]); const [restrictWorkspaces,setRestrictWorkspaces]=useState(false)
+  useEffect(()=>{fetch('/api/plugins/ollama-tagger/config',{credentials:'include'}).then(r=>r.json()).then(d=>{setC(x=>({...x,...d})); setRestrictWorkspaces((d.workspaces??[]).length>0); if (d.endpoint) void loadModels(d.endpoint, d.model ?? '')}).catch(()=>{}); fetch('/api/workspaces',{credentials:'include'}).then(r=>r.json()).then(d=>setAllWorkspaces(d.workspaces??[])).catch(()=>{})},[])
+  async function loadModels(endpoint=c.endpoint, savedModel=c.model) { setLoadingModels(true); setMsg(''); try { const r=await fetch(`/api/plugins/ollama-tagger/models?endpoint=${encodeURIComponent(endpoint)}`,{credentials:'include'}); if(!r.ok) { setMsg(await r.text()); return }; const d=await r.json(); setModels(d.models??[]); if (!savedModel && d.models?.length) setC(x=>({...x,model:d.models[0]})); if (!d.models?.length) setMsg('Ollama is reachable but has no installed models.') } finally { setLoadingModels(false) } }
+  async function save(next=c){setSaving(true);setMsg(''); try {const r=await fetch('/api/plugins/ollama-tagger/config',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify(next)});setMsg(r.ok?'Saved. These settings are personal to your account.':await r.text())} finally {setSaving(false)}}
+  function updateCheckbox(next: OllamaConfig) { setC(next); void save(next) }
+  return <div className="space-y-5 animate-in fade-in duration-150 min-w-0"><button onClick={onBack} className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-100"><ChevronLeft size={14}/> Plugins</button><div><h4 className="font-bold text-sm text-slate-100">Ollama Auto Tags</h4><p className="text-xs text-slate-500 mt-1 break-words">Personal to your signed-in account — nothing configured here is shared with other users.</p></div><div className="space-y-3 bg-slate-900/50 border border-slate-800 rounded-xl p-4"><label className="block text-xs text-slate-300">Ollama endpoint<input value={c.endpoint} onChange={e=>setC({...c,endpoint:e.target.value})} className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs" placeholder="http://host:11434"/></label><div className="flex items-end gap-2"><label className="block min-w-0 flex-1 text-xs text-slate-300">Model<select value={c.model} onChange={e=>setC({...c,model:e.target.value})} className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs"><option value="">Select a discovered model…</option>{c.model && !models.includes(c.model) && <option value={c.model}>{c.model} (saved)</option>}{models.map(m=><option key={m} value={m}>{m}</option>)}</select></label><button onClick={()=>loadModels()} disabled={loadingModels||!c.endpoint} className="shrink-0 px-3 py-1.5 border border-slate-700 hover:border-violet-500 rounded text-xs">{loadingModels?'Checking…':'Check models'}</button></div><div className="grid grid-cols-2 gap-3"><label className="text-xs text-slate-300">Schedule (minutes)<input type="number" min="1" value={Math.round(c.pollIntervalSeconds/60)} onChange={e=>setC({...c,pollIntervalSeconds:Number(e.target.value)*60})} className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs"/></label><label className="text-xs text-slate-300">Max plugin tags<input type="number" min="1" max="20" value={c.maxTags} onChange={e=>setC({...c,maxTags:Number(e.target.value)})} className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs"/></label></div><label className="flex gap-2 text-xs text-slate-300"><input type="checkbox" checked={c.autoEnabled} onChange={e=>updateCheckbox({...c,autoEnabled:e.target.checked})}/> Automatically tag all documents on schedule</label><label className="flex gap-2 text-xs text-slate-300"><input type="checkbox" checked={c.recheckOnChange} onChange={e=>updateCheckbox({...c,recheckOnChange:e.target.checked})}/> Recheck changed documents</label><label className="flex gap-2 text-xs text-slate-300"><input type="checkbox" checked={restrictWorkspaces} onChange={e=>{setRestrictWorkspaces(e.target.checked);updateCheckbox({...c,workspaces:e.target.checked?c.workspaces:[]})}}/> Limit to selected workspaces</label>{restrictWorkspaces&&<div className="ml-5 space-y-1">{allWorkspaces.map(w=><label key={w} className="flex gap-2 text-xs text-slate-400"><input type="checkbox" checked={c.workspaces.includes(w)} onChange={e=>updateCheckbox({...c,workspaces:e.target.checked?[...c.workspaces,w]:c.workspaces.filter(x=>x!==w)})}/>{w}</label>)}</div>}<button disabled={saving} onClick={()=>save()} className="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 rounded text-xs font-semibold">{saving?'Saving…':'Save settings'}</button>{msg&&<p className="text-xs text-slate-400 break-words">{msg}</p>}</div></div>
 }
 
 // ─── GoogleCalendarDetail ────────────────────────────────────────────────────

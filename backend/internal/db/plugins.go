@@ -2,8 +2,88 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"time"
 )
+
+// --- Ollama tagger: personal provider configuration and per-file ownership
+// state. managed_tags tracks only tags written by this plugin, never tags the
+// user added themselves.
+type OllamaTaggerConfig struct {
+	UserID              string
+	EndpointEnc         []byte
+	Model               string
+	AutoEnabled         bool
+	RecheckOnChange     bool
+	PollIntervalSeconds int
+	MaxTags             int
+	Workspaces          string
+}
+
+func (db *DB) GetOllamaTaggerConfig(userID string) (*OllamaTaggerConfig, error) {
+	var c OllamaTaggerConfig
+	err := db.Conn.QueryRow(`SELECT user_id, endpoint_enc, model, auto_enabled, recheck_on_change, poll_interval_seconds, max_tags, workspaces FROM plugin_ollama_tagger_user_config WHERE user_id = ?`, userID).
+		Scan(&c.UserID, &c.EndpointEnc, &c.Model, &c.AutoEnabled, &c.RecheckOnChange, &c.PollIntervalSeconds, &c.MaxTags, &c.Workspaces)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+func (db *DB) UpsertOllamaTaggerConfig(c OllamaTaggerConfig) error {
+	_, err := db.Conn.Exec(`INSERT INTO plugin_ollama_tagger_user_config (user_id, endpoint_enc, model, auto_enabled, recheck_on_change, poll_interval_seconds, max_tags, workspaces) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(user_id) DO UPDATE SET endpoint_enc=excluded.endpoint_enc, model=excluded.model, auto_enabled=excluded.auto_enabled, recheck_on_change=excluded.recheck_on_change, poll_interval_seconds=excluded.poll_interval_seconds, max_tags=excluded.max_tags, workspaces=excluded.workspaces`, c.UserID, c.EndpointEnc, c.Model, c.AutoEnabled, c.RecheckOnChange, c.PollIntervalSeconds, c.MaxTags, c.Workspaces)
+	return err
+}
+
+func (db *DB) ListEnabledOllamaTaggerConfigs() ([]OllamaTaggerConfig, error) {
+	rows, err := db.Conn.Query(`SELECT user_id, endpoint_enc, model, auto_enabled, recheck_on_change, poll_interval_seconds, max_tags, workspaces FROM plugin_ollama_tagger_user_config WHERE auto_enabled = 1`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []OllamaTaggerConfig
+	for rows.Next() {
+		var c OllamaTaggerConfig
+		if rows.Scan(&c.UserID, &c.EndpointEnc, &c.Model, &c.AutoEnabled, &c.RecheckOnChange, &c.PollIntervalSeconds, &c.MaxTags, &c.Workspaces) == nil {
+			out = append(out, c)
+		}
+	}
+	return out, rows.Err()
+}
+
+type OllamaTaggerState struct {
+	ContentHash string
+	ManagedTags []string
+	LastRunAt   *time.Time
+	LastError   string
+}
+
+func (db *DB) GetOllamaTaggerState(userID, path string) (*OllamaTaggerState, error) {
+	var s OllamaTaggerState
+	var tags string
+	var last sql.NullTime
+	err := db.Conn.QueryRow(`SELECT content_hash, managed_tags, last_run_at, last_error FROM plugin_ollama_tagger_state WHERE user_id=? AND file_path=?`, userID, path).Scan(&s.ContentHash, &tags, &last, &s.LastError)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	_ = json.Unmarshal([]byte(tags), &s.ManagedTags)
+	if last.Valid {
+		s.LastRunAt = &last.Time
+	}
+	return &s, nil
+}
+func (db *DB) UpsertOllamaTaggerState(userID, path, hash string, tags []string, run time.Time, lastError string) error {
+	b, _ := json.Marshal(tags)
+	_, err := db.Conn.Exec(`INSERT INTO plugin_ollama_tagger_state (user_id,file_path,content_hash,managed_tags,last_run_at,last_error) VALUES (?,?,?,?,?,?) ON CONFLICT(user_id,file_path) DO UPDATE SET content_hash=excluded.content_hash,managed_tags=excluded.managed_tags,last_run_at=excluded.last_run_at,last_error=excluded.last_error`, userID, path, hash, string(b), run, lastError)
+	return err
+}
 
 // --- plugin_secrets: generic encrypted key/value store, shared by any future
 // plugin that needs to persist a decryptable secret (Google Calendar's OAuth

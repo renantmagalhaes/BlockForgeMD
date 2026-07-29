@@ -264,7 +264,8 @@ import {
   GripVertical,
   GripHorizontal,
   ArrowLeft,
-  ArrowRight
+  ArrowRight,
+  Sparkles
 } from "lucide-react";
 
 // Configure Turndown for clean Markdown serialization
@@ -4874,6 +4875,7 @@ export const Editor: React.FC<
     useState<
       "saved" | "saving" | "dirty"
     >("saved");
+  const [taggingDocument, setTaggingDocument] = useState(false);
   // Set when an SSE file_update for this same file arrives while the editor
   // is focused — the content-sync effect below deliberately won't clobber
   // active typing, but silently ignoring it entirely just delays the same
@@ -7588,6 +7590,33 @@ export const Editor: React.FC<
     }
   };
 
+  const runAutoTags = async () => {
+    if (taggingDocument) return;
+    setTaggingDocument(true);
+    try {
+      await executeAutoSave();
+      const res = await fetch("/api/plugins/ollama-tagger/tag-file", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: filePath })
+      });
+      if (!res.ok) {
+        await alertDialog(`Auto tags: ${await res.text()}`);
+        return;
+      }
+      const result = await res.json();
+      try {
+        (JSON.parse(result.tags ?? "[]") as string[]).forEach(tag => onEnsureTagColor?.(tag));
+      } catch { /* older servers return status only; normal tag-color refresh still applies */ }
+      await alertDialog("Auto tags generated for this document.");
+    } catch (err) {
+      await alertDialog(`Auto tags: ${String(err)}`);
+    } finally {
+      setTaggingDocument(false);
+    }
+  };
+
   const handleRollback = async (
     timestamp: number,
     skipConfirm = false
@@ -9702,6 +9731,15 @@ export const Editor: React.FC<
             {/* Right Toolbar Actions */}
             <div className="flex flex-wrap items-center gap-3">
               {getSaveStatusIndicator()}
+              <button
+                onClick={() => void runAutoTags()}
+                disabled={taggingDocument || isSaving}
+                title="Generate contextual tags with Ollama"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-violet-500/30 text-violet-300 hover:bg-violet-500/15 disabled:opacity-50 text-xs font-semibold transition"
+              >
+                {taggingDocument ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                Auto tags
+              </button>
 
               {/* Layout radio group — fixed position, no shifting */}
               {(() => {

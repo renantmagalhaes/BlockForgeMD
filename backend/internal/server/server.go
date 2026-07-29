@@ -23,6 +23,7 @@ import (
 	"blockforgemd/internal/parser"
 	"blockforgemd/internal/plugins"
 	"blockforgemd/internal/plugins/googlecalendar"
+	"blockforgemd/internal/plugins/ollamatagger"
 	"blockforgemd/internal/watcher"
 
 	"github.com/go-chi/chi/v5"
@@ -49,6 +50,7 @@ func NewServer(rootPath string, database *db.DB, w *watcher.Watcher, encKey [32]
 	}
 
 	s.plugins.Register(googlecalendar.New(database, s, encKey))
+	s.plugins.Register(ollamatagger.New(database, s, encKey))
 	s.plugins.RegisterComingSoon(plugins.Meta{ID: "mcp-servers", Name: "MCP Servers", Category: "mcp"})
 	s.plugins.RegisterComingSoon(plugins.Meta{ID: "llm-providers", Name: "LLM Providers", Category: "llm"})
 	if err := s.plugins.StartAll(context.Background()); err != nil {
@@ -157,6 +159,10 @@ func (s *Server) setupRoutes() {
 		r.Post("/plugins/google-calendar/sync-now", s.handleGCalSyncNow)
 		r.Get("/plugins/google-calendar/calendars", s.handleGCalListCalendars)
 		r.Post("/plugins/google-calendar/calendar", s.handleGCalSetCalendar)
+		r.Get("/plugins/ollama-tagger/config", s.handleOllamaTaggerGetConfig)
+		r.Post("/plugins/ollama-tagger/config", s.handleOllamaTaggerSetConfig)
+		r.Get("/plugins/ollama-tagger/models", s.handleOllamaTaggerModels)
+		r.Post("/plugins/ollama-tagger/tag-file", s.handleOllamaTaggerTagFile)
 	})
 
 	// Google's OAuth redirect lands here with the bare browser (no session

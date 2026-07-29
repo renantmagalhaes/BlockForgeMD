@@ -180,6 +180,27 @@ func (db *DB) createTables() error {
 			production_confirmed BOOLEAN NOT NULL DEFAULT 0,
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 		);`,
+		`CREATE TABLE IF NOT EXISTS plugin_ollama_tagger_user_config (
+			user_id TEXT PRIMARY KEY,
+			endpoint_enc BLOB,
+			model TEXT NOT NULL DEFAULT '',
+			auto_enabled BOOLEAN NOT NULL DEFAULT 0,
+			recheck_on_change BOOLEAN NOT NULL DEFAULT 1,
+			poll_interval_seconds INTEGER NOT NULL DEFAULT 0,
+			max_tags INTEGER NOT NULL DEFAULT 5,
+			workspaces TEXT NOT NULL DEFAULT '',
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		);`,
+		`CREATE TABLE IF NOT EXISTS plugin_ollama_tagger_state (
+			user_id TEXT NOT NULL,
+			file_path TEXT NOT NULL,
+			content_hash TEXT NOT NULL DEFAULT '',
+			managed_tags TEXT NOT NULL DEFAULT '[]',
+			last_run_at DATETIME,
+			last_error TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (user_id, file_path),
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		);`,
 	}
 
 	for _, q := range queries {
@@ -192,6 +213,7 @@ func (db *DB) createTables() error {
 	_, _ = db.Conn.Exec("ALTER TABLE files ADD COLUMN content TEXT;")
 	_, _ = db.Conn.Exec("ALTER TABLE files ADD COLUMN position REAL DEFAULT 0;")
 	_, _ = db.Conn.Exec("ALTER TABLE files ADD COLUMN checklist TEXT;")
+	_, _ = db.Conn.Exec("ALTER TABLE plugin_ollama_tagger_user_config ADD COLUMN workspaces TEXT NOT NULL DEFAULT '';")
 	_, _ = db.Conn.Exec("UPDATE files SET position = rowid WHERE position = 0 OR position IS NULL;")
 	_, _ = db.Conn.Exec("INSERT OR IGNORE INTO settings (key, value) VALUES ('history_limit', '50');")
 
@@ -704,11 +726,11 @@ type UserRecord struct {
 }
 
 type APIKeyRecord struct {
-	ID          string  `json:"id"`
-	UserID      string  `json:"userId"`
-	Label       string  `json:"label"`
-	CreatedAt   string  `json:"createdAt"`
-	LastUsedAt  *string `json:"lastUsedAt"`
+	ID         string  `json:"id"`
+	UserID     string  `json:"userId"`
+	Label      string  `json:"label"`
+	CreatedAt  string  `json:"createdAt"`
+	LastUsedAt *string `json:"lastUsedAt"`
 }
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────

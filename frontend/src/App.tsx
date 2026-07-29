@@ -3661,12 +3661,14 @@ const App: React.FC = () => {
                   <ChevronRight size={12} />
                   <span className="font-mono text-slate-500">{selectedPath}</span>
                 </div>
+                <div className="flex items-center gap-2">
                 <button
                   onClick={() => handleDeleteFile(selectedPath)}
                   className="flex items-center gap-1 px-3 py-1 hover:bg-red-500/10 text-slate-500 hover:text-red-400 border border-transparent hover:border-red-500/20 text-xs font-semibold rounded-lg transition cursor-pointer"
                 >
                   <Trash2 size={12} /> Delete
                 </button>
+                </div>
               </div>
 
               <div className="flex-1 overflow-hidden">
