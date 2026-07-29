@@ -1314,6 +1314,7 @@ const App: React.FC = () => {
   const [historyInterval, setHistoryInterval] = useState(0)
   const [historyIntervalInput, setHistoryIntervalInput] = useState('0')
   const selectedPathRef = useRef<string | null>(null)
+  const activeViewRef = useRef<'board' | 'editor' | 'graph'>('editor')
   const isSavingRef = useRef(false)
   // Tells any open Kanban card panel that this path changed on disk — see
   // the SSE file_update listener below. A plain path string wouldn't re-fire
@@ -1976,7 +1977,13 @@ const App: React.FC = () => {
     let offlineTimer: ReturnType<typeof setTimeout> | null = null
     es.addEventListener('file_update', (e: any) => {
       fetchFiles()
-      if (selectedPathRef.current && selectedPathRef.current === e.data && !isSavingRef.current) {
+      // A graph is an independent view over the currently selected file.
+      // Refreshing that file in response to a normal sync event used to call
+      // fetchFileContent(), which deliberately navigates to the editor. That
+      // made the graph appear to close at random whenever its selected file
+      // was touched on disk. Keep its background data stable until the user
+      // explicitly leaves the graph instead.
+      if (activeViewRef.current !== 'graph' && selectedPathRef.current && selectedPathRef.current === e.data && !isSavingRef.current) {
         fetchFileContent(selectedPathRef.current)
       }
       // Kanban's card detail panel loads its body content independently of
@@ -2011,6 +2018,7 @@ const App: React.FC = () => {
   // Keep refs in sync so the SSE connection and interval timer always read
   // the current file/save state without needing to be recreated on every change
   useEffect(() => { selectedPathRef.current = selectedPath }, [selectedPath])
+  useEffect(() => { activeViewRef.current = activeView }, [activeView])
   useEffect(() => { isSavingRef.current = isSaving }, [isSaving])
 
   // Periodic version checkpoint (0 = disabled)
