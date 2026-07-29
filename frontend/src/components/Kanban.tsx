@@ -68,6 +68,19 @@ interface PriorityDef {
   color: string
 }
 
+type CardFieldKey = 'title' | 'cover' | 'priority' | 'dueDate' | 'assignee' | 'tags' | 'checklists'
+type CardFieldVisibility = Partial<Record<CardFieldKey, boolean>>
+
+const CARD_FIELD_OPTIONS: { key: CardFieldKey; label: string }[] = [
+  { key: 'title',       label: 'Title' },
+  { key: 'cover',       label: 'Cover image' },
+  { key: 'priority',    label: 'Priority' },
+  { key: 'dueDate',     label: 'Due date' },
+  { key: 'assignee',    label: 'Assignee' },
+  { key: 'tags',        label: 'Tags' },
+  { key: 'checklists',  label: 'Checklist progress' },
+]
+
 interface KanbanProps {
   files: FileRecord[]
   // See App.tsx's SSE file_update listener — lets an open card detail panel
@@ -336,6 +349,7 @@ const BoardSettingsModal: React.FC<{
   columns?: string[]
   completedColumns?: string[]
   completionTargetColumn?: string
+  cardFieldVisibility: CardFieldVisibility
   onClose: () => void
   onSavePriority: (idx: number, name: string, color: string) => Promise<void>
   onDeletePriority: (idx: number) => Promise<void>
@@ -343,7 +357,8 @@ const BoardSettingsModal: React.FC<{
   onSetTagColor: (tag: string, color: string) => Promise<void>
   onToggleCompleted?: (col: string) => void
   onSetCompletionTarget?: (col: string) => void
-}> = ({ priorities, tagColors, allBoardTags, columns, completedColumns = [], completionTargetColumn, onClose, onSavePriority, onDeletePriority, onAddPriority, onSetTagColor, onToggleCompleted, onSetCompletionTarget }) => {
+  onCardFieldVisibilityChange: (field: CardFieldKey, visible: boolean) => void
+}> = ({ priorities, tagColors, allBoardTags, columns, completedColumns = [], completionTargetColumn, cardFieldVisibility, onClose, onSavePriority, onDeletePriority, onAddPriority, onSetTagColor, onToggleCompleted, onSetCompletionTarget, onCardFieldVisibilityChange }) => {
   const [editingIdx, setEditingIdx] = useState<number | null>(null)
   const [editName, setEditName]     = useState('')
   const [editColor, setEditColor]   = useState('')
@@ -444,6 +459,28 @@ const BoardSettingsModal: React.FC<{
               >
                 <Plus size={12} />
               </button>
+            </div>
+          </div>
+
+          {/* Card fields */}
+          <div>
+            <h3 className="text-[10px] font-bold bf-kanban-section-label uppercase tracking-widest mb-3">Card Fields</h3>
+            <p className="text-[11px] bf-kanban-hint mb-3">Choose which properties appear on cards in this board. This only changes their display; it never removes card data.</p>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+              {CARD_FIELD_OPTIONS.map(({ key, label }) => {
+                const visible = cardFieldVisibility[key] !== false
+                return (
+                  <label key={key} className="flex items-center gap-2 text-[12px] cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={visible}
+                      onChange={e => onCardFieldVisibilityChange(key, e.target.checked)}
+                      className="accent-violet-500 cursor-pointer"
+                    />
+                    <span className={visible ? '' : 'opacity-55'}>{label}</span>
+                  </label>
+                )
+              })}
             </div>
           </div>
 
@@ -1638,6 +1675,14 @@ const Kanban: React.FC<KanbanProps> = ({
     const p = parseJSON<PriorityDef[] | null>(boardFrontMatter?.priorities, null)
     return Array.isArray(p) && p.length > 0 ? p : DEFAULT_PRIORITIES
   }, [boardFrontMatter?.priorities])
+  // A board can simplify its cards without changing the data on any task.
+  // Missing keys intentionally mean visible, so existing boards retain their
+  // current appearance until a user opts to hide a field.
+  const cardFieldVisibility = useMemo(
+    () => parseJSON<CardFieldVisibility>(boardFrontMatter?.cardFields, {}),
+    [boardFrontMatter?.cardFields],
+  )
+  const isCardFieldVisible = (field: CardFieldKey) => cardFieldVisibility[field] !== false
 
   // Tag colors are global across the workspace (assigned randomly on first
   // use and shared by every board/document) rather than stored per-board.
@@ -1931,6 +1976,10 @@ const Kanban: React.FC<KanbanProps> = ({
 
   const handleSetCompletionTarget = async (col: string) => {
     await onUpdateBoardFrontMatter?.({ completionTargetColumn: col })
+  }
+
+  const handleCardFieldVisibilityChange = async (field: CardFieldKey, visible: boolean) => {
+    await onUpdateBoardFrontMatter?.({ cardFields: { ...cardFieldVisibility, [field]: visible } })
   }
 
   // Quick-complete: the card checkbox and the context menu's "Mark as
@@ -2420,12 +2469,14 @@ const Kanban: React.FC<KanbanProps> = ({
                       </motion.button>
 
                       {/* Title */}
-                      <div className={`font-medium bf-kanban-card-title transition mb-2.5 text-[13px] leading-snug break-words min-w-0 pr-6 ${isCompleted ? 'line-through' : ''}`}>
-                        {task.title}
-                      </div>
+                      {isCardFieldVisible('title') && (
+                        <div className={`font-medium bf-kanban-card-title transition mb-2.5 text-[13px] leading-snug break-words min-w-0 pr-6 ${isCompleted ? 'line-through' : ''}`}>
+                          {task.title}
+                        </div>
+                      )}
 
                       {/* Cover image */}
-                      {cover && (
+                      {isCardFieldVisible('cover') && cover && (
                         <div className="bf-kanban-card-cover mb-2.5 -mx-3">
                           <img src={cover} alt="" className="w-full h-36 object-cover block" draggable={false} />
                         </div>
@@ -2433,8 +2484,10 @@ const Kanban: React.FC<KanbanProps> = ({
 
                       {/* Meta */}
                       <div className="space-y-1.5">
+                        {(isCardFieldVisible('priority') || isCardFieldVisible('dueDate') || isCardFieldVisible('assignee')) && (
                         <div className="flex flex-wrap items-center gap-1.5">
                           {/* Priority — clickable */}
+                          {isCardFieldVisible('priority') && (
                           <button
                             onClick={e => {
                               e.stopPropagation()
@@ -2450,24 +2503,27 @@ const Kanban: React.FC<KanbanProps> = ({
                           >
                             {priority || 'No priority'}
                           </button>
+                          )}
 
-                          {dueDate && (
+                          {isCardFieldVisible('dueDate') && dueDate && (
                             <div className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] ${duePast && !isCompleted ? 'bg-red-500/15 text-red-400 border border-red-500/25' : 'bf-kanban-meta-badge'}`}>
                               <Calendar size={9} /><span>{dueDate}</span>
                             </div>
                           )}
-                          {assignee && assignee !== 'Unassigned' && (
+                          {isCardFieldVisible('assignee') && assignee && assignee !== 'Unassigned' && (
                             <div className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] bf-kanban-meta-badge">
                               <User size={9} /><span>{assignee}</span>
                             </div>
                           )}
                         </div>
+                        )}
 
                         {/* Tags — no container-level stopPropagation here:
                             only the actual interactive bits (remove button,
                             +tag button) stop it, so clicking the empty gaps
                             in this row still opens the card like everywhere
                             else. */}
+                        {isCardFieldVisible('tags') && (
                         <div className="flex flex-wrap gap-1 items-center">
                           {tags.map(tag => {
                             const tc = isCompleted ? '#64748b' : (tagColors[tag] || '#8b5cf6')
@@ -2508,10 +2564,11 @@ const Kanban: React.FC<KanbanProps> = ({
                             </button>
                           )}
                         </div>
+                        )}
                       </div>
 
                       {/* Checklist progress — one bar + toggle per separate checklist */}
-                      {(task.checklistGroups ?? parseChecklistGroups(task.content || '')).map((items, groupIdx) => {
+                      {isCardFieldVisible('checklists') && (task.checklistGroups ?? parseChecklistGroups(task.content || '')).map((items, groupIdx) => {
                         const done  = items.filter(i => i.done).length
                         const total = items.length
                         const pct   = total ? (done / total) * 100 : 0
@@ -2703,6 +2760,7 @@ const Kanban: React.FC<KanbanProps> = ({
           columns={boardColumns}
           completedColumns={completedColumns}
           completionTargetColumn={completionTargetColumn}
+          cardFieldVisibility={cardFieldVisibility}
           onClose={() => setSettingsOpen(false)}
           onSavePriority={handleSavePriority}
           onDeletePriority={handleDeletePriority}
@@ -2710,6 +2768,7 @@ const Kanban: React.FC<KanbanProps> = ({
           onSetTagColor={handleSetTagColor}
           onToggleCompleted={handleToggleColumnCompleted}
           onSetCompletionTarget={handleSetCompletionTarget}
+          onCardFieldVisibilityChange={handleCardFieldVisibilityChange}
         />
       )}
 
