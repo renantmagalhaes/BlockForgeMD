@@ -547,8 +547,10 @@ const KanbanFilterBar: React.FC<{
   onClear: () => void
 }> = ({ allTags, allAssignees, hasDueDates, priorities, tagColors, filterTags, filterPriorities, filterAssignees, filterDueDate, filterMode, searchText, onTagToggle, onPriorityToggle, onAssigneeToggle, onDueDateChange, onModeChange, onSearchChange, onClear }) => {
   const [tagDropOpen, setTagDropOpen] = useState(false)
+  const [tagSearch, setTagSearch] = useState('')
   const [assigneeDropOpen, setAssigneeDropOpen] = useState(false)
   const tagDropRef = useRef<HTMLDivElement>(null)
+  const tagSearchRef = useRef<HTMLInputElement>(null)
   const assigneeDropRef = useRef<HTMLDivElement>(null)
   const dueDateRef = useRef<HTMLInputElement>(null)
   const isActive = filterTags.length > 0 || filterPriorities.length > 0 || filterAssignees.length > 0 || filterDueDate !== '' || searchText.length > 0
@@ -561,13 +563,18 @@ const KanbanFilterBar: React.FC<{
   // library's transforms on the columns wins over a same-context z-index).
   const [tagDropPos, setTagDropPos] = useState<{ top: number; left: number } | null>(null)
   const [assigneeDropPos, setAssigneeDropPos] = useState<{ top: number; left: number } | null>(null)
+  const matchingTags = useMemo(() => {
+    const query = tagSearch.trim().toLowerCase()
+    return query ? allTags.filter(tag => tag.toLowerCase().includes(query)) : allTags
+  }, [allTags, tagSearch])
 
   useEffect(() => {
-    if (!tagDropOpen) { setTagDropPos(null); return }
+    if (!tagDropOpen) { setTagDropPos(null); setTagSearch(''); return }
     if (tagDropRef.current) {
       const r = tagDropRef.current.getBoundingClientRect()
       setTagDropPos({ top: r.bottom + 6, left: r.left })
     }
+    requestAnimationFrame(() => tagSearchRef.current?.focus())
     const handler = (e: MouseEvent) => {
       if (tagDropRef.current && !tagDropRef.current.contains(e.target as Node))
         setTagDropOpen(false)
@@ -665,7 +672,27 @@ const KanbanFilterBar: React.FC<{
               style={{ top: tagDropPos.top, left: tagDropPos.left }}
               onMouseDown={e => e.stopPropagation()}
             >
-              {allTags.map(tag => {
+              <div className="sticky top-0 z-10 px-2 pb-1.5 bf-kanban-popover">
+                <div className="flex items-center gap-1.5 rounded-md border border-[var(--border-2)] px-2 py-1">
+                  <Search size={11} className="shrink-0 opacity-60" />
+                  <input
+                    ref={tagSearchRef}
+                    type="text"
+                    value={tagSearch}
+                    onChange={e => setTagSearch(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Escape') setTagDropOpen(false) }}
+                    placeholder="Find tags…"
+                    aria-label="Find tags"
+                    className="min-w-0 flex-1 bg-transparent text-[11px] outline-none placeholder:opacity-40"
+                  />
+                  {tagSearch && (
+                    <button onClick={() => setTagSearch('')} className="shrink-0 opacity-60 hover:opacity-100 cursor-pointer" aria-label="Clear tag search">
+                      <X size={10} />
+                    </button>
+                  )}
+                </div>
+              </div>
+              {matchingTags.map(tag => {
                 const tc = tagColors[tag] || '#8b5cf6'
                 const checked = filterTags.includes(tag)
                 return (
@@ -692,6 +719,9 @@ const KanbanFilterBar: React.FC<{
                   </button>
                 )
               })}
+              {matchingTags.length === 0 && (
+                <p className="px-3 py-2 text-[11px] bf-kanban-hint">No matching tags</p>
+              )}
             </div>,
             document.body
           )}
