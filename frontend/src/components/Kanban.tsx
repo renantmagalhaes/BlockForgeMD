@@ -1982,6 +1982,18 @@ const Kanban: React.FC<KanbanProps> = ({
     await onUpdateBoardFrontMatter?.({ cardFields: { ...cardFieldVisibility, [field]: visible } })
   }
 
+  // Moves a card into `target` and places it at the top of that column
+  // (rather than leaving it to sort wherever its stale `position` falls) —
+  // shared by "Mark as completed" and the context menu's "Move to column".
+  const moveCardToTop = async (path: string, target: string) => {
+    const movingTask = tasks.find(t => t.path === path)
+    const destItems = getTasksByColumn(target).filter(t => t.path !== path)
+    if (movingTask) destItems.unshift(movingTask)
+    const updates = destItems.map((t, idx) => ({ path: t.path, position: idx + 1 }))
+    onMoveCard(path, target)
+    onReorderCards?.(updates)
+  }
+
   // Quick-complete: the card checkbox and the context menu's "Mark as
   // completed" both call this. A card already sitting in a completed
   // column reopens to the board's first column instead — there's no single
@@ -1991,7 +2003,7 @@ const Kanban: React.FC<KanbanProps> = ({
     const alreadyDone = completedColumns.some(c => c.toLowerCase() === currentCol.toLowerCase())
     const target = alreadyDone ? (boardColumns[0] ?? '') : completionTargetColumn
     if (!target || target.toLowerCase() === currentCol.toLowerCase()) return
-    await onMoveCard(path, target)
+    moveCardToTop(path, target)
   }
 
   const toggleColCollapse = (col: string) => {
@@ -2790,7 +2802,7 @@ const Kanban: React.FC<KanbanProps> = ({
             const trimmed = newTitle?.trim()
             if (trimmed && trimmed !== cardCtxMenu.task.title) await onRenameTask(cardCtxMenu.task.path, trimmed)
           } : undefined}
-          onMove={col => onMoveCard(cardCtxMenu.task.path, col)}
+          onMove={col => moveCardToTop(cardCtxMenu.task.path, col)}
           onMarkComplete={() => handleMarkComplete(cardCtxMenu.task.path, cardCtxMenu.col)}
           onSetPriority={name => handleSetCardPriority(cardCtxMenu.task.path, name)}
           onSetDueDate={date => onUpdateTaskFrontMatter?.(cardCtxMenu.task.path, { dueDate: date })}

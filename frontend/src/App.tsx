@@ -2289,6 +2289,7 @@ const App: React.FC = () => {
   }
 
   const handleUpdateFrontMatter = async (path: string, updates: Record<string, any>) => {
+    const prevStatus = files.find(f => f.path === path)?.frontMatter?.status
     try {
       await fetch(`${API_BASE}/api/file/front-matter`, {
         method: 'PATCH',
@@ -2296,6 +2297,19 @@ const App: React.FC = () => {
         body: JSON.stringify({ path, updates }),
       })
       fetchFiles()
+      // Changing status here (e.g. the Page Attributes panel's Status select)
+      // is a column move just like Kanban drag-and-drop or "Mark complete" —
+      // land it at the top of the new column instead of leaving it to sort
+      // wherever its stale position happens to fall.
+      if (typeof updates.status === 'string' && updates.status && updates.status !== prevStatus) {
+        const folder = path.slice(0, path.lastIndexOf('/') + 1)
+        const siblings = files.filter(f =>
+          f.path !== path &&
+          f.path.slice(0, f.path.lastIndexOf('/') + 1) === folder &&
+          (f.frontMatter?.status || '').toLowerCase() === updates.status.toLowerCase()
+        )
+        handleReorderCards([{ path, position: 1 }, ...siblings.map((f, idx) => ({ path: f.path, position: idx + 2 }))])
+      }
       // currentFrontMatterStr is only captured once when the file is opened
       // (see fetchFileContent) — without refreshing it here, the next body
       // autosave would reconstruct the file from that stale snapshot and
