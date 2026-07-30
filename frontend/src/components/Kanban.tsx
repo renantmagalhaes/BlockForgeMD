@@ -2539,18 +2539,28 @@ const Kanban: React.FC<KanbanProps> = ({
                         <div className="flex flex-wrap gap-1 items-center">
                           {tags.map(tag => {
                             const tc = isCompleted ? '#64748b' : (tagColors[tag] || '#8b5cf6')
+                            // Pill's box is sized to the text ONLY — nothing
+                            // reserved, no idle space. The close button sits
+                            // absolutely positioned *inside* that same box
+                            // (over the tag's own right edge), so showing it
+                            // never resizes the pill: no expand, no push, no
+                            // spilling onto a neighboring tag to fight over.
                             return (
                               <span
                                 key={tag}
-                                className="flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] rounded-md border font-medium group/tag"
+                                className="relative flex items-center px-1.5 py-0.5 text-[10px] rounded-md border font-medium overflow-hidden"
                                 style={{ background: tc + '18', borderColor: tc + '44', color: tc }}
                               >
                                 {tag}
+                                {/* Own :hover, not the pill's — only shows up
+                                    when the pointer is exactly over this
+                                    strip, not anywhere else on the tag. */}
                                 <button
                                   onClick={e => { e.stopPropagation(); handleRemoveTag(task.path, tag, tags) }}
-                                  className="ml-0.5 opacity-0 group-hover/tag:opacity-100 hover:text-red-400 transition cursor-pointer"
+                                  className="absolute inset-y-0 right-0 flex items-center justify-center w-5 opacity-0 hover:opacity-100 text-white transition-opacity duration-150 cursor-pointer"
+                                  style={{ background: tc }}
                                 >
-                                  <X size={8} />
+                                  <X size={10} className="shrink-0" />
                                 </button>
                               </span>
                             )
