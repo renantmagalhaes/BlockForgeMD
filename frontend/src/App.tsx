@@ -1831,10 +1831,9 @@ const App: React.FC = () => {
     }
   }
 
-  // Manual "Run now" for due-date auto-update. Omit boardPath to sweep every
-  // board (the global Settings button); pass it to scope to one board (the
-  // per-board button in Board Settings). Both are explicit user actions, so
-  // the backend always runs them regardless of the enabled toggle.
+  // Manual "Run now" for due-date auto-update (Board Settings' per-board
+  // button). The schedule time is shared (Settings → General); each board
+  // just opts in/out of using it via its own enabled flag.
   const handleRunDueDateAutoUpdate = async (boardPath?: string) => {
     try {
       const res = await fetch(`${API_BASE}/api/due-dates/auto-update/run`, {
@@ -4197,13 +4196,13 @@ const App: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Due date auto-update */}
+                      {/* Due date auto-update schedule */}
                       <div className="space-y-2 pt-2 border-t border-slate-800">
                         <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
                           Due Date Auto-Update
                         </label>
                         <p className="text-[11px] text-slate-400 leading-relaxed">
-                          Automatically bumps overdue due dates to today, once a day at the time below. Only applies to cards in columns not marked Completed. Individual boards can opt out in their own Board Settings.
+                          Once a day at the time below, bumps overdue due dates to today. This is the default for every board — a board can override it in its own Board Settings ("Always on"/"Always off" regardless of this toggle).
                         </p>
                         <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
                           <input
@@ -4212,29 +4211,14 @@ const App: React.FC = () => {
                             onChange={e => saveDueDateAutoUpdateEnabled(e.target.checked)}
                             className="accent-violet-500 cursor-pointer"
                           />
-                          Enable automatic daily update
+                          Enable by default for all boards
                         </label>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="time"
-                            value={dueDateAutoUpdateTime}
-                            onChange={e => saveDueDateAutoUpdateTime(e.target.value)}
-                            className="bg-[#0d1220] border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 outline-none focus:border-violet-500"
-                          />
-                          <button
-                            onClick={async () => {
-                              try {
-                                const { updatedCount, boardsScanned } = await handleRunDueDateAutoUpdate()
-                                await alertDialog(`Updated ${updatedCount} card(s) across ${boardsScanned} board(s).`)
-                              } catch {
-                                await alertDialog('Failed to run due date auto-update.')
-                              }
-                            }}
-                            className="px-3 py-2 text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition cursor-pointer text-slate-200"
-                          >
-                            Run now
-                          </button>
-                        </div>
+                        <input
+                          type="time"
+                          value={dueDateAutoUpdateTime}
+                          onChange={e => saveDueDateAutoUpdateTime(e.target.value)}
+                          className="bg-[#0d1220] border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 outline-none focus:border-violet-500"
+                        />
                       </div>
 
                       {/* Upload limit */}

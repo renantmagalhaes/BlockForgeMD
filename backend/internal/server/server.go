@@ -1415,41 +1415,39 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	appFont, _ := s.db.GetSetting("app_font", "inter")
 	dueDateAutoUpdateEnabledStr, _ := s.db.GetSetting("due_date_auto_update_enabled", "false")
 	dueDateAutoUpdateTime, _ := s.db.GetSetting("due_date_auto_update_time", "09:00")
-	dueDateAutoUpdateLastRun, _ := s.db.GetSetting("due_date_auto_update_last_run", "")
 	uploadLimitStr, _ := s.db.GetSetting("upload_limit_mb", strconv.Itoa(defaultUploadLimitMB))
 	uploadLimitMB, err5 := strconv.Atoi(uploadLimitStr)
 	if err5 != nil || uploadLimitMB <= 0 || uploadLimitMB > maxUploadLimitMB {
 		uploadLimitMB = defaultUploadLimitMB
 	}
 	respondJSON(w, map[string]interface{}{
-		"history_limit":                 limit,
-		"theme":                         theme,
-		"trash_retention_days":          retention,
-		"default_page":                  defaultPage,
-		"sidebar_collapsed":             sidebarCollapsedStr == "true",
-		"kanban_card_view_mode":         kanbanCardViewMode,
-		"properties_collapsed":          propertiesCollapsedStr == "true",
-		"glass_enabled":                 glassEnabledStr == "true",
-		"glass_sidebar_enabled":         glassSidebarEnabledStr == "true",
-		"app_bg_type":                   appBgType,
-		"app_bg_color":                  appBgColor,
-		"app_bg_image":                  appBgImage,
-		"doc_header_text_color_dark":    docHeaderTextColorDark,
-		"doc_header_text_color_light":   docHeaderTextColorLight,
-		"autosave_delay":                autosaveDelay,
-		"history_interval":              historyInterval,
-		"sidebar_bg_color_dark":         sidebarBgColorDark,
-		"sidebar_bg_color_light":        sidebarBgColorLight,
-		"sidebar_text_color_dark":       sidebarTextColorDark,
-		"sidebar_text_color_light":      sidebarTextColorLight,
-		"global_layout_override":        globalLayoutOverride,
-		"global_column_width_override":  globalColumnWidthOverride,
-		"date_format":                   dateFormat,
-		"app_font":                      appFont,
-		"due_date_auto_update_enabled":  dueDateAutoUpdateEnabledStr == "true",
-		"due_date_auto_update_time":     dueDateAutoUpdateTime,
-		"due_date_auto_update_last_run": dueDateAutoUpdateLastRun,
-		"upload_limit_mb":               uploadLimitMB,
+		"history_limit":                limit,
+		"theme":                        theme,
+		"trash_retention_days":         retention,
+		"default_page":                 defaultPage,
+		"sidebar_collapsed":            sidebarCollapsedStr == "true",
+		"kanban_card_view_mode":        kanbanCardViewMode,
+		"properties_collapsed":         propertiesCollapsedStr == "true",
+		"glass_enabled":                glassEnabledStr == "true",
+		"glass_sidebar_enabled":        glassSidebarEnabledStr == "true",
+		"app_bg_type":                  appBgType,
+		"app_bg_color":                 appBgColor,
+		"app_bg_image":                 appBgImage,
+		"doc_header_text_color_dark":   docHeaderTextColorDark,
+		"doc_header_text_color_light":  docHeaderTextColorLight,
+		"autosave_delay":               autosaveDelay,
+		"history_interval":             historyInterval,
+		"sidebar_bg_color_dark":        sidebarBgColorDark,
+		"sidebar_bg_color_light":       sidebarBgColorLight,
+		"sidebar_text_color_dark":      sidebarTextColorDark,
+		"sidebar_text_color_light":     sidebarTextColorLight,
+		"global_layout_override":       globalLayoutOverride,
+		"global_column_width_override": globalColumnWidthOverride,
+		"date_format":                  dateFormat,
+		"app_font":                     appFont,
+		"due_date_auto_update_enabled": dueDateAutoUpdateEnabledStr == "true",
+		"due_date_auto_update_time":    dueDateAutoUpdateTime,
+		"upload_limit_mb":              uploadLimitMB,
 	})
 }
 
@@ -2488,46 +2486,61 @@ func (s *Server) startTrashCleanup() {
 	}()
 }
 
-// startDueDateAutoUpdate polls once a minute to catch the configured
-// due-date-auto-update time of day — a fixed 24h ticker (like trash cleanup)
-// can't do this since it has no way to line up with an arbitrary HH:MM the
-// user picked; a minute-granularity check plus the last-run-date guard in
-// maybeRunScheduledDueDateAutoUpdate keeps it to one run per day.
+// startDueDateAutoUpdate polls once a minute to catch the one shared
+// due-date-auto-update time (Settings → General). Whether a given board
+// actually runs at that time depends on its own dueDateAutoUpdate override:
+// "off" always skips it, "on" always includes it, and unset falls back to
+// the global enabled flag. Per-board last-run bookkeeping still lives in
+// that board's own front matter (visible by just opening the board file),
+// so a board reconfigured mid-day, or one that opts in after today's slot
+// already ran for others, isn't blocked by an unrelated board's history.
 func (s *Server) startDueDateAutoUpdate() {
 	go func() {
 		ticker := time.NewTicker(1 * time.Minute)
 		defer ticker.Stop()
 		for range ticker.C {
-			s.maybeRunScheduledDueDateAutoUpdate()
+			s.checkScheduledDueDateAutoUpdates()
 		}
 	}()
 }
 
-// The global enabled flag is deliberately NOT checked here — it's only the
-// *default* for boards that haven't set their own dueDateAutoUpdate override
-// (see RunDueDateAutoUpdate). A board explicitly set to "on" must still run
-// at the scheduled time even while the global default is off, otherwise
-// turning a single board on would be pointless unless every other board was
-// also explicitly turned off.
-func (s *Server) maybeRunScheduledDueDateAutoUpdate() {
+func (s *Server) checkScheduledDueDateAutoUpdates() {
 	runAt, _ := s.db.GetSetting("due_date_auto_update_time", "09:00")
 	now := time.Now()
 	if now.Format("15:04") != runAt {
 		return
 	}
-	// Keyed by date+time-slot, not just date — so changing the configured
-	// time later in the same day is a distinct slot that's still allowed to
-	// fire, instead of being silently blocked by an earlier slot that
-	// already ran today. This is also what makes it idempotent within the
-	// ~60s window a single slot's tick can land in (see startDueDateAutoUpdate).
 	slot := now.Format("2006-01-02") + " " + runAt
-	if last, _ := s.db.GetSetting("due_date_auto_update_last_run", ""); last == slot {
+
+	globalEnabled, _ := s.db.GetSetting("due_date_auto_update_enabled", "false")
+
+	boards, err := s.db.QueryByFrontMatter("type", "board")
+	if err != nil {
+		log.Printf("due-date auto-update: failed to list boards: %v", err)
 		return
 	}
-	updated, boardsScanned, err := s.RunDueDateAutoUpdate("", false)
-	log.Printf("due-date auto-update: scheduled run for slot %s — boardsScanned=%d updated=%d err=%v", slot, boardsScanned, updated, err)
-	if err := s.db.SetSetting("due_date_auto_update_last_run", slot); err != nil {
-		log.Printf("due-date auto-update: failed to record last-run slot: %v", err)
+
+	for _, b := range boards {
+		fm, ferr := s.db.GetFrontMatterFlat(b.Path)
+		if ferr != nil {
+			continue
+		}
+		switch override := fm["dueDateAutoUpdate"]; {
+		case override == "off":
+			continue
+		case override == "on":
+			// included regardless of the global flag
+		case globalEnabled != "true":
+			continue
+		}
+		if fm["dueDateAutoUpdateLastRun"] == slot {
+			continue
+		}
+		updated, _, rerr := s.RunDueDateAutoUpdate(b.Path)
+		log.Printf("due-date auto-update: board %s slot %s — updated=%d err=%v", b.Path, slot, updated, rerr)
+		if uerr := s.UpdateFrontMatter(b.Path, map[string]interface{}{"dueDateAutoUpdateLastRun": slot}); uerr != nil {
+			log.Printf("due-date auto-update: failed to record last-run for %s: %v", b.Path, uerr)
+		}
 	}
 }
 

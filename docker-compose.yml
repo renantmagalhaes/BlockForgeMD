@@ -26,7 +26,13 @@ services:
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
-      - TZ=UTC
+      # Must match the timezone you actually live in — the due-date
+      # auto-update scheduler (and any other clock-based feature) compares
+      # its configured HH:MM against this container's own clock with no
+      # timezone conversion. If this doesn't match your wall clock, every
+      # scheduled time you enter in the UI will silently fire off by
+      # whatever offset separates this from your real timezone.
+      - TZ=Europe/Lisbon
 
 #volumes:
 #blockforge-cache:

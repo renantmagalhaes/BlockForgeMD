@@ -546,11 +546,12 @@ const BoardSettingsModal: React.FC<{
             </div>
           )}
 
-          {/* Due date auto-update */}
+          {/* Due date auto-update — tri-state override of the global default
+              (Settings → General), using the one shared schedule time. */}
           <div>
             <h3 className="text-[10px] font-bold bf-kanban-section-label uppercase tracking-widest mb-3">Due Date Auto-Update</h3>
             <p className="text-[11px] bf-kanban-hint mb-3">
-              Follows the global schedule (Settings → General) unless overridden here. Bumps overdue due dates to today; never touches cards in a Completed column.
+              Once a day, at the time set in Settings → General, bumps overdue due dates on this board to today. Never touches cards in a Completed column.
             </p>
             <select
               value={dueDateAutoUpdate || ''}
@@ -1747,7 +1748,8 @@ const Kanban: React.FC<KanbanProps> = ({
     return boardColumns.filter(c => DONE_NAMES.includes(c.toLowerCase()))
   }, [boardFrontMatter?.completedColumns, boardColumns])
 
-  // "" (unset) = follow the global schedule; "on"/"off" = explicit per-board override.
+  // "" (unset) = follow the global default; "on"/"off" = explicit per-board
+  // override. The schedule time itself is shared (Settings → General).
   const dueDateAutoUpdate = boardFrontMatter?.dueDateAutoUpdate || ''
 
   // Which single column the quick-complete checkbox/context-menu action sends
