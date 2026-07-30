@@ -1313,6 +1313,8 @@ const App: React.FC = () => {
   const [uploadLimitMBInput, setUploadLimitMBInput] = useState('100')
   const [historyInterval, setHistoryInterval] = useState(0)
   const [historyIntervalInput, setHistoryIntervalInput] = useState('0')
+  const [dueDateAutoUpdateEnabled, setDueDateAutoUpdateEnabled] = useState(false)
+  const [dueDateAutoUpdateTime, setDueDateAutoUpdateTime] = useState('09:00')
   const selectedPathRef = useRef<string | null>(null)
   const activeViewRef = useRef<'board' | 'editor' | 'graph'>('editor')
   const isSavingRef = useRef(false)
@@ -1686,6 +1688,12 @@ const App: React.FC = () => {
           setAutosaveDelay(data.autosave_delay)
           setAutosaveDelayInput(data.autosave_delay.toString())
         }
+        if (typeof data?.due_date_auto_update_enabled === 'boolean') {
+          setDueDateAutoUpdateEnabled(data.due_date_auto_update_enabled)
+        }
+        if (typeof data?.due_date_auto_update_time === 'string' && data.due_date_auto_update_time) {
+          setDueDateAutoUpdateTime(data.due_date_auto_update_time)
+        }
         if (typeof data?.history_interval === 'number' && data.history_interval >= 0) {
           setHistoryInterval(data.history_interval)
           setHistoryIntervalInput(data.history_interval.toString())
@@ -1794,6 +1802,53 @@ const App: React.FC = () => {
       })
     } catch (e) {
       console.error('Failed to save glass_sidebar_enabled', e)
+    }
+  }
+
+  const saveDueDateAutoUpdateEnabled = async (enabled: boolean) => {
+    setDueDateAutoUpdateEnabled(enabled)
+    try {
+      await fetch(`${API_BASE}/api/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ due_date_auto_update_enabled: enabled }),
+      })
+    } catch (e) {
+      console.error('Failed to save due_date_auto_update_enabled', e)
+    }
+  }
+
+  const saveDueDateAutoUpdateTime = async (time: string) => {
+    setDueDateAutoUpdateTime(time)
+    try {
+      await fetch(`${API_BASE}/api/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ due_date_auto_update_time: time }),
+      })
+    } catch (e) {
+      console.error('Failed to save due_date_auto_update_time', e)
+    }
+  }
+
+  // Manual "Run now" for due-date auto-update. Omit boardPath to sweep every
+  // board (the global Settings button); pass it to scope to one board (the
+  // per-board button in Board Settings). Both are explicit user actions, so
+  // the backend always runs them regardless of the enabled toggle.
+  const handleRunDueDateAutoUpdate = async (boardPath?: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/due-dates/auto-update/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(boardPath ? { boardPath } : {}),
+      })
+      if (!res.ok) throw new Error('request failed')
+      const data = await res.json()
+      await fetchFiles()
+      return { updatedCount: data.updatedCount as number, boardsScanned: data.boardsScanned as number }
+    } catch (e) {
+      console.error('Failed to run due date auto-update', e)
+      throw e
     }
   }
 
@@ -3644,6 +3699,7 @@ const App: React.FC = () => {
                 }
                 boardFrontMatter={activeFile?.frontMatter}
                 onUpdateBoardFrontMatter={selectedPath ? (updates) => handleUpdateFrontMatter(selectedPath, updates) : undefined}
+                onRunDueDateAutoUpdate={handleRunDueDateAutoUpdate}
                 onUpdateTaskFrontMatter={(path, updates) => handleUpdateFrontMatter(path, updates)}
                 onRenameTask={(path, newTitle) => handleRenameFile(path, newTitle)}
                 resolvePath={resolveRenamedPath}
@@ -4138,6 +4194,46 @@ const App: React.FC = () => {
                           <span className="text-[11px] text-slate-500 ml-1">
                             {autosaveDelay < 500 ? '⚡ very fast' : autosaveDelay <= 1000 ? '· fast' : autosaveDelay <= 2000 ? '· default' : '· slow'}
                           </span>
+                        </div>
+                      </div>
+
+                      {/* Due date auto-update */}
+                      <div className="space-y-2 pt-2 border-t border-slate-800">
+                        <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
+                          Due Date Auto-Update
+                        </label>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Automatically bumps overdue due dates to today, once a day at the time below. Only applies to cards in columns not marked Completed. Individual boards can opt out in their own Board Settings.
+                        </p>
+                        <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={dueDateAutoUpdateEnabled}
+                            onChange={e => saveDueDateAutoUpdateEnabled(e.target.checked)}
+                            className="accent-violet-500 cursor-pointer"
+                          />
+                          Enable automatic daily update
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="time"
+                            value={dueDateAutoUpdateTime}
+                            onChange={e => saveDueDateAutoUpdateTime(e.target.value)}
+                            className="bg-[#0d1220] border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 outline-none focus:border-violet-500"
+                          />
+                          <button
+                            onClick={async () => {
+                              try {
+                                const { updatedCount, boardsScanned } = await handleRunDueDateAutoUpdate()
+                                await alertDialog(`Updated ${updatedCount} card(s) across ${boardsScanned} board(s).`)
+                              } catch {
+                                await alertDialog('Failed to run due date auto-update.')
+                              }
+                            }}
+                            className="px-3 py-2 text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition cursor-pointer text-slate-200"
+                          >
+                            Run now
+                          </button>
                         </div>
                       </div>
 

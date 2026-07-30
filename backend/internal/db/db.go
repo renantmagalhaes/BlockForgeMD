@@ -456,6 +456,27 @@ func (db *DB) ListFiles() ([]FileRecord, error) {
 	return records, nil
 }
 
+// GetFrontMatterFlat returns a single file's front matter as a flat key/value
+// map — used where only one specific file's own settings are needed (e.g. a
+// board's completedColumns/dueDateAutoUpdate), as opposed to QueryCards
+// which is shaped for scanning many files under a folder prefix.
+func (db *DB) GetFrontMatterFlat(path string) (map[string]string, error) {
+	rows, err := db.Conn.Query(`SELECT key, value FROM front_matter WHERE file_path = ?;`, path)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	fm := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err == nil {
+			fm[k] = v
+		}
+	}
+	return fm, nil
+}
+
 // QueryByFrontMatter fetches files matching a specific front matter key-value criteria (perfect for Kanban board columns)
 func (db *DB) QueryByFrontMatter(key, value string) ([]FileRecord, error) {
 	query := `

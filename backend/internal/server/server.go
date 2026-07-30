@@ -60,6 +60,7 @@ func NewServer(rootPath string, database *db.DB, w *watcher.Watcher, encKey [32]
 	s.setupRoutes()
 	go s.listenForWatcherUpdates()
 	s.startTrashCleanup()
+	s.startDueDateAutoUpdate()
 
 	return s
 }
@@ -143,6 +144,7 @@ func (s *Server) setupRoutes() {
 		r.Get("/backlinks", s.handleGetBacklinks)
 		r.Get("/graph", s.handleGetGraph)
 		r.Get("/cards", s.handleGetCards)
+		r.Post("/due-dates/auto-update/run", s.handleRunDueDateAutoUpdate)
 		r.Get("/users", s.handleListUsers)
 		r.Post("/users", s.handleCreateUser)
 		r.Delete("/users/{id}", s.handleDeleteUser)
@@ -1411,6 +1413,8 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	globalColumnWidthOverride, _ := s.db.GetSetting("global_column_width_override", "per-page")
 	dateFormat, _ := s.db.GetSetting("date_format", "long")
 	appFont, _ := s.db.GetSetting("app_font", "inter")
+	dueDateAutoUpdateEnabledStr, _ := s.db.GetSetting("due_date_auto_update_enabled", "false")
+	dueDateAutoUpdateTime, _ := s.db.GetSetting("due_date_auto_update_time", "09:00")
 	uploadLimitStr, _ := s.db.GetSetting("upload_limit_mb", strconv.Itoa(defaultUploadLimitMB))
 	uploadLimitMB, err5 := strconv.Atoi(uploadLimitStr)
 	if err5 != nil || uploadLimitMB <= 0 || uploadLimitMB > maxUploadLimitMB {
@@ -1441,6 +1445,8 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"global_column_width_override": globalColumnWidthOverride,
 		"date_format":                  dateFormat,
 		"app_font":                     appFont,
+		"due_date_auto_update_enabled": dueDateAutoUpdateEnabledStr == "true",
+		"due_date_auto_update_time":    dueDateAutoUpdateTime,
 		"upload_limit_mb":              uploadLimitMB,
 	})
 }
@@ -1471,6 +1477,8 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		GlobalColumnWidthOverride string  `json:"global_column_width_override"`
 		DateFormat                string  `json:"date_format"`
 		AppFont                   string  `json:"app_font"`
+		DueDateAutoUpdateEnabled  *bool   `json:"due_date_auto_update_enabled"`
+		DueDateAutoUpdateTime     *string `json:"due_date_auto_update_time"`
 		UploadLimitMB             *int    `json:"upload_limit_mb"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1694,6 +1702,28 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	if validAppFonts[req.AppFont] {
 		if err := s.db.SetSetting("app_font", req.AppFont); err != nil {
 			http.Error(w, fmt.Sprintf("failed to save app_font: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if req.DueDateAutoUpdateEnabled != nil {
+		val := "false"
+		if *req.DueDateAutoUpdateEnabled {
+			val = "true"
+		}
+		if err := s.db.SetSetting("due_date_auto_update_enabled", val); err != nil {
+			http.Error(w, fmt.Sprintf("failed to save due_date_auto_update_enabled: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if req.DueDateAutoUpdateTime != nil {
+		if _, err := time.Parse("15:04", *req.DueDateAutoUpdateTime); err != nil {
+			http.Error(w, "invalid due_date_auto_update_time value (expected HH:MM)", http.StatusBadRequest)
+			return
+		}
+		if err := s.db.SetSetting("due_date_auto_update_time", *req.DueDateAutoUpdateTime); err != nil {
+			http.Error(w, fmt.Sprintf("failed to save due_date_auto_update_time: %v", err), http.StatusInternalServerError)
 			return
 		}
 	}
@@ -2454,6 +2484,42 @@ func (s *Server) startTrashCleanup() {
 			s.purgeExpiredTrash()
 		}
 	}()
+}
+
+// startDueDateAutoUpdate polls once a minute to catch the configured
+// due-date-auto-update time of day — a fixed 24h ticker (like trash cleanup)
+// can't do this since it has no way to line up with an arbitrary HH:MM the
+// user picked; a minute-granularity check plus the last-run-date guard in
+// maybeRunScheduledDueDateAutoUpdate keeps it to one run per day.
+func (s *Server) startDueDateAutoUpdate() {
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			s.maybeRunScheduledDueDateAutoUpdate()
+		}
+	}()
+}
+
+func (s *Server) maybeRunScheduledDueDateAutoUpdate() {
+	if v, _ := s.db.GetSetting("due_date_auto_update_enabled", "false"); v != "true" {
+		return
+	}
+	runAt, _ := s.db.GetSetting("due_date_auto_update_time", "09:00")
+	now := time.Now()
+	if now.Format("15:04") != runAt {
+		return
+	}
+	today := now.Format("2006-01-02")
+	if last, _ := s.db.GetSetting("due_date_auto_update_last_run", ""); last == today {
+		return // already ran today — without this the ticker would re-fire every minute through that HH:MM minute
+	}
+	if _, _, err := s.RunDueDateAutoUpdate("", false); err != nil {
+		log.Printf("due-date auto-update: scheduled run failed: %v", err)
+	}
+	if err := s.db.SetSetting("due_date_auto_update_last_run", today); err != nil {
+		log.Printf("due-date auto-update: failed to record last-run date: %v", err)
+	}
 }
 
 // ─── HTTP handlers ────────────────────────────────────────────────────────────

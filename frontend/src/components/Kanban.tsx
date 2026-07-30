@@ -4,6 +4,7 @@ import {
   Calendar, User, Plus, Trash2, Edit3, X, Check,
   ChevronLeft, ChevronRight, Settings, Palette,
   Tag, ChevronDown, Search, ChevronsLeft, Copy, ArrowRight, GripVertical, ListChecks, Layers, Pencil,
+  ChevronsDown,
 } from 'lucide-react'
 import { Editor } from './Editor'
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd'
@@ -95,6 +96,7 @@ interface KanbanProps {
   onUpdateColumns?: (columns: string[]) => Promise<void>
   boardFrontMatter?: Record<string, string>
   onUpdateBoardFrontMatter?: (updates: Record<string, unknown>) => Promise<void>
+  onRunDueDateAutoUpdate?: (boardPath?: string) => Promise<{ updatedCount: number; boardsScanned: number }>
   onUpdateTaskFrontMatter?: (path: string, updates: Record<string, unknown>) => Promise<void>
   // Renames a task's file to match a new title (mirrors the main document
   // editor's rename-on-title-change behavior). Resolves to the task's final
@@ -350,6 +352,7 @@ const BoardSettingsModal: React.FC<{
   completedColumns?: string[]
   completionTargetColumn?: string
   cardFieldVisibility: CardFieldVisibility
+  dueDateAutoUpdate?: string
   onClose: () => void
   onSavePriority: (idx: number, name: string, color: string) => Promise<void>
   onDeletePriority: (idx: number) => Promise<void>
@@ -358,13 +361,30 @@ const BoardSettingsModal: React.FC<{
   onToggleCompleted?: (col: string) => void
   onSetCompletionTarget?: (col: string) => void
   onCardFieldVisibilityChange: (field: CardFieldKey, visible: boolean) => void
-}> = ({ priorities, tagColors, allBoardTags, columns, completedColumns = [], completionTargetColumn, cardFieldVisibility, onClose, onSavePriority, onDeletePriority, onAddPriority, onSetTagColor, onToggleCompleted, onSetCompletionTarget, onCardFieldVisibilityChange }) => {
+  onSetDueDateAutoUpdate?: (value: string) => void
+  onRunDueDateAutoUpdateHere?: () => Promise<void>
+}> = ({ priorities, tagColors, allBoardTags, columns, completedColumns = [], completionTargetColumn, cardFieldVisibility, dueDateAutoUpdate, onClose, onSavePriority, onDeletePriority, onAddPriority, onSetTagColor, onToggleCompleted, onSetCompletionTarget, onCardFieldVisibilityChange, onSetDueDateAutoUpdate, onRunDueDateAutoUpdateHere }) => {
   const [editingIdx, setEditingIdx] = useState<number | null>(null)
   const [editName, setEditName]     = useState('')
   const [editColor, setEditColor]   = useState('')
   const [newName, setNewName]       = useState('')
   const [newColor, setNewColor]     = useState('#8b5cf6')
   const [colorPicker, setColorPicker] = useState<{ key: string; x: number; y: number } | null>(null)
+
+  // Scroll-for-more hint — same pattern as the app's main Settings modal
+  // (App.tsx) — shown only while there's unscrolled content below, so a
+  // section like Due Date Auto-Update isn't missed below the fold.
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [scrollable, setScrollable] = useState(false)
+  const checkScroll = () => {
+    const el = scrollRef.current
+    if (!el) return
+    setScrollable(el.scrollHeight - el.scrollTop - el.clientHeight > 8)
+  }
+  useEffect(() => {
+    const id = requestAnimationFrame(checkScroll)
+    return () => cancelAnimationFrame(id)
+  }, [priorities.length, allBoardTags.length, columns?.length])
 
   const startEdit = (idx: number) => {
     setEditingIdx(idx)
@@ -397,7 +417,8 @@ const BoardSettingsModal: React.FC<{
           <button onClick={onClose} className="bf-kanban-icon-btn rounded transition cursor-pointer"><X size={16} /></button>
         </div>
 
-        <div className="p-5 space-y-7 max-h-[70vh] overflow-y-auto no-scrollbar">
+        <div className="relative">
+        <div ref={scrollRef} onScroll={checkScroll} className="p-5 space-y-7 max-h-[70vh] overflow-y-auto no-scrollbar">
           {/* Priorities */}
           <div>
             <h3 className="text-[10px] font-bold bf-kanban-section-label uppercase tracking-widest mb-3">Priorities</h3>
@@ -525,6 +546,29 @@ const BoardSettingsModal: React.FC<{
             </div>
           )}
 
+          {/* Due date auto-update */}
+          <div>
+            <h3 className="text-[10px] font-bold bf-kanban-section-label uppercase tracking-widest mb-3">Due Date Auto-Update</h3>
+            <p className="text-[11px] bf-kanban-hint mb-3">
+              Follows the global schedule (Settings → General) unless overridden here. Bumps overdue due dates to today; never touches cards in a Completed column.
+            </p>
+            <select
+              value={dueDateAutoUpdate || ''}
+              onChange={e => onSetDueDateAutoUpdate?.(e.target.value)}
+              className="bf-kanban-input rounded-lg px-2 py-1.5 text-xs w-full outline-none cursor-pointer mb-2"
+            >
+              <option value="">Use global default</option>
+              <option value="on">Always on for this board</option>
+              <option value="off">Always off for this board</option>
+            </select>
+            <button
+              onClick={() => onRunDueDateAutoUpdateHere?.()}
+              className="px-3 py-1.5 text-xs bf-kanban-input rounded-lg transition cursor-pointer hover:opacity-80 w-full"
+            >
+              Run now for this board
+            </button>
+          </div>
+
           {/* Tag colors */}
           {allBoardTags.length > 0 && (
             <div>
@@ -548,6 +592,12 @@ const BoardSettingsModal: React.FC<{
               </div>
             </div>
           )}
+        </div>
+        {scrollable && (
+          <div className="pointer-events-none absolute bottom-0 left-0 right-1 h-10 flex items-end justify-center pb-1 bg-gradient-to-t from-[var(--bg-surface)] to-transparent">
+            <ChevronsDown size={13} className="text-slate-500 animate-bounce" />
+          </div>
+        )}
         </div>
       </div>
 
@@ -1441,6 +1491,7 @@ const Kanban: React.FC<KanbanProps> = ({
   onUpdateColumns,
   boardFrontMatter,
   onUpdateBoardFrontMatter,
+  onRunDueDateAutoUpdate,
   onUpdateTaskFrontMatter,
   onRenameTask,
   resolvePath,
@@ -1695,6 +1746,9 @@ const Kanban: React.FC<KanbanProps> = ({
     // auto-detect on first load
     return boardColumns.filter(c => DONE_NAMES.includes(c.toLowerCase()))
   }, [boardFrontMatter?.completedColumns, boardColumns])
+
+  // "" (unset) = follow the global schedule; "on"/"off" = explicit per-board override.
+  const dueDateAutoUpdate = boardFrontMatter?.dueDateAutoUpdate || ''
 
   // Which single column the quick-complete checkbox/context-menu action sends
   // a card to. "Completed" is ambiguous — a board's done-equivalent column
@@ -1976,6 +2030,20 @@ const Kanban: React.FC<KanbanProps> = ({
 
   const handleSetCompletionTarget = async (col: string) => {
     await onUpdateBoardFrontMatter?.({ completionTargetColumn: col })
+  }
+
+  const handleSetDueDateAutoUpdate = async (value: string) => {
+    await onUpdateBoardFrontMatter?.({ dueDateAutoUpdate: value })
+  }
+
+  const handleRunDueDateAutoUpdateForBoard = async () => {
+    if (!boardPath || !onRunDueDateAutoUpdate) return
+    try {
+      const { updatedCount } = await onRunDueDateAutoUpdate(boardPath)
+      await alertDialog(`Updated ${updatedCount} card(s) on this board.`)
+    } catch {
+      await alertDialog('Failed to run due date auto-update.')
+    }
   }
 
   const handleCardFieldVisibilityChange = async (field: CardFieldKey, visible: boolean) => {
@@ -2783,6 +2851,7 @@ const Kanban: React.FC<KanbanProps> = ({
           completedColumns={completedColumns}
           completionTargetColumn={completionTargetColumn}
           cardFieldVisibility={cardFieldVisibility}
+          dueDateAutoUpdate={dueDateAutoUpdate}
           onClose={() => setSettingsOpen(false)}
           onSavePriority={handleSavePriority}
           onDeletePriority={handleDeletePriority}
@@ -2790,6 +2859,8 @@ const Kanban: React.FC<KanbanProps> = ({
           onSetTagColor={handleSetTagColor}
           onToggleCompleted={handleToggleColumnCompleted}
           onSetCompletionTarget={handleSetCompletionTarget}
+          onSetDueDateAutoUpdate={handleSetDueDateAutoUpdate}
+          onRunDueDateAutoUpdateHere={handleRunDueDateAutoUpdateForBoard}
           onCardFieldVisibilityChange={handleCardFieldVisibilityChange}
         />
       )}
