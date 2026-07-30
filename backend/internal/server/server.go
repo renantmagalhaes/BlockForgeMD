@@ -1414,7 +1414,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	dateFormat, _ := s.db.GetSetting("date_format", "long")
 	appFont, _ := s.db.GetSetting("app_font", "inter")
 	dueDateAutoUpdateEnabledStr, _ := s.db.GetSetting("due_date_auto_update_enabled", "false")
-	dueDateAutoUpdateTime, _ := s.db.GetSetting("due_date_auto_update_time", "09:00")
+	dueDateAutoUpdateTime, _ := s.db.GetSetting("due_date_auto_update_time", "01:00")
 	uploadLimitStr, _ := s.db.GetSetting("upload_limit_mb", strconv.Itoa(defaultUploadLimitMB))
 	uploadLimitMB, err5 := strconv.Atoi(uploadLimitStr)
 	if err5 != nil || uploadLimitMB <= 0 || uploadLimitMB > maxUploadLimitMB {
@@ -2505,7 +2505,7 @@ func (s *Server) startDueDateAutoUpdate() {
 }
 
 func (s *Server) checkScheduledDueDateAutoUpdates() {
-	runAt, _ := s.db.GetSetting("due_date_auto_update_time", "09:00")
+	runAt, _ := s.db.GetSetting("due_date_auto_update_time", "01:00")
 	now := time.Now()
 	if now.Format("15:04") != runAt {
 		return

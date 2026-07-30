@@ -1314,7 +1314,7 @@ const App: React.FC = () => {
   const [historyInterval, setHistoryInterval] = useState(0)
   const [historyIntervalInput, setHistoryIntervalInput] = useState('0')
   const [dueDateAutoUpdateEnabled, setDueDateAutoUpdateEnabled] = useState(false)
-  const [dueDateAutoUpdateTime, setDueDateAutoUpdateTime] = useState('09:00')
+  const [dueDateAutoUpdateTime, setDueDateAutoUpdateTime] = useState('01:00')
   const selectedPathRef = useRef<string | null>(null)
   const activeViewRef = useRef<'board' | 'editor' | 'graph'>('editor')
   const isSavingRef = useRef(false)
