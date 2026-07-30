@@ -1415,39 +1415,41 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	appFont, _ := s.db.GetSetting("app_font", "inter")
 	dueDateAutoUpdateEnabledStr, _ := s.db.GetSetting("due_date_auto_update_enabled", "false")
 	dueDateAutoUpdateTime, _ := s.db.GetSetting("due_date_auto_update_time", "09:00")
+	dueDateAutoUpdateLastRun, _ := s.db.GetSetting("due_date_auto_update_last_run", "")
 	uploadLimitStr, _ := s.db.GetSetting("upload_limit_mb", strconv.Itoa(defaultUploadLimitMB))
 	uploadLimitMB, err5 := strconv.Atoi(uploadLimitStr)
 	if err5 != nil || uploadLimitMB <= 0 || uploadLimitMB > maxUploadLimitMB {
 		uploadLimitMB = defaultUploadLimitMB
 	}
 	respondJSON(w, map[string]interface{}{
-		"history_limit":                limit,
-		"theme":                        theme,
-		"trash_retention_days":         retention,
-		"default_page":                 defaultPage,
-		"sidebar_collapsed":            sidebarCollapsedStr == "true",
-		"kanban_card_view_mode":        kanbanCardViewMode,
-		"properties_collapsed":         propertiesCollapsedStr == "true",
-		"glass_enabled":                glassEnabledStr == "true",
-		"glass_sidebar_enabled":        glassSidebarEnabledStr == "true",
-		"app_bg_type":                  appBgType,
-		"app_bg_color":                 appBgColor,
-		"app_bg_image":                 appBgImage,
-		"doc_header_text_color_dark":   docHeaderTextColorDark,
-		"doc_header_text_color_light":  docHeaderTextColorLight,
-		"autosave_delay":               autosaveDelay,
-		"history_interval":             historyInterval,
-		"sidebar_bg_color_dark":        sidebarBgColorDark,
-		"sidebar_bg_color_light":       sidebarBgColorLight,
-		"sidebar_text_color_dark":      sidebarTextColorDark,
-		"sidebar_text_color_light":     sidebarTextColorLight,
-		"global_layout_override":       globalLayoutOverride,
-		"global_column_width_override": globalColumnWidthOverride,
-		"date_format":                  dateFormat,
-		"app_font":                     appFont,
-		"due_date_auto_update_enabled": dueDateAutoUpdateEnabledStr == "true",
-		"due_date_auto_update_time":    dueDateAutoUpdateTime,
-		"upload_limit_mb":              uploadLimitMB,
+		"history_limit":                 limit,
+		"theme":                         theme,
+		"trash_retention_days":          retention,
+		"default_page":                  defaultPage,
+		"sidebar_collapsed":             sidebarCollapsedStr == "true",
+		"kanban_card_view_mode":         kanbanCardViewMode,
+		"properties_collapsed":          propertiesCollapsedStr == "true",
+		"glass_enabled":                 glassEnabledStr == "true",
+		"glass_sidebar_enabled":         glassSidebarEnabledStr == "true",
+		"app_bg_type":                   appBgType,
+		"app_bg_color":                  appBgColor,
+		"app_bg_image":                  appBgImage,
+		"doc_header_text_color_dark":    docHeaderTextColorDark,
+		"doc_header_text_color_light":   docHeaderTextColorLight,
+		"autosave_delay":                autosaveDelay,
+		"history_interval":              historyInterval,
+		"sidebar_bg_color_dark":         sidebarBgColorDark,
+		"sidebar_bg_color_light":        sidebarBgColorLight,
+		"sidebar_text_color_dark":       sidebarTextColorDark,
+		"sidebar_text_color_light":      sidebarTextColorLight,
+		"global_layout_override":        globalLayoutOverride,
+		"global_column_width_override":  globalColumnWidthOverride,
+		"date_format":                   dateFormat,
+		"app_font":                      appFont,
+		"due_date_auto_update_enabled":  dueDateAutoUpdateEnabledStr == "true",
+		"due_date_auto_update_time":     dueDateAutoUpdateTime,
+		"due_date_auto_update_last_run": dueDateAutoUpdateLastRun,
+		"upload_limit_mb":               uploadLimitMB,
 	})
 }
 
@@ -2513,14 +2515,19 @@ func (s *Server) maybeRunScheduledDueDateAutoUpdate() {
 	if now.Format("15:04") != runAt {
 		return
 	}
-	today := now.Format("2006-01-02")
-	if last, _ := s.db.GetSetting("due_date_auto_update_last_run", ""); last == today {
-		return // already ran today — without this the ticker would re-fire every minute through that HH:MM minute
+	// Keyed by date+time-slot, not just date — so changing the configured
+	// time later in the same day is a distinct slot that's still allowed to
+	// fire, instead of being silently blocked by an earlier slot that
+	// already ran today. This is also what makes it idempotent within the
+	// ~60s window a single slot's tick can land in (see startDueDateAutoUpdate).
+	slot := now.Format("2006-01-02") + " " + runAt
+	if last, _ := s.db.GetSetting("due_date_auto_update_last_run", ""); last == slot {
+		return
 	}
 	updated, boardsScanned, err := s.RunDueDateAutoUpdate("", false)
-	log.Printf("due-date auto-update: scheduled run — boardsScanned=%d updated=%d err=%v", boardsScanned, updated, err)
-	if err := s.db.SetSetting("due_date_auto_update_last_run", today); err != nil {
-		log.Printf("due-date auto-update: failed to record last-run date: %v", err)
+	log.Printf("due-date auto-update: scheduled run for slot %s — boardsScanned=%d updated=%d err=%v", slot, boardsScanned, updated, err)
+	if err := s.db.SetSetting("due_date_auto_update_last_run", slot); err != nil {
+		log.Printf("due-date auto-update: failed to record last-run slot: %v", err)
 	}
 }
 
