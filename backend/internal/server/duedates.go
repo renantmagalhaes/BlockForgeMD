@@ -42,9 +42,11 @@ var doneColumnNames = map[string]bool{
 // scopes it to just that board's cards.
 //
 // force=true skips all enabled/off gating — used by both manual "Run now"
-// buttons. force=false is the scheduled path: the caller has already checked
-// the global enabled flag, and this additionally skips any board whose own
-// dueDateAutoUpdate override is explicitly "off".
+// buttons. force=false is the scheduled path: a board's own dueDateAutoUpdate
+// override ("on"/"off") always wins regardless of the global enabled flag;
+// a board with no override at all falls back to that global flag as its
+// default. This lets a single board be turned on without having to first
+// explicitly turn every other board off.
 func (s *Server) RunDueDateAutoUpdate(boardPath string, force bool) (updated int, boardsScanned int, err error) {
 	var boards []string
 	if boardPath != "" {
@@ -62,17 +64,30 @@ func (s *Server) RunDueDateAutoUpdate(boardPath string, force bool) (updated int
 	today := time.Now().Format("2006-01-02")
 	singleBoardForceRun := force && boardPath != ""
 
+	globalEnabled := false
+	if !force {
+		v, _ := s.db.GetSetting("due_date_auto_update_enabled", "false")
+		globalEnabled = v == "true"
+	}
+
 	for _, bp := range boards {
 		boardFM, ferr := s.db.GetFrontMatterFlat(bp)
 		if ferr != nil {
 			continue
 		}
 
-		// A board explicitly opted out is skipped by every path except a
-		// manual "Run now" aimed directly at that one board.
 		override := boardFM["dueDateAutoUpdate"]
-		if override == "off" && !singleBoardForceRun {
-			continue
+		if !singleBoardForceRun {
+			if override == "off" {
+				// Explicitly opted out — skipped by everything except a
+				// manual "Run now" aimed directly at this one board.
+				continue
+			}
+			if override != "on" && !force && !globalEnabled {
+				// Scheduled run, no per-board override, and the global
+				// default is off — nothing to do for this board.
+				continue
+			}
 		}
 
 		var completedColumns []string

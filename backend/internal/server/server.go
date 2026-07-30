@@ -2501,10 +2501,13 @@ func (s *Server) startDueDateAutoUpdate() {
 	}()
 }
 
+// The global enabled flag is deliberately NOT checked here — it's only the
+// *default* for boards that haven't set their own dueDateAutoUpdate override
+// (see RunDueDateAutoUpdate). A board explicitly set to "on" must still run
+// at the scheduled time even while the global default is off, otherwise
+// turning a single board on would be pointless unless every other board was
+// also explicitly turned off.
 func (s *Server) maybeRunScheduledDueDateAutoUpdate() {
-	if v, _ := s.db.GetSetting("due_date_auto_update_enabled", "false"); v != "true" {
-		return
-	}
 	runAt, _ := s.db.GetSetting("due_date_auto_update_time", "09:00")
 	now := time.Now()
 	if now.Format("15:04") != runAt {
@@ -2514,9 +2517,8 @@ func (s *Server) maybeRunScheduledDueDateAutoUpdate() {
 	if last, _ := s.db.GetSetting("due_date_auto_update_last_run", ""); last == today {
 		return // already ran today — without this the ticker would re-fire every minute through that HH:MM minute
 	}
-	if _, _, err := s.RunDueDateAutoUpdate("", false); err != nil {
-		log.Printf("due-date auto-update: scheduled run failed: %v", err)
-	}
+	updated, boardsScanned, err := s.RunDueDateAutoUpdate("", false)
+	log.Printf("due-date auto-update: scheduled run — boardsScanned=%d updated=%d err=%v", boardsScanned, updated, err)
 	if err := s.db.SetSetting("due_date_auto_update_last_run", today); err != nil {
 		log.Printf("due-date auto-update: failed to record last-run date: %v", err)
 	}
