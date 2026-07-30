@@ -645,6 +645,13 @@ const KanbanFilterBar: React.FC<{
   const dueDateRef = useRef<HTMLInputElement>(null)
   const dueDateToRef = useRef<HTMLInputElement>(null)
   const [dueDateRangeOpen, setDueDateRangeOpen] = useState(false)
+  // Reveal + open the end-date picker in one click instead of two — the
+  // "To" field only mounts once dueDateRangeOpen flips true, so the ref
+  // isn't attached yet at the moment the "+ Range" button itself is
+  // clicked; this fires right after that render lands.
+  useEffect(() => {
+    if (dueDateRangeOpen) dueDateToRef.current?.showPicker()
+  }, [dueDateRangeOpen])
   const isActive = filterTags.length > 0 || filterPriorities.length > 0 || filterAssignees.length > 0 || filterDueDate !== '' || searchText.length > 0
 
   // Portaled + position:fixed (computed from the trigger button's real
@@ -923,9 +930,10 @@ const KanbanFilterBar: React.FC<{
             <button
               onClick={e => { e.stopPropagation(); setDueDateRangeOpen(true) }}
               title="Filter a date range instead"
-              className="shrink-0 opacity-60 hover:opacity-100 transition cursor-pointer relative z-10"
+              className="flex items-center gap-0.5 shrink-0 text-[10px] font-semibold pl-1.5 ml-0.5 border-l border-white/10 opacity-60 hover:opacity-100 transition cursor-pointer relative z-10"
             >
-              <Plus size={9} />
+              <Plus size={9} className="shrink-0" />
+              Range
             </button>
           )}
 
