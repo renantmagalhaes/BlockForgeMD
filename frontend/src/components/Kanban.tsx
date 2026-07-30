@@ -624,16 +624,18 @@ const KanbanFilterBar: React.FC<{
   filterPriorities: string[]
   filterAssignees: string[]
   filterDueDate: string
+  filterDueDateTo: string
   filterMode: 'hide' | 'highlight'
   searchText: string
   onTagToggle: (tag: string) => void
   onPriorityToggle: (name: string) => void
   onAssigneeToggle: (name: string) => void
   onDueDateChange: (date: string) => void
+  onDueDateToChange: (date: string) => void
   onModeChange: (mode: 'hide' | 'highlight') => void
   onSearchChange: (v: string) => void
   onClear: () => void
-}> = ({ allTags, allAssignees, hasDueDates, priorities, tagColors, filterTags, filterPriorities, filterAssignees, filterDueDate, filterMode, searchText, onTagToggle, onPriorityToggle, onAssigneeToggle, onDueDateChange, onModeChange, onSearchChange, onClear }) => {
+}> = ({ allTags, allAssignees, hasDueDates, priorities, tagColors, filterTags, filterPriorities, filterAssignees, filterDueDate, filterDueDateTo, filterMode, searchText, onTagToggle, onPriorityToggle, onAssigneeToggle, onDueDateChange, onDueDateToChange, onModeChange, onSearchChange, onClear }) => {
   const [tagDropOpen, setTagDropOpen] = useState(false)
   const [tagSearch, setTagSearch] = useState('')
   const [assigneeDropOpen, setAssigneeDropOpen] = useState(false)
@@ -641,6 +643,8 @@ const KanbanFilterBar: React.FC<{
   const tagSearchRef = useRef<HTMLInputElement>(null)
   const assigneeDropRef = useRef<HTMLDivElement>(null)
   const dueDateRef = useRef<HTMLInputElement>(null)
+  const dueDateToRef = useRef<HTMLInputElement>(null)
+  const [dueDateRangeOpen, setDueDateRangeOpen] = useState(false)
   const isActive = filterTags.length > 0 || filterPriorities.length > 0 || filterAssignees.length > 0 || filterDueDate !== '' || searchText.length > 0
 
   // Portaled + position:fixed (computed from the trigger button's real
@@ -872,28 +876,62 @@ const KanbanFilterBar: React.FC<{
         </div>
       )}
 
-      {/* Due date filter — only shown when board has cards with due dates */}
+      {/* Due date filter — only shown when board has cards with due dates.
+          Defaults to an exact-day match; the "+" reveals a second date to
+          turn it into an inclusive range, kept behind an extra click so the
+          common case (one date) stays a single click. */}
       {hasDueDates && (
         <div
-          onClick={() => dueDateRef.current?.showPicker()}
-          className={`relative flex items-center gap-1.5 px-2.5 py-1 rounded-lg border transition-all duration-150 shrink-0 cursor-pointer ${filterDueDate ? 'bf-kanban-filter-tag-active' : 'bf-kanban-btn'}`}
+          className={`relative flex items-center gap-1.5 px-2.5 py-1 rounded-lg border transition-all duration-150 shrink-0 ${filterDueDate ? 'bf-kanban-filter-tag-active' : 'bf-kanban-btn'}`}
         >
-          <Calendar size={10} className="shrink-0 opacity-70 pointer-events-none" />
-          <span className="text-[10px] font-semibold select-none pointer-events-none">
-            {filterDueDate || 'Due by'}
-          </span>
-          <input
-            ref={dueDateRef}
-            type="date"
-            value={filterDueDate}
-            onChange={e => onDueDateChange(e.target.value)}
-            className="absolute inset-0 opacity-0 w-full h-full pointer-events-none"
-            style={{ colorScheme: 'dark' }}
-            tabIndex={-1}
-          />
+          <div onClick={() => dueDateRef.current?.showPicker()} className="flex items-center gap-1.5 cursor-pointer">
+            <Calendar size={10} className="shrink-0 opacity-70 pointer-events-none" />
+            <span className="text-[10px] font-semibold select-none pointer-events-none">
+              {filterDueDate || 'Due by'}
+            </span>
+            <input
+              ref={dueDateRef}
+              type="date"
+              value={filterDueDate}
+              onChange={e => onDueDateChange(e.target.value)}
+              className="absolute inset-0 opacity-0 w-full h-full pointer-events-none"
+              style={{ colorScheme: 'dark' }}
+              tabIndex={-1}
+            />
+          </div>
+
+          {filterDueDate && (dueDateRangeOpen || filterDueDateTo) && (
+            <div onClick={() => dueDateToRef.current?.showPicker()} className="flex items-center gap-1.5 cursor-pointer">
+              <span className="text-[10px] opacity-50 select-none">→</span>
+              <span className="text-[10px] font-semibold select-none">
+                {filterDueDateTo || 'End date'}
+              </span>
+              <input
+                ref={dueDateToRef}
+                type="date"
+                value={filterDueDateTo}
+                min={filterDueDate}
+                onChange={e => onDueDateToChange(e.target.value)}
+                className="absolute inset-0 opacity-0 w-full h-full pointer-events-none"
+                style={{ colorScheme: 'dark' }}
+                tabIndex={-1}
+              />
+            </div>
+          )}
+
+          {filterDueDate && !dueDateRangeOpen && !filterDueDateTo && (
+            <button
+              onClick={e => { e.stopPropagation(); setDueDateRangeOpen(true) }}
+              title="Filter a date range instead"
+              className="shrink-0 opacity-60 hover:opacity-100 transition cursor-pointer relative z-10"
+            >
+              <Plus size={9} />
+            </button>
+          )}
+
           {filterDueDate && (
             <button
-              onClick={e => { e.stopPropagation(); onDueDateChange('') }}
+              onClick={e => { e.stopPropagation(); onDueDateChange(''); onDueDateToChange(''); setDueDateRangeOpen(false) }}
               className="shrink-0 opacity-60 hover:opacity-100 transition cursor-pointer relative z-10"
             >
               <X size={9} />
@@ -1525,6 +1563,7 @@ const Kanban: React.FC<KanbanProps> = ({
   const [filterPriorities, setFilterPriorities] = useState<string[]>([])
   const [filterAssignees, setFilterAssignees]   = useState<string[]>([])
   const [filterDueDate, setFilterDueDate]       = useState('')
+  const [filterDueDateTo, setFilterDueDateTo]   = useState('')
   const [filterMode, setFilterMode]             = useState<'hide' | 'highlight'>('highlight')
   const [searchText, setSearchText]             = useState('')
   const [collapsedCols, setCollapsedCols]       = useState<Set<string>>(new Set())
@@ -1751,6 +1790,15 @@ const Kanban: React.FC<KanbanProps> = ({
   // "" (unset) = follow the global default; "on"/"off" = explicit per-board
   // override. The schedule time itself is shared (Settings → General).
   const dueDateAutoUpdate = boardFrontMatter?.dueDateAutoUpdate || ''
+
+  // Local calendar-day string (not UTC, not a raw Date comparison) so a card
+  // due "today" reads as today regardless of time-of-day or the viewer's
+  // timezone — a plain `new Date(dueDate) < new Date()` comparison would
+  // flag today's date as already "past" as soon as it's after midnight.
+  const todayLocalStr = (() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  })()
 
   // Which single column the quick-complete checkbox/context-menu action sends
   // a card to. "Completed" is ambiguous — a board's done-equivalent column
@@ -2019,8 +2067,16 @@ const Kanban: React.FC<KanbanProps> = ({
   const handleAssigneeToggle = (name: string) =>
     setFilterAssignees(prev => prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name])
 
+  // Moving the range's start past its end would silently invert the filter
+  // (e.g. From=2026-08-10 with a stale To=2026-08-01) — clear the stale end
+  // instead of leaving that inconsistent.
+  const handleFilterDueDateChange = (date: string) => {
+    setFilterDueDate(date)
+    if (filterDueDateTo && date && filterDueDateTo < date) setFilterDueDateTo('')
+  }
+
   const handleClearFilters = () => {
-    setFilterTags([]); setFilterPriorities([]); setFilterAssignees([]); setFilterDueDate(''); setSearchText('')
+    setFilterTags([]); setFilterPriorities([]); setFilterAssignees([]); setFilterDueDate(''); setFilterDueDateTo(''); setSearchText('')
   }
 
   const handleToggleColumnCompleted = async (col: string) => {
@@ -2246,12 +2302,14 @@ const Kanban: React.FC<KanbanProps> = ({
           filterPriorities={filterPriorities}
           filterAssignees={filterAssignees}
           filterDueDate={filterDueDate}
+          filterDueDateTo={filterDueDateTo}
           filterMode={filterMode}
           searchText={searchText}
           onTagToggle={handleTagToggle}
           onPriorityToggle={handlePriorityToggle}
           onAssigneeToggle={handleAssigneeToggle}
-          onDueDateChange={setFilterDueDate}
+          onDueDateChange={handleFilterDueDateChange}
+          onDueDateToChange={setFilterDueDateTo}
           onModeChange={setFilterMode}
           onSearchChange={setSearchText}
           onClear={handleClearFilters}
@@ -2457,7 +2515,8 @@ const Kanban: React.FC<KanbanProps> = ({
                   const pColor      = isCompleted ? '#64748b' : (pDef?.color || '#64748b')
                   const assignee    = task.frontMatter?.assignee
                   const dueDate     = task.frontMatter?.dueDate?.split('T')[0]
-                  const duePast     = !!task.frontMatter?.dueDate && new Date(task.frontMatter.dueDate) < new Date()
+                  const duePast     = !!dueDate && dueDate < todayLocalStr
+                  const dueToday    = !!dueDate && dueDate === todayLocalStr
                   const tags        = parseTags(task.frontMatter?.tags)
                   const cover       = task.frontMatter?.cover
                   const showTagEd   = tagEditorCard === task.path
@@ -2466,10 +2525,16 @@ const Kanban: React.FC<KanbanProps> = ({
                   const matchesTags     = filterTags.length === 0 || filterTags.every(t => tags.includes(t))
                   const matchesPriority = filterPriorities.length === 0 || filterPriorities.includes(priority || '')
                   const matchesAssignee = filterAssignees.length === 0 || filterAssignees.includes(assignee || '')
-                  const matchesDueDate  = !filterDueDate || (
-                    !!task.frontMatter?.dueDate &&
-                    task.frontMatter.dueDate.split('T')[0] <= filterDueDate
-                  )
+                  // No range set: exact-day match. Range set: inclusive
+                  // [filterDueDate, filterDueDateTo] — previously this was
+                  // "on or before" the picked date, which meant every card
+                  // overdue before that date matched too, not just that day.
+                  const matchesDueDate  = !filterDueDate || (() => {
+                    const d = task.frontMatter?.dueDate?.split('T')[0]
+                    if (!d) return false
+                    if (filterDueDateTo) return d >= filterDueDate && d <= filterDueDateTo
+                    return d === filterDueDate
+                  })()
                   const matchesFilter   = matchesTags && matchesPriority && matchesAssignee && matchesDueDate
 
                   const q = searchText.trim().toLowerCase()
@@ -2588,7 +2653,12 @@ const Kanban: React.FC<KanbanProps> = ({
                           )}
 
                           {isCardFieldVisible('dueDate') && dueDate && (
-                            <div className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] ${duePast && !isCompleted ? 'bg-red-500/15 text-red-400 border border-red-500/25' : 'bf-kanban-meta-badge'}`}>
+                            <div className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] ${
+                              isCompleted ? 'bf-kanban-meta-badge'
+                                : duePast ? 'bg-red-500/15 text-red-400 border border-red-500/25'
+                                : dueToday ? 'bg-orange-500/15 text-orange-400 border border-orange-500/25'
+                                : 'bf-kanban-meta-badge'
+                            }`}>
                               <Calendar size={9} /><span>{dueDate}</span>
                             </div>
                           )}
