@@ -1059,6 +1059,9 @@ const App: React.FC = () => {
   const [newWorkspaceName, setNewWorkspaceName] = useState('')
   const [renameWorkspaceTarget, setRenameWorkspaceTarget] = useState<string | null>(null)
   const [renameWorkspaceName, setRenameWorkspaceName] = useState('')
+  const [deleteWorkspaceTarget, setDeleteWorkspaceTarget] = useState<string | null>(null)
+  const [deleteWorkspaceConfirm, setDeleteWorkspaceConfirm] = useState('')
+  const [deleteWorkspaceError, setDeleteWorkspaceError] = useState('')
 
   // ── Favorites ──────────────────────────────────────────────────────────────
   const [favorites, setFavorites] = useState<string[]>([])
@@ -1594,6 +1597,38 @@ const App: React.FC = () => {
       fetchFiles()
     } catch (e) {
       console.error('Error renaming workspace', e)
+    }
+  }
+
+  const handleDeleteWorkspace = async () => {
+    if (!deleteWorkspaceTarget || deleteWorkspaceConfirm !== deleteWorkspaceTarget) return
+    try {
+      const res = await fetch(`${API_BASE}/api/workspaces`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: deleteWorkspaceTarget }),
+      })
+      if (!res.ok) {
+        const text = await res.text()
+        setDeleteWorkspaceError(text || 'Failed to delete workspace')
+        return
+      }
+      const remaining = workspaces.filter(w => w !== deleteWorkspaceTarget)
+      setWorkspaces(remaining)
+      if (activeWorkspace === deleteWorkspaceTarget) {
+        const next = remaining[0] || ''
+        setActiveWorkspace(next)
+        localStorage.setItem('blockforge_workspace', next)
+        setSelectedPath(null)
+        setActiveView('editor')
+      }
+      setDeleteWorkspaceTarget(null)
+      setDeleteWorkspaceConfirm('')
+      setDeleteWorkspaceError('')
+      fetchFiles()
+    } catch (e) {
+      console.error('Error deleting workspace', e)
+      setDeleteWorkspaceError('Failed to delete workspace')
     }
   }
 
@@ -3078,11 +3113,20 @@ const App: React.FC = () => {
                       </button>
                       <button
                         onClick={e => { e.stopPropagation(); setWorkspaceDropdownOpen(false); setRenameWorkspaceTarget(ws); setRenameWorkspaceName(ws) }}
-                        className="pr-2 pl-1 py-1.5 text-slate-600 hover:text-slate-300 opacity-0 group-hover/ws:opacity-100 transition cursor-pointer shrink-0"
+                        className="pl-1 py-1.5 text-slate-600 hover:text-slate-300 opacity-0 group-hover/ws:opacity-100 transition cursor-pointer shrink-0"
                         title="Rename workspace"
                       >
                         <Pencil size={10} />
                       </button>
+                      {workspaces.length > 1 && (
+                        <button
+                          onClick={e => { e.stopPropagation(); setWorkspaceDropdownOpen(false); setDeleteWorkspaceTarget(ws); setDeleteWorkspaceConfirm(''); setDeleteWorkspaceError('') }}
+                          className="pr-2 pl-1 py-1.5 text-slate-600 hover:text-red-400 opacity-0 group-hover/ws:opacity-100 transition cursor-pointer shrink-0"
+                          title="Delete workspace"
+                        >
+                          <Trash2 size={10} />
+                        </button>
+                      )}
                     </div>
                   ))}
                   <div className="border-t border-slate-700/60 mt-1 pt-1">
@@ -5273,6 +5317,59 @@ const App: React.FC = () => {
                 className="px-4 py-1.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg transition cursor-pointer"
               >
                 Create
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+      </AnimatePresence>
+
+      {/* ── Delete Workspace Modal ──────────────────────────────────────────── */}
+      <AnimatePresence>
+      {deleteWorkspaceTarget && (
+        <motion.div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[1200]"
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          onClick={() => { setDeleteWorkspaceTarget(null); setDeleteWorkspaceConfirm(''); setDeleteWorkspaceError('') }}
+        >
+          <motion.div
+            className="bf-popover-card bg-[#1c2433] border border-red-800/40 rounded-2xl shadow-2xl p-6 w-80"
+            initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2 mb-1">
+              <Trash2 size={14} className="text-red-400" />
+              <h2 className="text-sm font-bold text-slate-100">Delete Workspace</h2>
+            </div>
+            <p className="text-[11px] text-slate-500 mb-1">
+              This permanently deletes <span className="text-slate-300 font-mono">{deleteWorkspaceTarget}</span> and everything in it — pages, boards, canvases, mind maps, and its trash. This cannot be undone.
+            </p>
+            <p className="text-[11px] text-slate-500 mb-3">
+              Type <span className="text-slate-300 font-mono">{deleteWorkspaceTarget}</span> to confirm.
+            </p>
+            <input
+              autoFocus
+              type="text"
+              value={deleteWorkspaceConfirm}
+              onChange={e => setDeleteWorkspaceConfirm(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleDeleteWorkspace(); if (e.key === 'Escape') { setDeleteWorkspaceTarget(null); setDeleteWorkspaceConfirm(''); setDeleteWorkspaceError('') } }}
+              placeholder={deleteWorkspaceTarget}
+              className="w-full bg-[#0d1117] border border-red-800/50 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-red-500 font-mono mb-2"
+            />
+            {deleteWorkspaceError && <p className="text-red-400 text-[10px] mb-2">{deleteWorkspaceError}</p>}
+            <div className="flex gap-2 justify-end mt-2">
+              <button
+                onClick={() => { setDeleteWorkspaceTarget(null); setDeleteWorkspaceConfirm(''); setDeleteWorkspaceError('') }}
+                className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteWorkspace}
+                disabled={deleteWorkspaceConfirm !== deleteWorkspaceTarget}
+                className="px-4 py-1.5 bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg transition cursor-pointer"
+              >
+                Delete Workspace
               </button>
             </div>
           </motion.div>

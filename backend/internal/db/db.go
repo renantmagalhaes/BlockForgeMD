@@ -712,6 +712,31 @@ func (db *DB) AddWorkspacePrefix(workspace string) error {
 	return tx.Commit()
 }
 
+// DeleteWorkspacePaths removes all path-referencing rows for a deleted workspace,
+// plus its per-workspace settings (favorites, tag colors).
+func (db *DB) DeleteWorkspacePaths(name string) error {
+	tx, err := db.Conn.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	prefix := name + "/%"
+	for _, stmt := range []string{
+		"DELETE FROM files WHERE path LIKE ?",
+		"DELETE FROM front_matter WHERE file_path LIKE ?",
+		"DELETE FROM tasks WHERE file_path LIKE ?",
+	} {
+		if _, err := tx.Exec(stmt, prefix); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec("DELETE FROM settings WHERE key IN (?, ?)", "favorites_"+name, "tag_colors_"+name); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // UpdatePositions batch-updates the position of files for reordering.
 func (db *DB) UpdatePositions(updates []PositionUpdate) error {
 	tx, err := db.Conn.Begin()

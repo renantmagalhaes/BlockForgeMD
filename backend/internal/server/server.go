@@ -141,6 +141,7 @@ func (s *Server) setupRoutes() {
 		r.Post("/workspaces", s.handleCreateWorkspace)
 		r.Post("/workspaces/rename", s.handleRenameWorkspace)
 		r.Post("/workspaces/migrate", s.handleMigrateWorkspace)
+		r.Delete("/workspaces", s.handleDeleteWorkspace)
 		r.Get("/backlinks", s.handleGetBacklinks)
 		r.Get("/graph", s.handleGetGraph)
 		r.Get("/cards", s.handleGetCards)
@@ -3192,6 +3193,68 @@ func (s *Server) handleRenameWorkspace(w http.ResponseWriter, r *http.Request) {
 	s.watcher.WatchPath(dst)
 	s.broadcastEvent("__workspace_renamed__")
 	respondJSON(w, map[string]string{"oldName": oldName, "newName": newName})
+}
+
+// handleDeleteWorkspace permanently deletes a workspace directory (including its
+// own Trash) and purges all DB rows and settings referencing it.
+func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		http.Error(w, "invalid workspace name", http.StatusBadRequest)
+		return
+	}
+
+	dir := filepath.Join(s.rootPath, name)
+	if _, err := os.Stat(dir); err != nil {
+		http.Error(w, "workspace not found", http.StatusNotFound)
+		return
+	}
+
+	entries, err := os.ReadDir(s.rootPath)
+	if err != nil {
+		http.Error(w, "failed to read vault", http.StatusInternalServerError)
+		return
+	}
+	count := 0
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		children, err := os.ReadDir(filepath.Join(s.rootPath, e.Name()))
+		if err != nil {
+			continue
+		}
+		for _, c := range children {
+			if c.IsDir() && sectionRoots[c.Name()] {
+				count++
+				break
+			}
+		}
+	}
+	if count <= 1 {
+		http.Error(w, "cannot delete the only remaining workspace", http.StatusConflict)
+		return
+	}
+
+	if err := os.RemoveAll(dir); err != nil {
+		http.Error(w, fmt.Sprintf("failed to delete workspace directory: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := s.db.DeleteWorkspacePaths(name); err != nil {
+		http.Error(w, fmt.Sprintf("failed to update DB: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	s.broadcastEvent("__workspace_deleted__")
+	respondJSON(w, map[string]string{"status": "ok"})
 }
 
 // handleMigrateWorkspace moves existing flat section dirs (Documents/, Boards/, etc.)
