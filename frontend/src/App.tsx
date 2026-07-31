@@ -664,6 +664,11 @@ function UsersTab() {
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; username: string } | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState('')
   const [deleteError, setDeleteError] = useState('')
+  const [passwordTarget, setPasswordTarget] = useState<{ id: string; username: string } | null>(null)
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [passwordError, setPasswordError] = useState('')
+  const [passwordSuccess, setPasswordSuccess] = useState('')
 
   function reload() {
     fetch('/api/users', { credentials: 'include' })
@@ -697,6 +702,25 @@ function UsersTab() {
     }
   }
 
+  async function confirmChangePassword() {
+    if (!passwordTarget) return
+    setPasswordError(''); setPasswordSuccess('')
+    if (newPassword.length < 6) { setPasswordError('Password must be at least 6 characters.'); return }
+    if (newPassword !== confirmPassword) { setPasswordError('Passwords do not match.'); return }
+    const res = await fetch(`/api/users/${passwordTarget.id}/password`, {
+      method: 'PATCH', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: newPassword }),
+    })
+    if (res.ok) {
+      setPasswordSuccess('Password changed.')
+      setNewPassword(''); setConfirmPassword('')
+      setTimeout(() => { setPasswordTarget(null); setPasswordSuccess('') }, 1200)
+    } else {
+      const t = await res.text(); setPasswordError(t || 'Failed to change password.')
+    }
+  }
+
   return (
     <div className="space-y-5 animate-in fade-in duration-150">
       <h4 className="font-bold text-sm text-slate-100">Users</h4>
@@ -706,6 +730,13 @@ function UsersTab() {
             <span className="font-medium">{u.username}</span>
             <div className="flex items-center gap-3">
               <span className="text-slate-500">{u.createdAt?.slice(0, 10)}</span>
+              <button
+                onClick={() => { setPasswordTarget(u); setNewPassword(''); setConfirmPassword(''); setPasswordError(''); setPasswordSuccess('') }}
+                className="text-slate-600 hover:text-indigo-400 transition"
+                title="Change password"
+              >
+                <Key size={11} />
+              </button>
               <button
                 onClick={() => { setDeleteTarget(u); setDeleteConfirm(''); setDeleteError('') }}
                 className="text-slate-600 hover:text-red-400 transition"
@@ -718,6 +749,48 @@ function UsersTab() {
         ))}
         {users.length === 0 && <p className="text-xs text-slate-500">No users found.</p>}
       </div>
+
+      {/* Change password inline panel */}
+      {passwordTarget && (
+        <div className="bg-indigo-950/30 border border-indigo-800/40 rounded-xl p-4 space-y-3">
+          <p className="text-xs text-indigo-300 font-semibold">Change password for <span className="font-mono">{passwordTarget.username}</span></p>
+          <p className="text-[10px] text-slate-400">This will sign them out of all current sessions.</p>
+          <input
+            autoFocus
+            type="password"
+            value={newPassword}
+            onChange={e => setNewPassword(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && confirmChangePassword()}
+            placeholder="New password (min 6)"
+            className="w-full bg-slate-900 border border-indigo-800/50 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-600 outline-none focus:border-indigo-500 transition"
+          />
+          <input
+            type="password"
+            value={confirmPassword}
+            onChange={e => setConfirmPassword(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && confirmChangePassword()}
+            placeholder="Confirm new password"
+            className="w-full bg-slate-900 border border-indigo-800/50 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-600 outline-none focus:border-indigo-500 transition"
+          />
+          {passwordError && <p className="text-red-400 text-[10px]">{passwordError}</p>}
+          {passwordSuccess && <p className="text-emerald-400 text-[10px]">{passwordSuccess}</p>}
+          <div className="flex gap-2">
+            <button
+              onClick={confirmChangePassword}
+              disabled={!newPassword || !confirmPassword}
+              className="flex-1 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-lg px-3 py-1.5 text-xs font-medium transition"
+            >
+              Save
+            </button>
+            <button
+              onClick={() => { setPasswordTarget(null); setNewPassword(''); setConfirmPassword(''); setPasswordError('') }}
+              className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg px-3 py-1.5 text-xs font-medium transition"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Delete confirmation inline panel */}
       {deleteTarget && (

@@ -89,6 +89,28 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, map[string]string{"status": "ok"})
 }
 
+// PATCH /api/users/{id}/password — change a user's password
+func (s *Server) handleChangeUserPassword(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Password) < 6 {
+		http.Error(w, "password (min 6 chars) required", http.StatusBadRequest)
+		return
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if err := s.db.UpdateUserPassword(id, string(hash)); err != nil {
+		http.Error(w, "user not found", http.StatusNotFound)
+		return
+	}
+	respondJSON(w, map[string]string{"status": "ok"})
+}
+
 // GET /api/keys — list API keys for current user
 func (s *Server) handleListAPIKeys(w http.ResponseWriter, r *http.Request) {
 	user := userFromCtx(r)

@@ -845,6 +845,21 @@ func (db *DB) DeleteUser(id string) error {
 	return nil
 }
 
+func (db *DB) UpdateUserPassword(id, passwordHash string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := db.Conn.Exec(`UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?`, passwordHash, now, id)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("user not found")
+	}
+	// Invalidate existing sessions so the changed password takes effect immediately.
+	_, _ = db.Conn.Exec(`DELETE FROM sessions WHERE user_id = ?`, id)
+	return nil
+}
+
 func scanUser(s interface {
 	Scan(...any) error
 }) (*UserRecord, error) {

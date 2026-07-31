@@ -149,6 +149,7 @@ func (s *Server) setupRoutes() {
 		r.Get("/users", s.handleListUsers)
 		r.Post("/users", s.handleCreateUser)
 		r.Delete("/users/{id}", s.handleDeleteUser)
+		r.Patch("/users/{id}/password", s.handleChangeUserPassword)
 		r.Get("/keys", s.handleListAPIKeys)
 		r.Post("/keys", s.handleCreateAPIKey)
 		r.Delete("/keys/{id}", s.handleDeleteAPIKey)
