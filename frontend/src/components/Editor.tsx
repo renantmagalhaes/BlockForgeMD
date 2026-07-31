@@ -4966,6 +4966,9 @@ export const Editor: React.FC<
     exportDropdownOpen,
     setExportDropdownOpen
   ] = useState(false);
+  const exportBtnRef = useRef<HTMLButtonElement>(null);
+  const [exportMenuPos, setExportMenuPos] =
+    useState<{ top: number; left: number } | null>(null);
   const [historyList, setHistoryList] =
     useState<HistoryVersion[]>([]);
   const [
@@ -10069,14 +10072,40 @@ export const Editor: React.FC<
                 />
               </button>
 
-              {/* Export Dropdown Menu */}
+              {/* Export Dropdown Menu — portaled to document.body (like
+                  every other floating popover in this app) and positioned
+                  with a clamped fixed top/left instead of `absolute right-0`,
+                  which used to anchor to this button's own tiny wrapper div:
+                  on a narrow/wrapped mobile toolbar this button rarely sits
+                  at the true right edge of the screen, so the 176px-wide
+                  menu extended left off the edge of the viewport and got
+                  clipped. */}
               <div className="relative">
                 <button
-                  onClick={() =>
+                  ref={exportBtnRef}
+                  onClick={() => {
+                    if (!exportDropdownOpen) {
+                      const rect =
+                        exportBtnRef.current?.getBoundingClientRect();
+                      if (rect) {
+                        const MENU_W = 176;
+                        const left = Math.max(
+                          8,
+                          Math.min(
+                            rect.right - MENU_W,
+                            window.innerWidth - MENU_W - 8
+                          )
+                        );
+                        setExportMenuPos({
+                          top: rect.bottom + 6,
+                          left
+                        });
+                      }
+                    }
                     setExportDropdownOpen(
                       !exportDropdownOpen
-                    )
-                  }
+                    );
+                  }}
                   className={`p-2 rounded-lg hover:bg-slate-800 transition cursor-pointer flex items-center gap-1 text-slate-400 hover:text-white ${
                     exportDropdownOpen
                       ? "bg-slate-800 text-white"
@@ -10087,17 +10116,25 @@ export const Editor: React.FC<
                   <Download size={16} />
                 </button>
 
-                {exportDropdownOpen && (
-                  <>
-                    <div
-                      className="fixed inset-0 z-10"
-                      onClick={() =>
-                        setExportDropdownOpen(
-                          false
-                        )
-                      }
-                    />
-                    <div className="absolute right-0 mt-1.5 w-44 bg-[#161b22] border border-slate-800 rounded-xl shadow-2xl p-1.5 flex flex-col space-y-0.5 z-20 no-scrollbar select-none text-slate-200">
+                {exportDropdownOpen &&
+                  exportMenuPos &&
+                  createPortal(
+                    <>
+                      <div
+                        className="fixed inset-0 z-[9998]"
+                        onClick={() =>
+                          setExportDropdownOpen(
+                            false
+                          )
+                        }
+                      />
+                      <div
+                        style={{
+                          position: "fixed",
+                          top: `${exportMenuPos.top}px`,
+                          left: `${exportMenuPos.left}px`
+                        }}
+                        className="w-44 bg-[#161b22] border border-slate-800 rounded-xl shadow-2xl p-1.5 flex flex-col space-y-0.5 z-[9999] no-scrollbar select-none text-slate-200">
                       <button
                         onClick={() => {
                           setExportDropdownOpen(
@@ -10309,8 +10346,9 @@ export const Editor: React.FC<
                         </span>
                       </button>
                     </div>
-                  </>
-                )}
+                    </>,
+                    document.body
+                  )}
               </div>
 
               <button

@@ -4137,7 +4137,7 @@ const App: React.FC = () => {
       <AnimatePresence>
       {adminModalOpen && (
         <motion.div
-          className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[1200] flex items-center justify-center p-4 select-none"
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[1200] flex items-center justify-center p-0 md:p-4 select-none"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -4146,7 +4146,7 @@ const App: React.FC = () => {
           onKeyDown={(e) => { if (e.key === 'Escape') setAdminModalOpen(false) }}
         >
           <motion.div
-            className="bf-popover-card bg-[#161b22] border border-slate-800 rounded-2xl max-w-2xl w-full shadow-2xl p-6 overflow-hidden text-slate-200 flex flex-col h-[480px] max-h-[85vh]"
+            className="bf-popover-card bg-[#161b22] border-0 md:border border-slate-800 rounded-none md:rounded-2xl max-w-2xl w-full shadow-2xl p-4 md:p-6 overflow-hidden text-slate-200 flex flex-col h-full md:h-[480px] max-h-full md:max-h-[85vh]"
             initial={{ scale: 0.95, y: 10 }}
             animate={{ scale: 1, y: 0 }}
             exit={{ scale: 0.95, y: 10 }}
@@ -4154,24 +4154,28 @@ const App: React.FC = () => {
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
-            <div className="flex justify-between items-center mb-6 pb-4 border-b border-slate-800 shrink-0">
+            <div className="flex justify-between items-center mb-4 md:mb-6 pb-3 md:pb-4 border-b border-slate-800 shrink-0">
               <div className="flex items-center gap-2">
                 <Settings className="text-violet-400" size={18} />
                 <h3 className="font-bold text-base text-slate-100">Settings</h3>
               </div>
-              <button 
-                onClick={() => setAdminModalOpen(false)} 
+              <button
+                onClick={() => setAdminModalOpen(false)}
                 className="text-slate-500 hover:text-slate-300 transition cursor-pointer"
               >
                 <X size={16} />
               </button>
             </div>
 
-            {/* Modal Body (Sidebar + Content Panel) */}
-            <div className="flex-1 flex overflow-hidden min-h-0">
+            {/* Modal Body (Sidebar + Content Panel) — a side-by-side desktop
+                layout with a fixed-width sidebar breaks down on phone
+                screens (barely any width left for the content pane), so
+                below md it stacks: the sidebar becomes a horizontally
+                scrollable tab strip above a full-width content pane. */}
+            <div className="flex-1 flex flex-col md:flex-row overflow-hidden min-h-0">
               {/* Settings Sidebar Submenu */}
-              <div className="w-44 border-r border-slate-800 pr-4 space-y-1 shrink-0 flex flex-col justify-between">
-                <div className="space-y-1">
+              <div className="w-full md:w-44 border-b md:border-b-0 md:border-r border-slate-800 pb-2 md:pb-0 mb-3 md:mb-0 md:pr-4 shrink-0 flex flex-col md:justify-between">
+                <div className="flex md:flex-col gap-1.5 md:gap-0 md:space-y-1 overflow-x-auto no-scrollbar">
                   {[
                     { id: 'general'    as const, label: 'General',           icon: <Home size={14} className="text-emerald-400" /> },
                     { id: 'appearance' as const, label: 'Appearance',        icon: <Sun size={14} className="text-amber-400" /> },
@@ -4185,7 +4189,7 @@ const App: React.FC = () => {
                     <button
                       key={tab.id}
                       onClick={() => setSettingsTab(tab.id)}
-                      className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold border transition cursor-pointer text-left ${
+                      className={`shrink-0 whitespace-nowrap md:w-full flex items-center gap-2 md:gap-2.5 px-2.5 md:px-3 py-2 rounded-lg text-xs font-semibold border transition cursor-pointer text-left ${
                         settingsTab === tab.id
                           ? 'bg-violet-600/10 border-violet-500/35 text-violet-300'
                           : 'bg-transparent border-transparent text-slate-400 hover:bg-slate-800 hover:text-slate-200'
@@ -4196,13 +4200,13 @@ const App: React.FC = () => {
                     </button>
                   ))}
                 </div>
-                <div className="text-[10px] text-slate-500 font-mono pl-3">
+                <div className="hidden md:block text-[10px] text-slate-500 font-mono pl-3">
                   v{APP_VERSION}
                 </div>
               </div>
 
               {/* Settings Content Pane */}
-              <div className="flex-1 min-w-0 pl-6 flex flex-col min-h-0">
+              <div className="flex-1 min-w-0 pl-0 md:pl-6 pt-4 md:pt-0 flex flex-col min-h-0">
                 <div className="relative flex-1 min-h-0">
                   <div
                     ref={settingsScrollRef}
