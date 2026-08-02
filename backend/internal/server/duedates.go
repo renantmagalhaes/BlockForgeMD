@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -35,8 +36,11 @@ var doneColumnNames = map[string]bool{
 	"finished": true, "archive": true, "archived": true, "closed": true,
 }
 
-// RunDueDateAutoUpdate bumps overdue dueDates (strictly before today) to
-// today, for cards not sitting in a column the board has marked Completed.
+// RunDueDateAutoUpdate bumps overdue dueDates (strictly before today) forward
+// by the configured number of days, for cards not sitting in a column the
+// board has marked Completed. Manual and scheduled runs use the same
+// Global → Board → Card eligibility rules, so "Run now" is a previewable
+// immediate execution of the configuration rather than a bypass of it.
 //
 // boardPath == "" scans every board in the workspace; a specific board path
 // scopes it to just that board's cards. There is no enabled/schedule gating
@@ -45,6 +49,21 @@ var doneColumnNames = map[string]bool{
 // it's given, whether called from the manual "Run now" endpoint or from a
 // board whose own scheduled time just matched.
 func (s *Server) RunDueDateAutoUpdate(boardPath string) (updated int, boardsScanned int, err error) {
+	return s.runDueDateAutoUpdate(boardPath, false)
+}
+
+func dueDateAutoUpdateOffset(raw string) (int, bool) {
+	if raw == "" {
+		return 0, false
+	}
+	days, err := strconv.Atoi(raw)
+	if err != nil || days < 0 {
+		return 0, false
+	}
+	return days, true
+}
+
+func (s *Server) runDueDateAutoUpdate(boardPath string, forceBoardEnabled bool) (updated int, boardsScanned int, err error) {
 	var boards []string
 	if boardPath != "" {
 		boards = []string{boardPath}
@@ -58,12 +77,28 @@ func (s *Server) RunDueDateAutoUpdate(boardPath string) (updated int, boardsScan
 		}
 	}
 
-	today := time.Now().Format("2006-01-02")
+	globalEnabled, _ := s.db.GetSetting("due_date_auto_update_enabled", "false")
+	globalOffsetRaw, _ := s.db.GetSetting("due_date_auto_update_days_ahead", "0")
+	globalOffset, _ := dueDateAutoUpdateOffset(globalOffsetRaw)
+	today := time.Now()
 
 	for _, bp := range boards {
 		boardFM, ferr := s.db.GetFrontMatterFlat(bp)
 		if ferr != nil {
 			continue
+		}
+		boardEnabled := forceBoardEnabled || globalEnabled == "true"
+		if !forceBoardEnabled {
+			switch boardFM["dueDateAutoUpdate"] {
+			case "on":
+				boardEnabled = true
+			case "off":
+				boardEnabled = false
+			}
+		}
+		boardOffset := globalOffset
+		if days, ok := dueDateAutoUpdateOffset(boardFM["dueDateAutoUpdateDaysAhead"]); ok {
+			boardOffset = days
 		}
 
 		var completedColumns []string
@@ -95,12 +130,22 @@ func (s *Server) RunDueDateAutoUpdate(boardPath string) (updated int, boardsScan
 		}
 		prefix += "/"
 
-		cards, cerr := s.db.QueryCards(prefix, nil, today)
+		cards, cerr := s.db.QueryCards(prefix, nil, today.Format("2006-01-02"))
 		if cerr != nil {
 			continue
 		}
 
 		for _, card := range cards {
+			cardEnabled := boardEnabled
+			switch card.Fields["dueDateAutoUpdate"] {
+			case "on":
+				cardEnabled = true
+			case "off":
+				cardEnabled = false
+			}
+			if !cardEnabled {
+				continue
+			}
 			status := card.Fields["status"]
 			isCompleted := false
 			for _, c := range completedColumns {
@@ -115,10 +160,14 @@ func (s *Server) RunDueDateAutoUpdate(boardPath string) (updated int, boardsScan
 			// A dueDate can carry a specific time (e.g. "2026-07-20T14:00",
 			// see the Google Calendar plugin) — bumping the date shouldn't
 			// silently drop that time, so carry over whatever follows "T".
-			newDueDate := today
+			daysAhead := boardOffset
+			if days, ok := dueDateAutoUpdateOffset(card.Fields["dueDateAutoUpdateDaysAhead"]); ok {
+				daysAhead = days
+			}
+			newDueDate := today.AddDate(0, 0, daysAhead).Format("2006-01-02")
 			if orig := card.Fields["dueDate"]; orig != "" {
 				if idx := strings.Index(orig, "T"); idx != -1 {
-					newDueDate = today + orig[idx:]
+					newDueDate += orig[idx:]
 				}
 			}
 			if uerr := s.UpdateFrontMatter(card.Path, map[string]interface{}{"dueDate": newDueDate}); uerr == nil {

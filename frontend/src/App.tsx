@@ -1391,6 +1391,7 @@ const App: React.FC = () => {
   const [historyIntervalInput, setHistoryIntervalInput] = useState('0')
   const [dueDateAutoUpdateEnabled, setDueDateAutoUpdateEnabled] = useState(false)
   const [dueDateAutoUpdateTime, setDueDateAutoUpdateTime] = useState('01:00')
+  const [dueDateAutoUpdateDaysAhead, setDueDateAutoUpdateDaysAhead] = useState(0)
   const selectedPathRef = useRef<string | null>(null)
   const activeViewRef = useRef<'board' | 'editor' | 'graph'>('editor')
   const isSavingRef = useRef(false)
@@ -1802,6 +1803,10 @@ const App: React.FC = () => {
         if (typeof data?.due_date_auto_update_time === 'string' && data.due_date_auto_update_time) {
           setDueDateAutoUpdateTime(data.due_date_auto_update_time)
         }
+        const dueDateDaysAhead = Number(data?.due_date_auto_update_days_ahead)
+        if (Number.isInteger(dueDateDaysAhead) && dueDateDaysAhead >= 0) {
+          setDueDateAutoUpdateDaysAhead(dueDateDaysAhead)
+        }
         if (typeof data?.history_interval === 'number' && data.history_interval >= 0) {
           setHistoryInterval(data.history_interval)
           setHistoryIntervalInput(data.history_interval.toString())
@@ -1936,6 +1941,20 @@ const App: React.FC = () => {
       })
     } catch (e) {
       console.error('Failed to save due_date_auto_update_time', e)
+    }
+  }
+
+  const saveDueDateAutoUpdateDaysAhead = async (days: number) => {
+    const safeDays = Math.max(0, Math.min(3650, Math.floor(days) || 0))
+    setDueDateAutoUpdateDaysAhead(safeDays)
+    try {
+      await fetch(`${API_BASE}/api/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ due_date_auto_update_days_ahead: safeDays }),
+      })
+    } catch (e) {
+      console.error('Failed to save due_date_auto_update_days_ahead', e)
     }
   }
 
@@ -4323,7 +4342,7 @@ const App: React.FC = () => {
                           Due Date Auto-Update
                         </label>
                         <p className="text-[11px] text-slate-400 leading-relaxed">
-                          Once a day at the time below, bumps overdue due dates to today. This is the default for every board — a board can override it in its own Board Settings ("Always on"/"Always off" regardless of this toggle).
+                          Once a day at the time below, updates overdue due dates. Boards and individual cards can override whether they participate and how many days ahead to set the new date.
                         </p>
                         <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
                           <input
@@ -4334,12 +4353,29 @@ const App: React.FC = () => {
                           />
                           Enable by default for all boards
                         </label>
+                        <p className={`text-[11px] leading-relaxed ${dueDateAutoUpdateEnabled ? 'text-emerald-400' : 'text-amber-400'}`}>
+                          {dueDateAutoUpdateEnabled
+                            ? 'Global default is active. Boards and cards set to follow their parent will update.'
+                            : 'Global default is inactive. Boards and cards set to follow their parent will not update; an explicit “Always on” board or “Always update this card” can still opt in.'}
+                        </p>
                         <input
                           type="time"
                           value={dueDateAutoUpdateTime}
                           onChange={e => saveDueDateAutoUpdateTime(e.target.value)}
                           className="bg-[#0d1220] border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 outline-none focus:border-violet-500"
                         />
+                        <label className="flex items-center gap-2 text-xs text-slate-300">
+                          Set updated due date
+                          <input
+                            type="number"
+                            min="0"
+                            max="3650"
+                            value={dueDateAutoUpdateDaysAhead}
+                            onChange={e => saveDueDateAutoUpdateDaysAhead(Number(e.target.value))}
+                            className="w-20 bg-[#0d1220] border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-violet-500"
+                          />
+                          days ahead
+                        </label>
                       </div>
 
                       {/* Upload limit */}

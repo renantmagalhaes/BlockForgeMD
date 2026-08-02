@@ -1417,71 +1417,74 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	appFont, _ := s.db.GetSetting("app_font", "inter")
 	dueDateAutoUpdateEnabledStr, _ := s.db.GetSetting("due_date_auto_update_enabled", "false")
 	dueDateAutoUpdateTime, _ := s.db.GetSetting("due_date_auto_update_time", "01:00")
+	dueDateAutoUpdateDaysAhead, _ := s.db.GetSetting("due_date_auto_update_days_ahead", "0")
 	uploadLimitStr, _ := s.db.GetSetting("upload_limit_mb", strconv.Itoa(defaultUploadLimitMB))
 	uploadLimitMB, err5 := strconv.Atoi(uploadLimitStr)
 	if err5 != nil || uploadLimitMB <= 0 || uploadLimitMB > maxUploadLimitMB {
 		uploadLimitMB = defaultUploadLimitMB
 	}
 	respondJSON(w, map[string]interface{}{
-		"history_limit":                limit,
-		"theme":                        theme,
-		"trash_retention_days":         retention,
-		"default_page":                 defaultPage,
-		"sidebar_collapsed":            sidebarCollapsedStr == "true",
-		"kanban_card_view_mode":        kanbanCardViewMode,
-		"properties_collapsed":         propertiesCollapsedStr == "true",
-		"glass_enabled":                glassEnabledStr == "true",
-		"glass_sidebar_enabled":        glassSidebarEnabledStr == "true",
-		"app_bg_type":                  appBgType,
-		"app_bg_color":                 appBgColor,
-		"app_bg_image":                 appBgImage,
-		"doc_header_text_color_dark":   docHeaderTextColorDark,
-		"doc_header_text_color_light":  docHeaderTextColorLight,
-		"autosave_delay":               autosaveDelay,
-		"history_interval":             historyInterval,
-		"sidebar_bg_color_dark":        sidebarBgColorDark,
-		"sidebar_bg_color_light":       sidebarBgColorLight,
-		"sidebar_text_color_dark":      sidebarTextColorDark,
-		"sidebar_text_color_light":     sidebarTextColorLight,
-		"global_layout_override":       globalLayoutOverride,
-		"global_column_width_override": globalColumnWidthOverride,
-		"date_format":                  dateFormat,
-		"app_font":                     appFont,
-		"due_date_auto_update_enabled": dueDateAutoUpdateEnabledStr == "true",
-		"due_date_auto_update_time":    dueDateAutoUpdateTime,
-		"upload_limit_mb":              uploadLimitMB,
+		"history_limit":                   limit,
+		"theme":                           theme,
+		"trash_retention_days":            retention,
+		"default_page":                    defaultPage,
+		"sidebar_collapsed":               sidebarCollapsedStr == "true",
+		"kanban_card_view_mode":           kanbanCardViewMode,
+		"properties_collapsed":            propertiesCollapsedStr == "true",
+		"glass_enabled":                   glassEnabledStr == "true",
+		"glass_sidebar_enabled":           glassSidebarEnabledStr == "true",
+		"app_bg_type":                     appBgType,
+		"app_bg_color":                    appBgColor,
+		"app_bg_image":                    appBgImage,
+		"doc_header_text_color_dark":      docHeaderTextColorDark,
+		"doc_header_text_color_light":     docHeaderTextColorLight,
+		"autosave_delay":                  autosaveDelay,
+		"history_interval":                historyInterval,
+		"sidebar_bg_color_dark":           sidebarBgColorDark,
+		"sidebar_bg_color_light":          sidebarBgColorLight,
+		"sidebar_text_color_dark":         sidebarTextColorDark,
+		"sidebar_text_color_light":        sidebarTextColorLight,
+		"global_layout_override":          globalLayoutOverride,
+		"global_column_width_override":    globalColumnWidthOverride,
+		"date_format":                     dateFormat,
+		"app_font":                        appFont,
+		"due_date_auto_update_enabled":    dueDateAutoUpdateEnabledStr == "true",
+		"due_date_auto_update_time":       dueDateAutoUpdateTime,
+		"due_date_auto_update_days_ahead": dueDateAutoUpdateDaysAhead,
+		"upload_limit_mb":                 uploadLimitMB,
 	})
 }
 
 func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		HistoryLimit              *int    `json:"history_limit"`
-		Theme                     string  `json:"theme"`
-		TrashRetentionDays        *int    `json:"trash_retention_days"`
-		DefaultPage               *string `json:"default_page"`
-		SidebarCollapsed          *bool   `json:"sidebar_collapsed"`
-		KanbanCardViewMode        string  `json:"kanban_card_view_mode"`
-		PropertiesCollapsed       *bool   `json:"properties_collapsed"`
-		GlassEnabled              *bool   `json:"glass_enabled"`
-		GlassSidebarEnabled       *bool   `json:"glass_sidebar_enabled"`
-		AutosaveDelay             *int    `json:"autosave_delay"`
-		HistoryInterval           *int    `json:"history_interval"`
-		SidebarBgColorDark        *string `json:"sidebar_bg_color_dark"`
-		SidebarBgColorLight       *string `json:"sidebar_bg_color_light"`
-		SidebarTextColorDark      *string `json:"sidebar_text_color_dark"`
-		SidebarTextColorLight     *string `json:"sidebar_text_color_light"`
-		AppBgType                 string  `json:"app_bg_type"`
-		AppBgColor                *string `json:"app_bg_color"`
-		AppBgImage                *string `json:"app_bg_image"`
-		DocHeaderTextColorDark    *string `json:"doc_header_text_color_dark"`
-		DocHeaderTextColorLight   *string `json:"doc_header_text_color_light"`
-		GlobalLayoutOverride      string  `json:"global_layout_override"`
-		GlobalColumnWidthOverride string  `json:"global_column_width_override"`
-		DateFormat                string  `json:"date_format"`
-		AppFont                   string  `json:"app_font"`
-		DueDateAutoUpdateEnabled  *bool   `json:"due_date_auto_update_enabled"`
-		DueDateAutoUpdateTime     *string `json:"due_date_auto_update_time"`
-		UploadLimitMB             *int    `json:"upload_limit_mb"`
+		HistoryLimit               *int    `json:"history_limit"`
+		Theme                      string  `json:"theme"`
+		TrashRetentionDays         *int    `json:"trash_retention_days"`
+		DefaultPage                *string `json:"default_page"`
+		SidebarCollapsed           *bool   `json:"sidebar_collapsed"`
+		KanbanCardViewMode         string  `json:"kanban_card_view_mode"`
+		PropertiesCollapsed        *bool   `json:"properties_collapsed"`
+		GlassEnabled               *bool   `json:"glass_enabled"`
+		GlassSidebarEnabled        *bool   `json:"glass_sidebar_enabled"`
+		AutosaveDelay              *int    `json:"autosave_delay"`
+		HistoryInterval            *int    `json:"history_interval"`
+		SidebarBgColorDark         *string `json:"sidebar_bg_color_dark"`
+		SidebarBgColorLight        *string `json:"sidebar_bg_color_light"`
+		SidebarTextColorDark       *string `json:"sidebar_text_color_dark"`
+		SidebarTextColorLight      *string `json:"sidebar_text_color_light"`
+		AppBgType                  string  `json:"app_bg_type"`
+		AppBgColor                 *string `json:"app_bg_color"`
+		AppBgImage                 *string `json:"app_bg_image"`
+		DocHeaderTextColorDark     *string `json:"doc_header_text_color_dark"`
+		DocHeaderTextColorLight    *string `json:"doc_header_text_color_light"`
+		GlobalLayoutOverride       string  `json:"global_layout_override"`
+		GlobalColumnWidthOverride  string  `json:"global_column_width_override"`
+		DateFormat                 string  `json:"date_format"`
+		AppFont                    string  `json:"app_font"`
+		DueDateAutoUpdateEnabled   *bool   `json:"due_date_auto_update_enabled"`
+		DueDateAutoUpdateTime      *string `json:"due_date_auto_update_time"`
+		DueDateAutoUpdateDaysAhead *int    `json:"due_date_auto_update_days_ahead"`
+		UploadLimitMB              *int    `json:"upload_limit_mb"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -1726,6 +1729,17 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := s.db.SetSetting("due_date_auto_update_time", *req.DueDateAutoUpdateTime); err != nil {
 			http.Error(w, fmt.Sprintf("failed to save due_date_auto_update_time: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if req.DueDateAutoUpdateDaysAhead != nil {
+		if *req.DueDateAutoUpdateDaysAhead < 0 || *req.DueDateAutoUpdateDaysAhead > 3650 {
+			http.Error(w, "invalid due_date_auto_update_days_ahead value (must be between 0 and 3650)", http.StatusBadRequest)
+			return
+		}
+		if err := s.db.SetSetting("due_date_auto_update_days_ahead", strconv.Itoa(*req.DueDateAutoUpdateDaysAhead)); err != nil {
+			http.Error(w, fmt.Sprintf("failed to save due_date_auto_update_days_ahead: %v", err), http.StatusInternalServerError)
 			return
 		}
 	}
@@ -2527,23 +2541,42 @@ func (s *Server) checkScheduledDueDateAutoUpdates() {
 		if ferr != nil {
 			continue
 		}
+		boardEnabled := globalEnabled == "true"
 		switch override := fm["dueDateAutoUpdate"]; {
 		case override == "off":
-			continue
+			boardEnabled = false
 		case override == "on":
-			// included regardless of the global flag
-		case globalEnabled != "true":
+			boardEnabled = true
+		}
+		// A card can explicitly opt in even when its board (and the global
+		// default) is off, so don't skip that board before card-level rules
+		// get a chance to apply.
+		if !boardEnabled && !s.boardHasDueDateAutoUpdateOn(b.Path) {
 			continue
 		}
 		if fm["dueDateAutoUpdateLastRun"] == slot {
 			continue
 		}
-		updated, _, rerr := s.RunDueDateAutoUpdate(b.Path)
+		updated, _, rerr := s.runDueDateAutoUpdate(b.Path, false)
 		log.Printf("due-date auto-update: board %s slot %s — updated=%d err=%v", b.Path, slot, updated, rerr)
 		if uerr := s.UpdateFrontMatter(b.Path, map[string]interface{}{"dueDateAutoUpdateLastRun": slot}); uerr != nil {
 			log.Printf("due-date auto-update: failed to record last-run for %s: %v", b.Path, uerr)
 		}
 	}
+}
+
+func (s *Server) boardHasDueDateAutoUpdateOn(boardPath string) bool {
+	prefix := strings.TrimSuffix(boardPath, ".board.md") + "/"
+	cards, err := s.db.QueryCards(prefix, nil, "")
+	if err != nil {
+		return false
+	}
+	for _, card := range cards {
+		if card.Fields["dueDateAutoUpdate"] == "on" {
+			return true
+		}
+	}
+	return false
 }
 
 // ─── HTTP handlers ────────────────────────────────────────────────────────────

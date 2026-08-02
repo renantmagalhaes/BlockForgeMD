@@ -353,6 +353,7 @@ const BoardSettingsModal: React.FC<{
   completionTargetColumn?: string
   cardFieldVisibility: CardFieldVisibility
   dueDateAutoUpdate?: string
+  dueDateAutoUpdateDaysAhead?: string
   onClose: () => void
   onSavePriority: (idx: number, name: string, color: string) => Promise<void>
   onDeletePriority: (idx: number) => Promise<void>
@@ -362,14 +363,28 @@ const BoardSettingsModal: React.FC<{
   onSetCompletionTarget?: (col: string) => void
   onCardFieldVisibilityChange: (field: CardFieldKey, visible: boolean) => void
   onSetDueDateAutoUpdate?: (value: string) => void
+  onSetDueDateAutoUpdateDaysAhead?: (value: string) => void
   onRunDueDateAutoUpdateHere?: () => Promise<void>
-}> = ({ priorities, tagColors, allBoardTags, columns, completedColumns = [], completionTargetColumn, cardFieldVisibility, dueDateAutoUpdate, onClose, onSavePriority, onDeletePriority, onAddPriority, onSetTagColor, onToggleCompleted, onSetCompletionTarget, onCardFieldVisibilityChange, onSetDueDateAutoUpdate, onRunDueDateAutoUpdateHere }) => {
+}> = ({ priorities, tagColors, allBoardTags, columns, completedColumns = [], completionTargetColumn, cardFieldVisibility, dueDateAutoUpdate, dueDateAutoUpdateDaysAhead, onClose, onSavePriority, onDeletePriority, onAddPriority, onSetTagColor, onToggleCompleted, onSetCompletionTarget, onCardFieldVisibilityChange, onSetDueDateAutoUpdate, onSetDueDateAutoUpdateDaysAhead, onRunDueDateAutoUpdateHere }) => {
   const [editingIdx, setEditingIdx] = useState<number | null>(null)
   const [editName, setEditName]     = useState('')
   const [editColor, setEditColor]   = useState('')
   const [newName, setNewName]       = useState('')
   const [newColor, setNewColor]     = useState('#8b5cf6')
   const [colorPicker, setColorPicker] = useState<{ key: string; x: number; y: number } | null>(null)
+  const [daysAheadInput, setDaysAheadInput] = useState(dueDateAutoUpdateDaysAhead || '')
+
+  const saveDaysAhead = (value: string) => {
+    setDaysAheadInput(value)
+    const days = Number(value)
+    if (value === '' || (Number.isInteger(days) && days >= 0 && days <= 3650)) {
+      onSetDueDateAutoUpdateDaysAhead?.(value)
+    }
+  }
+
+  useEffect(() => {
+    setDaysAheadInput(dueDateAutoUpdateDaysAhead || '')
+  }, [dueDateAutoUpdateDaysAhead])
 
   // Scroll-for-more hint — same pattern as the app's main Settings modal
   // (App.tsx) — shown only while there's unscrolled content below, so a
@@ -551,7 +566,7 @@ const BoardSettingsModal: React.FC<{
           <div>
             <h3 className="text-[10px] font-bold bf-kanban-section-label uppercase tracking-widest mb-3">Due Date Auto-Update</h3>
             <p className="text-[11px] bf-kanban-hint mb-3">
-              Once a day, at the time set in Settings → General, bumps overdue due dates on this board to today. Never touches cards in a Completed column.
+              Once a day, at the time set in Settings → General, updates overdue due dates on this board. Individual cards can opt in or out separately. Never touches cards in a Completed column.
             </p>
             <select
               value={dueDateAutoUpdate || ''}
@@ -562,6 +577,21 @@ const BoardSettingsModal: React.FC<{
               <option value="on">Always on for this board</option>
               <option value="off">Always off for this board</option>
             </select>
+            <label className="flex items-center gap-2 text-[11px] bf-kanban-hint mb-2">
+              Set updated due date
+              <input
+                type="number"
+                min="0"
+                max="3650"
+                value={daysAheadInput}
+                placeholder="Global"
+                onChange={e => saveDaysAhead(e.target.value)}
+                onBlur={() => saveDaysAhead(daysAheadInput)}
+                onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                className="w-20 bf-kanban-input rounded px-2 py-1 text-xs outline-none"
+              />
+              days ahead
+            </label>
             <button
               onClick={() => onRunDueDateAutoUpdateHere?.()}
               className="px-3 py-1.5 text-xs bf-kanban-input rounded-lg transition cursor-pointer hover:opacity-80 w-full"
@@ -995,11 +1025,13 @@ const CardContextMenu: React.FC<{
   onMarkComplete: () => void
   onSetPriority: (name: string) => void
   onSetDueDate: (date: string) => void
+  onSetDueDateAutoUpdate: (value: string) => void
+  onSetDueDateAutoUpdateDaysAhead: (value: string) => void
   onDelete?: () => void
   otherBoards?: { path: string; title: string; columns: string[] }[]
   onMoveToBoard?: (boardPath: string, column: string) => void
-}> = ({ x, y, task, currentCol, columns, priorities, isCompleted, completionTargetColumn, onClose, onOpen, onRename, onMove, onMarkComplete, onSetPriority, onSetDueDate, onDelete, otherBoards = [], onMoveToBoard }) => {
-  const [sub, setSub] = useState<'move' | 'priority' | 'date' | 'moveBoard' | null>(null)
+}> = ({ x, y, task, currentCol, columns, priorities, isCompleted, completionTargetColumn, onClose, onOpen, onRename, onMove, onMarkComplete, onSetPriority, onSetDueDate, onSetDueDateAutoUpdate, onSetDueDateAutoUpdateDaysAhead, onDelete, otherBoards = [], onMoveToBoard }) => {
+  const [sub, setSub] = useState<'move' | 'priority' | 'date' | 'moveBoard' | 'dueAutoUpdate' | null>(null)
   const [moveBoardTarget, setMoveBoardTarget] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -1024,6 +1056,21 @@ const CardContextMenu: React.FC<{
 
   const currentPriority = task.frontMatter?.priority
   const currentDue      = task.frontMatter?.dueDate?.split('T')[0] ?? ''
+  const dueDateAutoUpdate = task.frontMatter?.dueDateAutoUpdate || ''
+  const dueDateAutoUpdateDaysAhead = task.frontMatter?.dueDateAutoUpdateDaysAhead || ''
+  const [daysAheadInput, setDaysAheadInput] = useState(dueDateAutoUpdateDaysAhead)
+
+  const saveDaysAhead = (value: string) => {
+    setDaysAheadInput(value)
+    const days = Number(value)
+    if (value === '' || (Number.isInteger(days) && days >= 0 && days <= 3650)) {
+      onSetDueDateAutoUpdateDaysAhead(value)
+    }
+  }
+
+  useEffect(() => {
+    setDaysAheadInput(dueDateAutoUpdateDaysAhead)
+  }, [dueDateAutoUpdateDaysAhead])
 
   const Row: React.FC<{
     icon: React.ReactNode; label: string; onClick: () => void
@@ -1165,6 +1212,36 @@ const CardContextMenu: React.FC<{
               className="bf-kanban-input rounded-lg px-2 py-1.5 text-xs w-full outline-none"
               onChange={e => { if (e.target.value) { onSetDueDate(e.target.value); onClose() } }}
             />
+          </div>
+        )}
+
+        <Row icon={<Calendar size={13} />} label="Due date auto-update" active={sub === 'dueAutoUpdate'} expand onClick={() => setSub(sub === 'dueAutoUpdate' ? null : 'dueAutoUpdate')} />
+        {sub === 'dueAutoUpdate' && (
+          <div className="mx-3 mb-2 space-y-2">
+            <select
+              value={dueDateAutoUpdate}
+              onChange={e => onSetDueDateAutoUpdate(e.target.value)}
+              className="bf-kanban-input rounded-lg px-2 py-1.5 text-xs w-full outline-none cursor-pointer"
+            >
+              <option value="">Follow board setting</option>
+              <option value="on">Always update this card</option>
+              <option value="off">Never update this card</option>
+            </select>
+            <label className="flex items-center gap-2 text-[11px] bf-kanban-hint">
+              Set date
+              <input
+                type="number"
+                min="0"
+                max="3650"
+                value={daysAheadInput}
+                placeholder="Inherited"
+                onChange={e => saveDaysAhead(e.target.value)}
+                onBlur={() => saveDaysAhead(daysAheadInput)}
+                onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                className="w-20 bf-kanban-input rounded px-2 py-1 text-xs outline-none"
+              />
+              days ahead
+            </label>
           </div>
         )}
 
@@ -1798,6 +1875,7 @@ const Kanban: React.FC<KanbanProps> = ({
   // "" (unset) = follow the global default; "on"/"off" = explicit per-board
   // override. The schedule time itself is shared (Settings → General).
   const dueDateAutoUpdate = boardFrontMatter?.dueDateAutoUpdate || ''
+  const dueDateAutoUpdateDaysAhead = boardFrontMatter?.dueDateAutoUpdateDaysAhead || ''
 
   // Local calendar-day string (not UTC, not a raw Date comparison) so a card
   // due "today" reads as today regardless of time-of-day or the viewer's
@@ -2100,6 +2178,12 @@ const Kanban: React.FC<KanbanProps> = ({
 
   const handleSetDueDateAutoUpdate = async (value: string) => {
     await onUpdateBoardFrontMatter?.({ dueDateAutoUpdate: value })
+  }
+
+  const handleSetDueDateAutoUpdateDaysAhead = async (value: string) => {
+    const days = Number(value)
+    if (value !== '' && (!Number.isInteger(days) || days < 0 || days > 3650)) return
+    await onUpdateBoardFrontMatter?.({ dueDateAutoUpdateDaysAhead: value })
   }
 
   const handleRunDueDateAutoUpdateForBoard = async () => {
@@ -2932,6 +3016,7 @@ const Kanban: React.FC<KanbanProps> = ({
           completionTargetColumn={completionTargetColumn}
           cardFieldVisibility={cardFieldVisibility}
           dueDateAutoUpdate={dueDateAutoUpdate}
+          dueDateAutoUpdateDaysAhead={dueDateAutoUpdateDaysAhead}
           onClose={() => setSettingsOpen(false)}
           onSavePriority={handleSavePriority}
           onDeletePriority={handleDeletePriority}
@@ -2940,6 +3025,7 @@ const Kanban: React.FC<KanbanProps> = ({
           onToggleCompleted={handleToggleColumnCompleted}
           onSetCompletionTarget={handleSetCompletionTarget}
           onSetDueDateAutoUpdate={handleSetDueDateAutoUpdate}
+          onSetDueDateAutoUpdateDaysAhead={handleSetDueDateAutoUpdateDaysAhead}
           onRunDueDateAutoUpdateHere={handleRunDueDateAutoUpdateForBoard}
           onCardFieldVisibilityChange={handleCardFieldVisibilityChange}
         />
@@ -2967,6 +3053,13 @@ const Kanban: React.FC<KanbanProps> = ({
           onMarkComplete={() => handleMarkComplete(cardCtxMenu.task.path, cardCtxMenu.col)}
           onSetPriority={name => handleSetCardPriority(cardCtxMenu.task.path, name)}
           onSetDueDate={date => onUpdateTaskFrontMatter?.(cardCtxMenu.task.path, { dueDate: date })}
+          onSetDueDateAutoUpdate={value => onUpdateTaskFrontMatter?.(cardCtxMenu.task.path, { dueDateAutoUpdate: value })}
+          onSetDueDateAutoUpdateDaysAhead={value => {
+            const days = Number(value)
+            if (value === '' || (Number.isInteger(days) && days >= 0 && days <= 3650)) {
+              onUpdateTaskFrontMatter?.(cardCtxMenu.task.path, { dueDateAutoUpdateDaysAhead: value })
+            }
+          }}
           onDelete={onDeleteCard ? () => onDeleteCard(cardCtxMenu.task.path) : undefined}
           otherBoards={otherBoards}
           onMoveToBoard={onMoveCardToBoard ? (boardPath, col) => onMoveCardToBoard(cardCtxMenu.task.path, boardPath, col) : undefined}
