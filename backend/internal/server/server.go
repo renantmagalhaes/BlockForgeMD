@@ -129,6 +129,7 @@ func (s *Server) setupRoutes() {
 		r.Get("/embed-check", s.handleEmbedCheck)
 		r.Get("/screenshot", s.handleScreenshot)
 		r.Get("/search", s.handleSearch)
+		r.Post("/search/open", s.handleRecordSearchOpen)
 		r.Get("/settings", s.handleGetSettings)
 		r.Post("/settings", s.handleSaveSettings)
 		r.Get("/favorites", s.handleGetFavorites)
@@ -1295,13 +1296,51 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		wsPrefix = ws + "/"
 	}
 
-	results, err := s.db.Search(q, wsPrefix)
+	user := userFromCtx(r)
+	var userID string
+	if user != nil {
+		userID = user.ID
+	}
+
+	results, err := s.db.Search(q, wsPrefix, userID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Search failed: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	respondJSON(w, results)
+}
+
+// handleRecordSearchOpen logs that a user opened a file from a search result.
+// It's fire-and-forget learning signal for the ranking engine: repeated opens
+// of the same file for the same query gently boost it in future searches.
+func (s *Server) handleRecordSearchOpen(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Query string `json:"query"`
+		Path  string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	user := userFromCtx(r)
+	if user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if len([]rune(req.Query)) > 256 || len([]rune(req.Path)) > 1024 {
+		http.Error(w, "query or path is too long", http.StatusBadRequest)
+		return
+	}
+	if _, err := s.db.GetFile(req.Path); err != nil {
+		http.Error(w, "file not found", http.StatusNotFound)
+		return
+	}
+	if err := s.db.RecordSearchOpen(user.ID, req.Query, req.Path); err != nil {
+		http.Error(w, "failed to record search open", http.StatusInternalServerError)
+		return
+	}
+	respondJSON(w, map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleGetFileHistoryContent(w http.ResponseWriter, r *http.Request) {

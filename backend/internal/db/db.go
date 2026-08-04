@@ -6,10 +6,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
+	"unicode"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -23,6 +27,10 @@ type FileRecord struct {
 	Content     string            `json:"content,omitempty"`
 	FrontMatter map[string]string `json:"frontMatter,omitempty"`
 	Position    float64           `json:"position"`
+	// Score is the search relevance score (0..1+) produced by the ranking
+	// engine. Higher is a better match. Populated by Search/rankResults only;
+	// empty/zero for all other queries.
+	Score float64 `json:"score,omitempty"`
 	// Checklist groups (contiguous runs of `- [ ]`/`- [x]` lines, one group
 	// per run) — kept separate from Content so the Kanban board's bulk file
 	// list can show checklist progress without shipping every file's full
@@ -146,6 +154,23 @@ func (db *DB) createTables() error {
 			value_enc BLOB NOT NULL,
 			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		);`,
+		`CREATE TABLE IF NOT EXISTS search_history (
+			user_id TEXT NOT NULL,
+			query TEXT NOT NULL,
+			file_path TEXT NOT NULL,
+			opened_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			open_count INTEGER NOT NULL DEFAULT 1,
+			PRIMARY KEY (user_id, query, file_path),
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		);`,
+		`CREATE TABLE IF NOT EXISTS search_index (
+			file_path TEXT NOT NULL,
+			field INTEGER NOT NULL,
+			term TEXT NOT NULL,
+			PRIMARY KEY (file_path, field, term),
+			FOREIGN KEY (file_path) REFERENCES files(path) ON DELETE CASCADE
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_search_index_term ON search_index(term, field, file_path);`,
 		`CREATE TABLE IF NOT EXISTS plugin_gcal_accounts (
 			user_id TEXT PRIMARY KEY,
 			google_email TEXT,
@@ -213,9 +238,13 @@ func (db *DB) createTables() error {
 	_, _ = db.Conn.Exec("ALTER TABLE files ADD COLUMN content TEXT;")
 	_, _ = db.Conn.Exec("ALTER TABLE files ADD COLUMN position REAL DEFAULT 0;")
 	_, _ = db.Conn.Exec("ALTER TABLE files ADD COLUMN checklist TEXT;")
+	_, _ = db.Conn.Exec("ALTER TABLE search_history ADD COLUMN open_count INTEGER NOT NULL DEFAULT 1;")
 	_, _ = db.Conn.Exec("ALTER TABLE plugin_ollama_tagger_user_config ADD COLUMN workspaces TEXT NOT NULL DEFAULT '';")
 	_, _ = db.Conn.Exec("UPDATE files SET position = rowid WHERE position = 0 OR position IS NULL;")
 	_, _ = db.Conn.Exec("INSERT OR IGNORE INTO settings (key, value) VALUES ('history_limit', '50');")
+	if err := db.ensureSearchIndex(); err != nil {
+		return fmt.Errorf("failed to build search index: %w", err)
+	}
 
 	if err := db.migrateSharedGCalConfigToPerUser(); err != nil {
 		return fmt.Errorf("failed to migrate shared google calendar config: %w", err)
@@ -268,6 +297,10 @@ func (db *DB) migrateSharedGCalConfigToPerUser() error {
 			userIDs = append(userIDs, id)
 		}
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
 	rows.Close()
 
 	for _, id := range userIDs {
@@ -316,6 +349,9 @@ func (db *DB) UpsertFile(file FileRecord, fm map[string]interface{}, tasks []Tas
 	`, file.Path, file.Title, file.Type, file.ContentHash, file.UpdatedAt, file.Content, checklistJSON)
 	if err != nil {
 		return fmt.Errorf("failed to upsert file: %w", err)
+	}
+	if err := replaceSearchIndex(tx, file); err != nil {
+		return fmt.Errorf("failed to update search index: %w", err)
 	}
 
 	// 2. Delete old front matter
@@ -369,6 +405,82 @@ func (db *DB) UpsertFile(file FileRecord, fm map[string]interface{}, tasks []Tas
 	}
 
 	return tx.Commit()
+}
+
+const (
+	searchFieldTitle = iota + 1
+	searchFieldPath
+	searchFieldContent
+)
+
+// ensureSearchIndex backfills the token index once for existing vaults. The
+// index makes body-text lookup proportional to matching notes, rather than to
+// every byte of content in the vault.
+func (db *DB) ensureSearchIndex() error {
+	var complete string
+	err := db.Conn.QueryRow("SELECT value FROM settings WHERE key = 'search_index_version'").Scan(&complete)
+	if err == nil && complete == "1" {
+		return nil
+	}
+	rows, err := db.Conn.Query("SELECT path, title, content FROM files")
+	if err != nil {
+		return err
+	}
+	var files []FileRecord
+	for rows.Next() {
+		var file FileRecord
+		if err := rows.Scan(&file.Path, &file.Title, &file.Content); err != nil {
+			rows.Close()
+			return err
+		}
+		files = append(files, file)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+
+	tx, err := db.Conn.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec("DELETE FROM search_index"); err != nil {
+		return err
+	}
+	for _, file := range files {
+		if err := replaceSearchIndex(tx, file); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec("INSERT INTO settings(key, value) VALUES('search_index_version', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value"); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func replaceSearchIndex(tx *sql.Tx, file FileRecord) error {
+	if _, err := tx.Exec("DELETE FROM search_index WHERE file_path = ?", file.Path); err != nil {
+		return err
+	}
+	stmt, err := tx.Prepare("INSERT OR IGNORE INTO search_index(file_path, field, term) VALUES (?, ?, ?)")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for field, text := range map[int]string{
+		searchFieldTitle:   file.Title,
+		searchFieldPath:    file.Path,
+		searchFieldContent: file.Content,
+	} {
+		for _, term := range searchTerms(text) {
+			if _, err := stmt.Exec(file.Path, field, term); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // DeleteFile removes a file and cascadingly deletes front matter and tasks
@@ -614,41 +726,443 @@ func (db *DB) GetTasksForFile(filePath string) ([]TaskRecord, error) {
 	return tasks, nil
 }
 
-// Search queries files where path, title, or content matches the query string
-func (db *DB) Search(query, wsPrefix string) ([]FileRecord, error) {
-	q := "%" + query + "%"
-	var rows *sql.Rows
-	var err error
-	if wsPrefix != "" {
-		rows, err = db.Conn.Query(`
-			SELECT path, title, type, content_hash, updated_at, COALESCE(content, '')
-			FROM files
-			WHERE (path LIKE ? OR title LIKE ? OR content LIKE ?)
-			  AND path LIKE ?
-			ORDER BY title ASC LIMIT 50;
-		`, q, q, q, wsPrefix+"%")
-	} else {
-		rows, err = db.Conn.Query(`
-			SELECT path, title, type, content_hash, updated_at, COALESCE(content, '')
-			FROM files
-			WHERE path LIKE ? OR title LIKE ? OR content LIKE ?
-			ORDER BY title ASC LIMIT 50;
-		`, q, q, q)
+// Search runs a fuzzy, relevance-ranked search across files. Fuzzy matching is
+// deliberately restricted to titles and paths; body matches come from the
+// token index, which avoids an expensive LIKE scan across every note on each
+// keystroke.
+func (db *DB) Search(query, wsPrefix, userID string) ([]FileRecord, error) {
+	trimmed := strings.TrimSpace(query)
+	terms := searchTerms(trimmed)
+	if len(terms) == 0 {
+		return nil, nil
 	}
+
+	// Query 1: every file in scope, WITHOUT body content. These get fuzzy
+	// title/path scoring. Fetching all titles/paths is cheap and is what lets a
+	// typo'd query ("nixt date") still surface the right file — there is no
+	// substring pre-filter that could exclude a near-miss before scoring runs.
+	scope := ""
+	args := []interface{}{}
+	if wsPrefix != "" {
+		scope = "WHERE path LIKE ?"
+		args = append(args, wsPrefix+"%")
+	}
+	rows, err := db.Conn.Query(`
+		SELECT path, title, type, content_hash, updated_at
+		FROM files `+scope+` ORDER BY title ASC;`, args...)
+	if err != nil {
+		return nil, err
+	}
+	var records []FileRecord
+	for rows.Next() {
+		var record FileRecord
+		if err := rows.Scan(&record.Path, &record.Title, &record.Type, &record.ContentHash, &record.UpdatedAt); err == nil {
+			records = append(records, record)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+
+	// Load bodies only for notes with an exact indexed body-token match. Title
+	// and path candidates still get fuzzy-scored from the lightweight metadata
+	// query above.
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(terms)), ",")
+	contentArgs := make([]interface{}, 0, len(terms)+1)
+	for _, term := range terms {
+		contentArgs = append(contentArgs, term)
+	}
+	contentScope := ""
+	if wsPrefix != "" {
+		contentScope = " AND f.path LIKE ?"
+		contentArgs = append(contentArgs, wsPrefix+"%")
+	}
+	crows, err := db.Conn.Query(`
+		SELECT f.path, COALESCE(f.content, '')
+		FROM files f JOIN search_index i ON i.file_path = f.path
+		WHERE i.field = ? AND i.term IN (`+placeholders+`)`+contentScope+`
+		GROUP BY f.path LIMIT 300;`, append([]interface{}{searchFieldContent}, contentArgs...)...)
+	if err != nil {
+		return nil, err
+	}
+	byPath := make(map[string]int, len(records))
+	for i := range records {
+		byPath[records[i].Path] = i
+	}
+	for crows.Next() {
+		var path, content string
+		if err := crows.Scan(&path, &content); err == nil {
+			if idx, ok := byPath[path]; ok {
+				records[idx].Content = content
+			}
+		}
+	}
+	if err := crows.Err(); err != nil {
+		crows.Close()
+		return nil, err
+	}
+	crows.Close()
+
+	return db.rankResults(records, trimmed, userID), nil
+}
+
+// rankResults scores candidate records and returns them best-first.
+func (db *DB) rankResults(records []FileRecord, query, userID string) []FileRecord {
+	if len(records) == 0 {
+		return records
+	}
+
+	terms := searchTerms(query)
+	normQuery := normalize(query)
+	now := time.Now()
+
+	// Preload the historical-open signal for this user, if any, so we can
+	// boost "the file they actually opened from a search before".
+	histCounts := map[string]int{}
+	histRecency := map[string]time.Time{}
+	if userID != "" {
+		if hist, err := db.searchHistoryForQuery(userID, query); err == nil {
+			for _, h := range hist {
+				histCounts[h.FilePath] = h.OpenCount
+				if histRecency[h.FilePath].IsZero() || h.OpenedAt.After(histRecency[h.FilePath]) {
+					histRecency[h.FilePath] = h.OpenedAt
+				}
+			}
+		}
+	}
+
+	type scored struct {
+		rec   FileRecord
+		score float64
+	}
+	scoredList := make([]scored, 0, len(records))
+
+	for _, rec := range records {
+		title := normalize(rec.Title)
+		path := normalize(searchPath(rec.Path))
+		content := normalize(rec.Content)
+		titleScore, titleTerms := matchScore(title, terms, 4.0, normQuery, true)
+		pathScore, pathTerms := matchScore(path, terms, 1.8, normQuery, true)
+		contentScore, contentTerms := matchScore(content, terms, 0.7, normQuery, false)
+		score := titleScore + pathScore + contentScore
+
+		matched := make(map[string]bool, len(terms))
+		for _, group := range []map[string]bool{titleTerms, pathTerms, contentTerms} {
+			for term := range group {
+				matched[term] = true
+			}
+		}
+		minimumTerms := len(terms)
+		if len(terms) > 4 {
+			minimumTerms--
+		}
+		if score <= 0 || len(matched) < minimumTerms {
+			continue
+		}
+
+		// Recency: files edited more recently nudge up slightly.
+		age := now.Sub(rec.UpdatedAt)
+		if age > 0 {
+			score += 0.4 * math.Exp(-age.Hours()/(24*90)) // half-decay ~62 days
+		}
+
+		// Historical searches: opening this file from a search before boosts it,
+		// proportionally to how often and how recently.
+		if n := histCounts[rec.Path]; n > 0 {
+			histBoost := 1.0 + math.Min(float64(n), 3)*0.45
+			if recent := histRecency[rec.Path]; !recent.IsZero() && now.Sub(recent) < 30*24*time.Hour {
+				histBoost += 0.4
+			}
+			score *= histBoost
+		}
+
+		rec.Score = score
+		scoredList = append(scoredList, scored{rec: rec, score: score})
+	}
+
+	// Stable sort: equal scores keep DB/insertion order (already alphabetical-ish).
+	sort.SliceStable(scoredList, func(i, j int) bool {
+		if scoredList[i].score != scoredList[j].score {
+			return scoredList[i].score > scoredList[j].score
+		}
+		return scoredList[i].rec.Title < scoredList[j].rec.Title
+	})
+
+	if len(scoredList) > 50 {
+		scoredList = scoredList[:50]
+	}
+
+	out := make([]FileRecord, 0, len(scoredList))
+	for _, s := range scoredList {
+		out = append(out, s.rec)
+	}
+	return out
+}
+
+// matchScore returns both the field score and the query terms it matched.
+func matchScore(haystack string, terms []string, dist float64, normQuery string, allowFuzzy bool) (float64, map[string]bool) {
+	matched := make(map[string]bool, len(terms))
+	if haystack == "" {
+		return 0, matched
+	}
+	score := 0.0
+
+	// Whole-query exact substring match.
+	if normQuery != "" && strings.Contains(haystack, normQuery) {
+		score += dist
+		for _, term := range terms {
+			matched[term] = true
+		}
+	}
+
+	// Per-term scoring.
+	for _, term := range terms {
+		if strings.Contains(haystack, term) {
+			// Penalize long haystacks a touch so a short title beating a big
+			// body is handled naturally by the field weight.
+			score += dist * 0.6 * (1.0 / (1.0 + 0.0015*float64(len(haystack))))
+			matched[term] = true
+			continue
+		}
+		if allowFuzzy && wordPrefixFuzzy(haystack, term) {
+			score += dist * 0.4
+			matched[term] = true
+		}
+	}
+	return score, matched
+}
+
+// normalize lowercases, collapses whitespace and strips diacritics so
+// "café" matches "cafe" and accents don't break matching.
+func normalize(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	s = strings.Join(strings.Fields(s), " ")
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch r {
+		case 'þ':
+			b.WriteString("th")
+		case 'æ':
+			b.WriteString("ae")
+		case 'œ':
+			b.WriteString("oe")
+		default:
+			if d := unaccent(r); d != 0 {
+				b.WriteRune(d)
+			} else {
+				b.WriteRune(r)
+			}
+		}
+	}
+	return b.String()
+}
+
+// searchTerms emits unique normalized words. One-character terms are ignored:
+// they are both noisy to rank and disproportionately expensive to index.
+func searchTerms(s string) []string {
+	words := strings.FieldsFunc(normalize(s), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	})
+	seen := make(map[string]struct{}, len(words))
+	terms := make([]string, 0, len(words))
+	for _, word := range words {
+		if len([]rune(word)) < 2 {
+			continue
+		}
+		if _, ok := seen[word]; !ok {
+			seen[word] = struct{}{}
+			terms = append(terms, word)
+		}
+	}
+	return terms
+}
+
+func searchPath(path string) string {
+	if _, rest, ok := strings.Cut(path, "/"); ok {
+		return rest
+	}
+	return path
+}
+
+// unaccent returns the base ASCII equivalent of common accented runes.
+// Multi-character expansions (þ, æ, œ) are handled by the caller via
+// translateMulti, so this switch only ever returns a single rune or 0.
+func unaccent(r rune) rune {
+	switch r {
+	case 'á', 'à', 'â', 'ä', 'ã', 'å', 'ā', 'ă', 'ą', 'ǟ':
+		return 'a'
+	case 'é', 'è', 'ê', 'ë', 'ē', 'ĕ', 'ė', 'ę', 'ě':
+		return 'e'
+	case 'í', 'ì', 'î', 'ï', 'ī', 'ĭ', 'į', 'ı', 'ǐ', 'ȋ':
+		return 'i'
+	case 'ó', 'ò', 'ô', 'ö', 'õ', 'ø', 'ō', 'ŏ', 'ő', 'ơ':
+		return 'o'
+	case 'ú', 'ù', 'û', 'ü', 'ū', 'ŭ', 'ů', 'ű', 'ų', 'ư':
+		return 'u'
+	case 'ý', 'ÿ', 'ŷ':
+		return 'y'
+	case 'ç', 'ć', 'ĉ', 'ċ', 'č':
+		return 'c'
+	case 'ñ', 'ń', 'ņ', 'ň':
+		return 'n'
+	case 'ś', 'ŝ', 'ş', 'š':
+		return 's'
+	case 'ž', 'ź', 'ż':
+		return 'z'
+	case 'ğ', 'ĝ':
+		return 'g'
+	case 'ř':
+		return 'r'
+	case 'ľ', 'ĺ', 'ļ':
+		return 'l'
+	case 'đ', 'ð':
+		return 'd'
+	case 'ť', 'ţ', 'ŧ':
+		return 't'
+	default:
+		return 0
+	}
+}
+
+// wordPrefixFuzzy reports whether `word` (a single normalized term) appears as
+// a word-prefix in haystack, allowing at most one insertion/deletion/substitution.
+func wordPrefixFuzzy(haystack, word string) bool {
+	words := strings.Fields(haystack)
+	for _, w := range words {
+		if strings.HasPrefix(w, word) {
+			return true
+		}
+		// Don't fuzzy-match very short terms — too noisy.
+		if len([]rune(word)) < 3 || len([]rune(w)) < 3 {
+			continue
+		}
+		if editDistanceClose(w, word) {
+			return true
+		}
+	}
+	return false
+}
+
+// editDistanceClose reports whether a and b have a small edit distance
+// (<=1 for short strings, <=2 for longer ones). Uses a bounded Levenshtein.
+func editDistanceClose(a, b string) bool {
+	if a == b {
+		return true
+	}
+	limit := 1
+	if len([]rune(a)) > 5 || len([]rune(b)) > 5 {
+		limit = 2
+	}
+	if abs(len([]rune(a))-len([]rune(b))) > limit {
+		return false
+	}
+	return levenshtein(a, b) <= limit
+}
+
+func levenshtein(a, b string) int {
+	ar, br := []rune(a), []rune(b)
+	if len(ar) == 0 {
+		return len(br)
+	}
+	if len(br) == 0 {
+		return len(ar)
+	}
+	if len(ar) > len(br) {
+		ar, br = br, ar
+	}
+	prev := make([]int, len(br)+1)
+	for j := 0; j <= len(br); j++ {
+		prev[j] = j
+	}
+	cur := make([]int, len(br)+1)
+	for i := 1; i <= len(ar); i++ {
+		cur[0] = i
+		ra := ar[i-1]
+		for j := 1; j <= len(br); j++ {
+			rb := br[j-1]
+			cost := 0
+			if ra != rb {
+				cost = 1
+			}
+			ins := prev[j] + 1
+			del := cur[j-1] + 1
+			sub := prev[j-1] + cost
+			m := ins
+			if del < m {
+				m = del
+			}
+			if sub < m {
+				m = sub
+			}
+			cur[j] = m
+		}
+		prev, cur = cur, prev
+	}
+	return prev[len(br)]
+}
+
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+// SearchHistoryEntry is a single recorded "opened from a search" event.
+type SearchHistoryEntry struct {
+	FilePath  string
+	OpenedAt  time.Time
+	OpenCount int
+}
+
+// searchHistoryForQuery returns the files a user opened from a search for this
+// query in the last 90 days.
+func (db *DB) searchHistoryForQuery(userID, query string) ([]SearchHistoryEntry, error) {
+	rows, err := db.Conn.Query(`
+		SELECT file_path, opened_at, open_count FROM search_history
+		WHERE user_id = ? AND query = ? AND opened_at > datetime('now', '-90 days')
+		ORDER BY opened_at DESC;
+	`, userID, normalize(query))
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var records []FileRecord
+	var out []SearchHistoryEntry
 	for rows.Next() {
-		var record FileRecord
-		err := rows.Scan(&record.Path, &record.Title, &record.Type, &record.ContentHash, &record.UpdatedAt, &record.Content)
-		if err == nil {
-			records = append(records, record)
+		var e SearchHistoryEntry
+		var ts string
+		if err := rows.Scan(&e.FilePath, &ts, &e.OpenCount); err != nil {
+			continue
 		}
+		if t, perr := time.Parse("2006-01-02 15:04:05", ts); perr == nil {
+			e.OpenedAt = t
+		} else if t, perr = time.Parse(time.RFC3339, ts); perr == nil {
+			e.OpenedAt = t
+		}
+		out = append(out, e)
 	}
-	return records, nil
+	return out, nil
+}
+
+// RecordSearchOpen records that a user opened the given file from a search for
+// the given query. Upserts per (user, query, file) and refreshes opened_at.
+func (db *DB) RecordSearchOpen(userID, query, filePath string) error {
+	query = normalize(query)
+	if userID == "" || query == "" || filePath == "" {
+		return nil
+	}
+	_, err := db.Conn.Exec(`
+		INSERT INTO search_history (user_id, query, file_path, opened_at)
+		VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(user_id, query, file_path) DO UPDATE SET
+			opened_at = CURRENT_TIMESTAMP,
+			open_count = MIN(search_history.open_count + 1, 10);
+	`, userID, query, filePath)
+	return err
 }
 
 func (db *DB) GetSetting(key string, defaultValue string) (string, error) {

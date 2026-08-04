@@ -617,6 +617,7 @@ interface FileRecord {
   content?: string
   frontMatter?: Record<string, string>
   position?: number
+  score?: number
 }
 
 const API_BASE = ''
@@ -652,6 +653,18 @@ const getSearchSnippet = (content: string, query: string) => {
   if (start > 0) snippet = '...' + snippet
   if (end < content.length) snippet = snippet + '...'
   return snippet
+}
+
+// Fire-and-forget: tell the backend a file was opened from a search result so
+// the ranking engine can gently boost it for that query next time.
+const recordSearchOpen = (path: string, query: string) => {
+  if (!query.trim()) return
+  fetch(`${API_BASE}/api/search/open`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, path }),
+  }).catch(() => {})
 }
 
 // ─── UsersTab ────────────────────────────────────────────────────────────────
@@ -2329,11 +2342,12 @@ const App: React.FC = () => {
       return
     }
 
+    const controller = new AbortController()
     const delayDebounceFn = setTimeout(async () => {
       setIsSearching(true)
       try {
         const url = `${API_BASE}/api/search?q=${encodeURIComponent(searchQuery)}&workspace=${encodeURIComponent(activeWorkspace)}`
-        const res = await fetch(url)
+        const res = await fetch(url, { signal: controller.signal })
         if (res.ok) {
           const data: FileRecord[] = await res.json() || []
           // Client-side guard: keep only files that belong to the active workspace
@@ -2347,13 +2361,14 @@ const App: React.FC = () => {
           setSearchSelectedIndex(0)
         }
       } catch (e) {
+        if ((e as Error).name === 'AbortError') return
         console.error('Search query failed', e)
       } finally {
         setIsSearching(false)
       }
-    }, 150)
+    }, 200)
 
-    return () => clearTimeout(delayDebounceFn)
+    return () => { clearTimeout(delayDebounceFn); controller.abort() }
   }, [searchQuery, searchOpen, activeWorkspace])
 
   useEffect(() => {
@@ -5230,7 +5245,10 @@ const App: React.FC = () => {
                       label: f.title, 
                       path: f.path, 
                       fileType: f.type, 
-                      action: () => fetchFileContent(f.path, false, searchQuery) 
+                      action: () => {
+                        recordSearchOpen(f.path, searchQuery)
+                        fetchFileContent(f.path, false, searchQuery)
+                      }
                     }))
                   ]
 
@@ -5305,7 +5323,7 @@ const App: React.FC = () => {
                     return (
                       <button
                         key={file.path}
-                        onClick={() => { fetchFileContent(file.path, false, searchQuery); setSearchOpen(false) }}
+                        onClick={() => { recordSearchOpen(file.path, searchQuery); fetchFileContent(file.path, false, searchQuery); setSearchOpen(false) }}
                         onMouseEnter={() => setSearchSelectedIndex(globalIdx)}
                         className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-left text-xs transition font-medium cursor-pointer ${
                           isSelected ? 'bg-violet-600/15 text-violet-300 border border-violet-500/20' : 'text-slate-300 border border-transparent hover:bg-slate-800/40'
@@ -5324,6 +5342,11 @@ const App: React.FC = () => {
                               </div>
                             )}
                           </div>
+                          {typeof file.score === 'number' && file.score > 0 && (
+                            <span className="shrink-0 self-center ml-2 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-800/80 text-slate-500">
+                              {file.score >= 4 ? 'Best' : file.score >= 1.8 ? 'Strong' : 'Match'}
+                            </span>
+                          )}
                         </div>
                       </button>
                     )

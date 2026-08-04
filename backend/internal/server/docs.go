@@ -204,12 +204,19 @@ var CATS=[
      resp:'{\n  "count": 1,\n  "cards": [\n    {\n      "path": "Default/Boards/board/Task.md",\n      "title": "Task",\n      "updatedAt": "2026-06-20T09:00:00Z",\n      "fields": {\n        "dueDate": "2026-06-15",\n        "status": "In Progress",\n        "assignee": "Alice"\n      }\n    }\n  ]\n}'}
   ]},
   {id:'search',label:'Search & Graph',items:[
-    {method:'GET',path:'/api/search',sum:'Full-text search across files',
+    {method:'GET',path:'/api/search',sum:'Fuzzy, relevance-ranked search across files',
+     desc:'Returns files best-match first. Ranks exact/prefix/word-fuzzy title and path hits above indexed body-token matches, nudges recently edited files, and boosts files repeatedly opened for the same normalized query.',
      params:[
-       {name:'q',req:true,type:'string',desc:'Search query'},
+       {name:'q',req:true,type:'string',desc:'Search query (fuzzy title/path matching; indexed body-token matching)'},
        {name:'workspace',req:false,type:'string',desc:'Scope results to a workspace'}
      ],
      curl:function(b){return b+'/api/search?q=meeting+notes&workspace=Default'}},
+    {method:'POST',path:'/api/search/open',sum:'Record a file opened from search',
+     desc:'Fire-and-forget learning signal: logs that a user opened a file from a search result so the ranking engine boosts it for that query later.',
+     params:[
+       {name:'body',req:true,type:'json',desc:'{"query":"<search query>","path":"<file path>"}'}
+     ],
+     curl:function(b){return b+'/api/search/open'}},
     {method:'GET',path:'/api/backlinks',sum:'Get backlinks to a file',
      desc:'Returns all files that contain a Markdown link pointing to the given path.',
      params:[{name:'path',req:true,type:'string',desc:'Target file path'}],
