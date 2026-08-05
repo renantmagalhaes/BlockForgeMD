@@ -75,6 +75,16 @@ With the app published (step 3) and a connection established, it's effectively p
 
 By default, events sync to your Google account's primary calendar. To use a different one (e.g. a dedicated "BlockForgeMD" calendar), open **Settings → Plugins → Google Calendar** and pick from the **Sync to calendar** dropdown — it lists every calendar your account can write to. Switching calendars deletes previously synced events from the old calendar and recreates them on the newly selected one on the next sync pass, so nothing is left duplicated.
 
+## Completed Kanban cards
+
+In **Settings → Plugins → Google Calendar**, choose what happens when a card enters a board column marked **Completed**:
+
+- **Keep its event** leaves the event on the normal sync calendar (the default).
+- **Remove its event** deletes the event but deliberately keeps the card's `dueDate`. The plugin records that choice so normal two-way sync does not recreate the event or clear the card's due date.
+- **Move its event** copies the event to a calendar you select for completed items, then removes it from the normal sync calendar. The card's due date is retained.
+
+Reopening a completed card removes a moved event from the completed-items calendar, then resumes normal sync to the main calendar. The setting applies to Kanban columns marked Completed, not to pages with a manually entered status alone.
+
 ## Choosing which workspaces sync
 
 By default, **all workspaces** in the vault sync — this is the default for backward compatibility, so nothing changes until you touch this setting. To restrict sync to specific workspaces, open **Settings → Plugins → Google Calendar**, uncheck **All workspaces**, and pick individual ones from the list.

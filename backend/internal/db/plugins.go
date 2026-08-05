@@ -326,29 +326,61 @@ func (db *DB) DeleteGCalSyncStateByEventID(userID, eventID string) error {
 // config anymore, each user brings their own Google Cloud OAuth Client.
 
 type GCalUserConfig struct {
-	UserID              string
-	ClientID            string
-	ClientSecretEnc     []byte // nil if never set
-	PollIntervalSeconds int    // 0 = not set, caller should use the default
-	Workspaces          string // raw JSON array; "" = all workspaces
-	ProductionConfirmed bool
+	UserID               string
+	ClientID             string
+	ClientSecretEnc      []byte // nil if never set
+	PollIntervalSeconds  int    // 0 = not set, caller should use the default
+	Workspaces           string // raw JSON array; "" = all workspaces
+	ProductionConfirmed  bool
+	CompletionAction     string
+	CompletionCalendarID string
 }
 
 // GetGCalUserConfig returns (nil, nil) if this user has never touched
 // Settings > Plugins > Google Calendar.
 func (db *DB) GetGCalUserConfig(userID string) (*GCalUserConfig, error) {
 	row := db.Conn.QueryRow(`
-		SELECT user_id, client_id, client_secret_enc, poll_interval_seconds, workspaces, production_confirmed
+		SELECT user_id, client_id, client_secret_enc, poll_interval_seconds, workspaces, production_confirmed, completion_action, completion_calendar_id
 		FROM plugin_gcal_user_config WHERE user_id = ?;
 	`, userID)
 	var c GCalUserConfig
-	if err := row.Scan(&c.UserID, &c.ClientID, &c.ClientSecretEnc, &c.PollIntervalSeconds, &c.Workspaces, &c.ProductionConfirmed); err != nil {
+	if err := row.Scan(&c.UserID, &c.ClientID, &c.ClientSecretEnc, &c.PollIntervalSeconds, &c.Workspaces, &c.ProductionConfirmed, &c.CompletionAction, &c.CompletionCalendarID); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
 		return nil, err
 	}
 	return &c, nil
+}
+
+func (db *DB) SetGCalCompletionPolicy(userID, action, calendarID string) error {
+	_, err := db.Conn.Exec(`
+		INSERT INTO plugin_gcal_user_config (user_id, completion_action, completion_calendar_id) VALUES (?, ?, ?)
+		ON CONFLICT(user_id) DO UPDATE SET completion_action=excluded.completion_action, completion_calendar_id=excluded.completion_calendar_id;
+	`, userID, action, calendarID)
+	return err
+}
+
+type GCalCompletionState struct{ UserID, FilePath, Action, CalendarID, GoogleEventID string }
+
+func (db *DB) GetGCalCompletionState(userID, path string) (*GCalCompletionState, error) {
+	var s GCalCompletionState
+	err := db.Conn.QueryRow(`SELECT user_id, file_path, action, calendar_id, google_event_id FROM plugin_gcal_completion_state WHERE user_id=? AND file_path=?`, userID, path).Scan(&s.UserID, &s.FilePath, &s.Action, &s.CalendarID, &s.GoogleEventID)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+func (db *DB) UpsertGCalCompletionState(s GCalCompletionState) error {
+	_, err := db.Conn.Exec(`INSERT INTO plugin_gcal_completion_state (user_id,file_path,action,calendar_id,google_event_id) VALUES (?,?,?,?,?) ON CONFLICT(user_id,file_path) DO UPDATE SET action=excluded.action,calendar_id=excluded.calendar_id,google_event_id=excluded.google_event_id`, s.UserID, s.FilePath, s.Action, s.CalendarID, s.GoogleEventID)
+	return err
+}
+func (db *DB) DeleteGCalCompletionState(userID, path string) error {
+	_, err := db.Conn.Exec(`DELETE FROM plugin_gcal_completion_state WHERE user_id=? AND file_path=?`, userID, path)
+	return err
 }
 
 func (db *DB) SetGCalClientID(userID, clientID string) error {

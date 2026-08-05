@@ -109,13 +109,15 @@ func (s *Server) handleGCalGetConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, map[string]interface{}{
-		"clientId":            cfg.ClientID,
-		"hasClientSecret":     cfg.HasClientSecret,
-		"pollIntervalSeconds": cfg.PollIntervalSeconds,
-		"workspaces":          cfg.Workspaces,
-		"productionConfirmed": cfg.ProductionConfirmed,
-		"redirectUri":         s.gcalRedirectURI(r),
-		"isPrivateHost":       isPrivateIPHost(gcalRequestHost(r)),
+		"clientId":             cfg.ClientID,
+		"hasClientSecret":      cfg.HasClientSecret,
+		"pollIntervalSeconds":  cfg.PollIntervalSeconds,
+		"workspaces":           cfg.Workspaces,
+		"productionConfirmed":  cfg.ProductionConfirmed,
+		"completionAction":     cfg.CompletionAction,
+		"completionCalendarId": cfg.CompletionCalendarID,
+		"redirectUri":          s.gcalRedirectURI(r),
+		"isPrivateHost":        isPrivateIPHost(gcalRequestHost(r)),
 	})
 }
 
@@ -127,17 +129,19 @@ func (s *Server) handleGCalSetConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		ClientID            string   `json:"clientId"`
-		ClientSecret        string   `json:"clientSecret"`
-		PollIntervalSeconds *int     `json:"pollIntervalSeconds"`
-		Workspaces          []string `json:"workspaces"`
-		ProductionConfirmed *bool    `json:"productionConfirmed"`
+		ClientID             string   `json:"clientId"`
+		ClientSecret         string   `json:"clientSecret"`
+		PollIntervalSeconds  *int     `json:"pollIntervalSeconds"`
+		Workspaces           []string `json:"workspaces"`
+		ProductionConfirmed  *bool    `json:"productionConfirmed"`
+		CompletionAction     string   `json:"completionAction"`
+		CompletionCalendarID string   `json:"completionCalendarId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if err := s.gcalPlugin().SetConfig(r.Context(), user.ID, req.ClientID, req.ClientSecret, req.PollIntervalSeconds, req.Workspaces, req.ProductionConfirmed); err != nil {
+	if err := s.gcalPlugin().SetConfig(r.Context(), user.ID, req.ClientID, req.ClientSecret, req.PollIntervalSeconds, req.Workspaces, req.ProductionConfirmed, req.CompletionAction, req.CompletionCalendarID); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -256,6 +260,28 @@ func (s *Server) handleGCalSetCalendar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.gcalPlugin().SetCalendar(r.Context(), user.ID, req.CalendarID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	respondJSON(w, map[string]string{"status": "ok"})
+}
+
+// POST /api/plugins/google-calendar/completion-policy
+func (s *Server) handleGCalSetCompletionPolicy(w http.ResponseWriter, r *http.Request) {
+	user := userFromCtx(r)
+	if user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var req struct {
+		Action     string `json:"action"`
+		CalendarID string `json:"calendarId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if err := s.gcalPlugin().SetCompletionPolicy(user.ID, req.Action, req.CalendarID); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}

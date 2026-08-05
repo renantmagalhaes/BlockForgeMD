@@ -203,6 +203,17 @@ func (db *DB) createTables() error {
 			poll_interval_seconds INTEGER NOT NULL DEFAULT 0,
 			workspaces TEXT NOT NULL DEFAULT '',
 			production_confirmed BOOLEAN NOT NULL DEFAULT 0,
+			completion_action TEXT NOT NULL DEFAULT 'keep',
+			completion_calendar_id TEXT NOT NULL DEFAULT '',
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		);`,
+		`CREATE TABLE IF NOT EXISTS plugin_gcal_completion_state (
+			user_id TEXT NOT NULL,
+			file_path TEXT NOT NULL,
+			action TEXT NOT NULL,
+			calendar_id TEXT NOT NULL DEFAULT '',
+			google_event_id TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (user_id, file_path),
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 		);`,
 		`CREATE TABLE IF NOT EXISTS plugin_ollama_tagger_user_config (
@@ -242,6 +253,8 @@ func (db *DB) createTables() error {
 	_, _ = db.Conn.Exec("ALTER TABLE search_history ADD COLUMN open_count INTEGER NOT NULL DEFAULT 1;")
 	_, _ = db.Conn.Exec("ALTER TABLE plugin_ollama_tagger_user_config ADD COLUMN workspaces TEXT NOT NULL DEFAULT '';")
 	_, _ = db.Conn.Exec("ALTER TABLE plugin_ollama_tagger_user_config ADD COLUMN provider TEXT NOT NULL DEFAULT 'ollama';")
+	_, _ = db.Conn.Exec("ALTER TABLE plugin_gcal_user_config ADD COLUMN completion_action TEXT NOT NULL DEFAULT 'keep';")
+	_, _ = db.Conn.Exec("ALTER TABLE plugin_gcal_user_config ADD COLUMN completion_calendar_id TEXT NOT NULL DEFAULT '';")
 	_, _ = db.Conn.Exec("UPDATE files SET position = rowid WHERE position = 0 OR position IS NULL;")
 	_, _ = db.Conn.Exec("INSERT OR IGNORE INTO settings (key, value) VALUES ('history_limit', '50');")
 	if err := db.ensureSearchIndex(); err != nil {

@@ -21,6 +21,8 @@ type GCalConfig = {
   productionConfirmed: boolean
   redirectUri: string
   isPrivateHost: boolean
+  completionAction: 'keep' | 'remove' | 'move'
+  completionCalendarId: string
 }
 
 type GCalStatus = {
@@ -140,6 +142,10 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
   const [pollIntervalMinutes, setPollIntervalMinutes] = useState(2)
   const [allWorkspaces, setAllWorkspaces] = useState<string[]>([])
   const [selectedWorkspaces, setSelectedWorkspaces] = useState<string[]>([])
+  const [completionAction, setCompletionAction] = useState<'keep' | 'remove' | 'move'>('keep')
+  const [completionCalendarId, setCompletionCalendarId] = useState('')
+	const [savingCompletionPolicy, setSavingCompletionPolicy] = useState(false)
+	const [completionPolicyMsg, setCompletionPolicyMsg] = useState('')
   // Tracked separately from selectedWorkspaces: an empty selection is
   // ambiguous on its own (it's also what "All workspaces" looks like on the
   // wire), so this is what actually drives showing the per-workspace
@@ -161,6 +167,8 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
         if (d.pollIntervalSeconds) setPollIntervalMinutes(Math.round(d.pollIntervalSeconds / 60) || 1)
         setSelectedWorkspaces(d.workspaces ?? [])
         setRestrictWorkspaces((d.workspaces ?? []).length > 0)
+        setCompletionAction(d.completionAction ?? 'keep')
+        setCompletionCalendarId(d.completionCalendarId ?? '')
       })
       .catch(() => {})
   }
@@ -205,6 +213,21 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
     }
   }
 
+  async function saveCompletionPolicy() {
+    setSavingCompletionPolicy(true)
+    setCompletionPolicyMsg('')
+    try {
+      const res = await fetch('/api/plugins/google-calendar/completion-policy', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: completionAction, calendarId: completionCalendarId }),
+      })
+      setCompletionPolicyMsg(res.ok ? 'Completed-card behavior saved.' : await res.text() || 'Failed to save completed-card behavior.')
+      if (res.ok) reloadConfig()
+    } finally {
+      setSavingCompletionPolicy(false)
+    }
+  }
+
   async function saveConfig(e: React.FormEvent) {
     e.preventDefault()
     setSavingConfig(true)
@@ -217,6 +240,8 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
           clientId, clientSecret,
           pollIntervalSeconds: Math.max(1, pollIntervalMinutes) * 60,
           workspaces: selectedWorkspaces,
+			completionAction,
+			completionCalendarId,
         }),
       })
       if (res.ok) {
@@ -442,6 +467,21 @@ function GoogleCalendarDetail({ onBack }: { onBack: () => void }) {
             <p className="text-[10px] text-slate-600 -mt-1 break-words">
               Switching calendars removes previously synced events from the old one and recreates them on the new one.
             </p>
+
+			<div className="space-y-2 border-t border-slate-800 pt-3">
+			  <p className="text-xs font-semibold text-slate-400">When a Kanban card is completed</p>
+			  <select value={completionAction} onChange={e => setCompletionAction(e.target.value as 'keep' | 'remove' | 'move')} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-indigo-500">
+				<option value="keep">Keep its event on the sync calendar</option>
+				<option value="remove">Remove its event, keep the card due date</option>
+				<option value="move">Move its event to another calendar</option>
+			  </select>
+			  {completionAction === 'move' && <select value={completionCalendarId} onChange={e => setCompletionCalendarId(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-indigo-500">
+				<option value="">Select the completed-items calendar…</option>
+				{calendars.filter(c => c.id !== status.calendarId).map(c => <option key={c.id} value={c.id}>{c.summary}{c.primary ? ' (primary)' : ''}</option>)}
+			  </select>}
+			  <p className="text-[10px] text-slate-500">Applies when a card enters a board column marked Completed.</p>
+			  <div className="flex items-center gap-2"><button type="button" onClick={saveCompletionPolicy} disabled={savingCompletionPolicy || (completionAction === 'move' && !completionCalendarId)} className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 rounded text-xs text-slate-200">{savingCompletionPolicy ? 'Saving…' : 'Save completed-card behavior'}</button>{completionPolicyMsg && <span className="text-[10px] text-slate-400">{completionPolicyMsg}</span>}</div>
+			</div>
 
             <div className="flex items-center justify-between text-[10px] text-slate-500 px-1">
               <span>Last sync: {relativeTime(status.lastSyncAt)}</span>

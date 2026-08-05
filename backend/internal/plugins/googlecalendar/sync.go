@@ -5,8 +5,11 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"log"
+	"net/http"
+	"strings"
 	"time"
 
 	"blockforgemd/internal/db"
@@ -171,6 +174,33 @@ func (p *Plugin) pushFile(ctx context.Context, acct db.GCalAccount, relPath stri
 		dueDate = ""
 	}
 
+	completed, err := p.isCompletedKanbanCard(relPath, file)
+	if err != nil {
+		return err
+	}
+	completion, err := p.db.GetGCalCompletionState(acct.UserID, relPath)
+	if err != nil {
+		return err
+	}
+	if completed && dueDate != "" && p.CompletionAction(acct.UserID) != "keep" {
+		if completion != nil {
+			return nil
+		} // Completion was already applied; don't recreate the regular event.
+		return p.applyCompletionAction(ctx, client, acct, relPath, state, file, dueDate, dueTimeZone)
+	}
+	if completion != nil {
+		// Reopening a card restores normal calendar sync. A moved completed event
+		// is removed from its destination calendar before recreating/updating it.
+		if completion.Action == "move" && completion.GoogleEventID != "" {
+			if err := DeleteEvent(ctx, client, completion.CalendarID, completion.GoogleEventID); err != nil {
+				return err
+			}
+		}
+		if err := p.db.DeleteGCalCompletionState(acct.UserID, relPath); err != nil {
+			return err
+		}
+	}
+
 	if dueDate == "" {
 		// File deleted, or its dueDate was cleared — remove the mapped event, if any.
 		if state == nil {
@@ -223,6 +253,61 @@ func (p *Plugin) pushFile(ctx context.Context, acct db.GCalAccount, relPath stri
 		LocalContentHash: hash,
 		LastSyncedAt:     time.Now(),
 	})
+}
+
+func (p *Plugin) applyCompletionAction(ctx context.Context, client *http.Client, acct db.GCalAccount, relPath string, state *db.GCalSyncState, file *db.FileRecord, dueDate, dueTimeZone string) error {
+	action := p.CompletionAction(acct.UserID)
+	if state != nil {
+		if err := DeleteEvent(ctx, client, acct.CalendarID, state.GoogleEventID); err != nil {
+			return err
+		}
+		if err := p.db.DeleteGCalSyncStateByPath(acct.UserID, relPath); err != nil {
+			return err
+		}
+	}
+	completion := db.GCalCompletionState{UserID: acct.UserID, FilePath: relPath, Action: action}
+	if action == "move" {
+		completion.CalendarID = p.CompletionCalendarID(acct.UserID)
+		if completion.CalendarID == "" {
+			return errors.New("choose a completion calendar in Google Calendar settings")
+		}
+		start, end := dueDateToGEventTimes(dueDate, dueTimeZone)
+		ev, err := InsertEvent(ctx, client, completion.CalendarID, GEvent{Summary: file.Title, Description: p.buildEventDescription(relPath), Start: &start, End: &end})
+		if err != nil {
+			return err
+		}
+		completion.GoogleEventID = ev.ID
+	}
+	return p.db.UpsertGCalCompletionState(completion)
+}
+
+func (p *Plugin) isCompletedKanbanCard(relPath string, file *db.FileRecord) (bool, error) {
+	if file == nil {
+		return false, nil
+	}
+	status := file.FrontMatter["status"]
+	if status == "" {
+		return false, nil
+	}
+	lastSlash := strings.LastIndex(relPath, "/")
+	if lastSlash < 0 {
+		return false, nil
+	}
+	boardFM, err := p.db.GetFrontMatterFlat(relPath[:lastSlash] + ".board.md")
+	if err != nil {
+		return false, err
+	}
+	var completedColumns []string
+	_ = json.Unmarshal([]byte(boardFM["completedColumns"]), &completedColumns)
+	if len(completedColumns) == 0 {
+		completedColumns = []string{"done", "complete", "completed", "finished", "archive", "archived", "closed"}
+	}
+	for _, column := range completedColumns {
+		if strings.EqualFold(strings.TrimSpace(status), strings.TrimSpace(column)) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // pullEvent applies one remote Google Calendar event change back to the

@@ -164,6 +164,7 @@ func (s *Server) setupRoutes() {
 		r.Post("/plugins/google-calendar/sync-now", s.handleGCalSyncNow)
 		r.Get("/plugins/google-calendar/calendars", s.handleGCalListCalendars)
 		r.Post("/plugins/google-calendar/calendar", s.handleGCalSetCalendar)
+		r.Post("/plugins/google-calendar/completion-policy", s.handleGCalSetCompletionPolicy)
 		r.Get("/plugins/ai-auto-tags/config", s.handleAITagsGetConfig)
 		r.Post("/plugins/ai-auto-tags/config", s.handleAITagsSetConfig)
 		r.Get("/plugins/ai-auto-tags/models", s.handleAITagsModels)

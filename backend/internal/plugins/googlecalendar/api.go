@@ -19,11 +19,13 @@ import (
 
 // ConfigResult is returned to the frontend's per-user config panel.
 type ConfigResult struct {
-	ClientID            string   `json:"clientId"`
-	HasClientSecret     bool     `json:"hasClientSecret"`
-	PollIntervalSeconds int      `json:"pollIntervalSeconds"`
-	Workspaces          []string `json:"workspaces"`          // empty = all workspaces (default)
-	ProductionConfirmed bool     `json:"productionConfirmed"` // hides the Testing-mode reminder banner once true
+	ClientID             string   `json:"clientId"`
+	HasClientSecret      bool     `json:"hasClientSecret"`
+	PollIntervalSeconds  int      `json:"pollIntervalSeconds"`
+	Workspaces           []string `json:"workspaces"`          // empty = all workspaces (default)
+	ProductionConfirmed  bool     `json:"productionConfirmed"` // hides the Testing-mode reminder banner once true
+	CompletionAction     string   `json:"completionAction"`
+	CompletionCalendarID string   `json:"completionCalendarId"`
 }
 
 func (p *Plugin) GetConfig(userID string) (ConfigResult, error) {
@@ -36,11 +38,13 @@ func (p *Plugin) GetConfig(userID string) (ConfigResult, error) {
 		workspaces = []string{}
 	}
 	return ConfigResult{
-		ClientID:            clientID,
-		HasClientSecret:     hasSecret,
-		PollIntervalSeconds: p.PollIntervalSeconds(userID),
-		Workspaces:          workspaces,
-		ProductionConfirmed: p.ProductionConfirmed(userID),
+		ClientID:             clientID,
+		HasClientSecret:      hasSecret,
+		PollIntervalSeconds:  p.PollIntervalSeconds(userID),
+		Workspaces:           workspaces,
+		ProductionConfirmed:  p.ProductionConfirmed(userID),
+		CompletionAction:     p.CompletionAction(userID),
+		CompletionCalendarID: p.CompletionCalendarID(userID),
 	}, nil
 }
 
@@ -50,7 +54,7 @@ func (p *Plugin) GetConfig(userID string) (ConfigResult, error) {
 // workspaces") — unlike clientSecret there's no masking concern, so the
 // frontend always round-trips the complete current selection rather than
 // needing partial-update semantics.
-func (p *Plugin) SetConfig(ctx context.Context, userID, clientID, clientSecret string, pollIntervalSeconds *int, workspaces []string, productionConfirmed *bool) error {
+func (p *Plugin) SetConfig(ctx context.Context, userID, clientID, clientSecret string, pollIntervalSeconds *int, workspaces []string, productionConfirmed *bool, completionAction, completionCalendarID string) error {
 	if err := p.SaveClientCredentialsForUser(userID, clientID, clientSecret); err != nil {
 		return err
 	}
@@ -65,6 +69,9 @@ func (p *Plugin) SetConfig(ctx context.Context, userID, clientID, clientSecret s
 		}
 	}
 	if err := p.SetAllowedWorkspaces(ctx, userID, workspaces); err != nil {
+		return err
+	}
+	if err := p.SetCompletionPolicy(userID, completionAction, completionCalendarID); err != nil {
 		return err
 	}
 	return nil

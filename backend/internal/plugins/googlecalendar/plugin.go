@@ -258,6 +258,36 @@ func (p *Plugin) SetProductionConfirmed(userID string, confirmed bool) error {
 	return p.db.SetGCalProductionConfirmed(userID, confirmed)
 }
 
+func (p *Plugin) CompletionAction(userID string) string {
+	cfg, err := p.db.GetGCalUserConfig(userID)
+	if err != nil || cfg == nil || cfg.CompletionAction == "" {
+		return "keep"
+	}
+	return cfg.CompletionAction
+}
+func (p *Plugin) CompletionCalendarID(userID string) string {
+	cfg, err := p.db.GetGCalUserConfig(userID)
+	if err != nil || cfg == nil {
+		return ""
+	}
+	return cfg.CompletionCalendarID
+}
+func (p *Plugin) SetCompletionPolicy(userID, action, calendarID string) error {
+	if action == "" {
+		action = "keep"
+	}
+	if action != "keep" && action != "remove" && action != "move" {
+		return fmt.Errorf("invalid completion action")
+	}
+	if action == "move" && calendarID == "" {
+		return fmt.Errorf("choose a completion calendar")
+	}
+	if action != "move" {
+		calendarID = ""
+	}
+	return p.db.SetGCalCompletionPolicy(userID, action, calendarID)
+}
+
 // OnFileChanged pushes a single changed page to every connected account —
 // pushFile itself decides (via workspace scope + assignee match) whether
 // that account is actually the right target. It's called by the registry in
