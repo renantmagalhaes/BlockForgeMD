@@ -137,6 +137,11 @@ const TableCell = TableCellBase.extend({
           );
           return m ? m[1].trim() : null;
         }
+      },
+      textAlign: {
+        default: null,
+        renderHTML: (attrs) => attrs.textAlign ? { style: `text-align: ${attrs.textAlign};` } : {},
+        parseHTML: (el) => (el as HTMLElement).style.textAlign || null
       }
     };
   }
@@ -168,6 +173,11 @@ const TableHeader =
               ? m[1].trim()
               : null;
           }
+        },
+        textAlign: {
+          default: null,
+          renderHTML: (attrs) => attrs.textAlign ? { style: `text-align: ${attrs.textAlign};` } : {},
+          parseHTML: (el) => (el as HTMLElement).style.textAlign || null
         }
       };
     }
@@ -380,6 +390,12 @@ turndownService.addRule("tables", {
       return `|${content}${suffix}`;
     }
     if (name === "table") {
+	  // GFM pipe tables can only express alignment per column. Preserve an
+	  // HTML table whenever an individual cell is aligned so the centered
+	  // cell survives a save-and-reopen cycle.
+	  if ((node as HTMLElement).querySelector('[style*="text-align"]')) {
+		return `\n${(node as HTMLElement).outerHTML}\n`;
+	  }
       return `\n${content}\n`;
     }
     return content;
@@ -9680,6 +9696,19 @@ export const Editor: React.FC<
                 />
               </button>
               <button
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  const next = (editor.getAttributes("tableCell").textAlign || editor.getAttributes("tableHeader").textAlign) === "center" ? null : "center";
+                  editor.chain().focus().setCellAttribute("textAlign", next).run();
+                }}
+                disabled={!editor.isActive("table")}
+                className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-slate-800 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent transition text-xs font-medium ${editor.isActive("table") ? "text-slate-300" : "text-slate-500"}`}
+                title="Center or left-align selected table cells"
+              >
+                <AlignCenter size={15} />
+                <span>{(editor.getAttributes("tableCell").textAlign || editor.getAttributes("tableHeader").textAlign) === "center" ? "Left-align cells" : "Center cells"}</span>
+              </button>
+              <button
                 onClick={() =>
                   editor
                     .chain()
@@ -12534,12 +12563,15 @@ export const Editor: React.FC<
           document.body
         )}
 
+      {/* The top editor toolbar is the sole formatting surface. The legacy
+          text-selection bubble is intentionally disabled so it cannot cover
+          table controls or compete with the toolbar. */}
       {/* Bubble Formatting Menu — appears above selected text. Portaled to
           document.body (like every other floating popover in this app) so
           it stays genuinely viewport-relative regardless of any transformed
           ancestor between here and body — e.g. a Kanban card modal's own
           entrance-animation wrapper. */}
-      {bubbleVisible && createPortal(
+      {false && bubbleVisible && createPortal(
         <div
           ref={bubbleRef}
           style={{
