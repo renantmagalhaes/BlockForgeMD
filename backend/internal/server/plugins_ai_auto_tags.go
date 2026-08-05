@@ -1,32 +1,32 @@
 package server
 
 import (
-	"blockforgemd/internal/plugins/ollamatagger"
+	"blockforgemd/internal/plugins/aitags"
 	"encoding/json"
 	"net/http"
 )
 
-func (s *Server) ollamaTaggerPlugin() *ollamatagger.Plugin {
-	p, ok := s.plugins.Get(ollamatagger.ID)
+func (s *Server) aiTagsPlugin() *aitags.Plugin {
+	p, ok := s.plugins.Get(aitags.ID)
 	if !ok {
-		panic("ollama-tagger plugin not registered")
+		panic("ai-auto-tags plugin not registered")
 	}
-	return p.(*ollamatagger.Plugin)
+	return p.(*aitags.Plugin)
 }
-func (s *Server) handleOllamaTaggerGetConfig(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleAITagsGetConfig(w http.ResponseWriter, r *http.Request) {
 	u := userFromCtx(r)
 	if u == nil {
 		http.Error(w, "unauthorized", 401)
 		return
 	}
-	c, e := s.ollamaTaggerPlugin().GetConfig(u.ID)
+	c, e := s.aiTagsPlugin().GetConfig(u.ID)
 	if e != nil {
 		http.Error(w, e.Error(), 500)
 		return
 	}
 	respondJSON(w, c)
 }
-func (s *Server) handleOllamaTaggerSetConfig(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleAITagsSetConfig(w http.ResponseWriter, r *http.Request) {
 	u := userFromCtx(r)
 	if u == nil {
 		http.Error(w, "unauthorized", 401)
@@ -47,27 +47,27 @@ func (s *Server) handleOllamaTaggerSetConfig(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "invalid request body", 400)
 		return
 	}
-	if e := s.ollamaTaggerPlugin().SetConfig(u.ID, q.Provider, q.Endpoint, q.APIKey, q.Model, q.AutoEnabled, q.RecheckOnChange, q.PollIntervalSeconds, q.MaxTags, q.Workspaces); e != nil {
+	if e := s.aiTagsPlugin().SetConfig(u.ID, q.Provider, q.Endpoint, q.APIKey, q.Model, q.AutoEnabled, q.RecheckOnChange, q.PollIntervalSeconds, q.MaxTags, q.Workspaces); e != nil {
 		http.Error(w, e.Error(), 400)
 		return
 	}
 	respondJSON(w, map[string]string{"status": "ok"})
 }
 
-func (s *Server) handleOllamaTaggerModels(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleAITagsModels(w http.ResponseWriter, r *http.Request) {
 	u := userFromCtx(r)
 	if u == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	models, err := s.ollamaTaggerPlugin().ListModels(r.Context(), u.ID, r.URL.Query().Get("provider"), r.URL.Query().Get("endpoint"), r.Header.Get("X-OpenRouter-Key"))
+	models, err := s.aiTagsPlugin().ListModels(r.Context(), u.ID, r.URL.Query().Get("provider"), r.URL.Query().Get("endpoint"), r.Header.Get("X-OpenRouter-Key"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	respondJSON(w, map[string]interface{}{"models": models})
 }
-func (s *Server) handleOllamaTaggerTagFile(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleAITagsTagFile(w http.ResponseWriter, r *http.Request) {
 	u := userFromCtx(r)
 	if u == nil {
 		http.Error(w, "unauthorized", 401)
@@ -80,7 +80,7 @@ func (s *Server) handleOllamaTaggerTagFile(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "path is required", 400)
 		return
 	}
-	if e := s.ollamaTaggerPlugin().TagNow(r.Context(), u.ID, q.Path); e != nil {
+	if e := s.aiTagsPlugin().TagNow(r.Context(), u.ID, q.Path); e != nil {
 		http.Error(w, e.Error(), 400)
 		return
 	}

@@ -13,7 +13,7 @@ Google Calendar also routes sync **per page**, not just per user: a due-dated pa
 ## Available
 
 - **[Google Calendar](google-calendar.md)** — 2-way sync between any page's due date and events on your Google Calendar.
-- **[AI Auto Tags](ollama-tagger.md)** — contextual Markdown tags generated through Ollama or OpenRouter.
+- **[AI Auto Tags](ai-auto-tags.md)** — contextual Markdown tags generated through Ollama or OpenRouter.
 
 ## Coming soon
 

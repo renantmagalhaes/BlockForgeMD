@@ -1,7 +1,7 @@
-// Package ollamatagger classifies Markdown pages with a user-configured AI
+// Package aitags classifies Markdown pages with a user-configured AI
 // provider. It deliberately stores only the tags it owns, so users can
 // freely keep their own frontmatter tags alongside automated suggestions.
-package ollamatagger
+package aitags
 
 import (
 	"bytes"
@@ -22,7 +22,7 @@ import (
 	"blockforgemd/internal/plugins"
 )
 
-const ID = "ollama-tagger"
+const ID = "ai-auto-tags"
 const minPollIntervalSeconds = 60
 const defaultPollIntervalSeconds = 900
 const defaultMaxTags = 5
@@ -88,7 +88,7 @@ func (p *Plugin) OnFileChanged(path string) {
 	if !strings.HasSuffix(strings.ToLower(path), ".md") {
 		return
 	}
-	cfgs, err := p.db.ListEnabledOllamaTaggerConfigs()
+	cfgs, err := p.db.ListEnabledAITagsConfigs()
 	if err != nil {
 		return
 	}
@@ -204,7 +204,7 @@ func (p *Plugin) ListModels(ctx context.Context, userID, provider, endpoint, api
 }
 
 func (p *Plugin) GetConfig(userID string) (ConfigResult, error) {
-	c, e := p.db.GetOllamaTaggerConfig(userID)
+	c, e := p.db.GetAITagsConfig(userID)
 	if e != nil {
 		return ConfigResult{}, e
 	}
@@ -287,7 +287,7 @@ func (p *Plugin) SetConfig(userID, provider, endpoint, apiKey, model string, aut
 		}
 	}
 	encodedWorkspaces, _ := json.Marshal(workspaces)
-	return p.db.UpsertOllamaTaggerConfig(db.OllamaTaggerConfig{UserID: userID, Provider: provider, EndpointEnc: enc, Model: strings.TrimSpace(model), AutoEnabled: auto, RecheckOnChange: recheck, PollIntervalSeconds: interval, MaxTags: maxTags, Workspaces: string(encodedWorkspaces)})
+	return p.db.UpsertAITagsConfig(db.AITagsConfig{UserID: userID, Provider: provider, EndpointEnc: enc, Model: strings.TrimSpace(model), AutoEnabled: auto, RecheckOnChange: recheck, PollIntervalSeconds: interval, MaxTags: maxTags, Workspaces: string(encodedWorkspaces)})
 }
 
 func (p *Plugin) openRouterKey(userID string) (string, error) {
@@ -299,7 +299,7 @@ func (p *Plugin) openRouterKey(userID string) (string, error) {
 	return string(key), err
 }
 
-func workspaceAllowed(cfg db.OllamaTaggerConfig, path string) bool {
+func workspaceAllowed(cfg db.AITagsConfig, path string) bool {
 	if cfg.Workspaces == "" {
 		return true
 	}
@@ -316,7 +316,7 @@ func workspaceAllowed(cfg db.OllamaTaggerConfig, path string) bool {
 	return false
 }
 func (p *Plugin) TagNow(ctx context.Context, userID, path string) error {
-	c, e := p.db.GetOllamaTaggerConfig(userID)
+	c, e := p.db.GetAITagsConfig(userID)
 	if e != nil {
 		return e
 	}
@@ -329,7 +329,7 @@ func (p *Plugin) TagNow(ctx context.Context, userID, path string) error {
 	return p.tagFile(ctx, *c, path, true)
 }
 func (p *Plugin) runScheduled(ctx context.Context) {
-	cfgs, e := p.db.ListEnabledOllamaTaggerConfigs()
+	cfgs, e := p.db.ListEnabledAITagsConfigs()
 	if e != nil {
 		return
 	}
@@ -345,7 +345,7 @@ func (p *Plugin) runScheduled(ctx context.Context) {
 			if !workspaceAllowed(c, f.Path) {
 				continue
 			}
-			s, _ := p.db.GetOllamaTaggerState(c.UserID, f.Path)
+			s, _ := p.db.GetAITagsState(c.UserID, f.Path)
 			if s != nil && s.LastRunAt != nil && time.Since(*s.LastRunAt) < time.Duration(valueOr(c.PollIntervalSeconds, defaultPollIntervalSeconds))*time.Second {
 				continue
 			}
@@ -353,7 +353,7 @@ func (p *Plugin) runScheduled(ctx context.Context) {
 		}
 	}
 }
-func (p *Plugin) tagFile(ctx context.Context, c db.OllamaTaggerConfig, path string, force bool) error {
+func (p *Plugin) tagFile(ctx context.Context, c db.AITagsConfig, path string, force bool) error {
 	unlock := p.locks.Lock(c.UserID + ":" + path)
 	defer unlock()
 	f, e := p.db.GetFile(path)
@@ -364,7 +364,7 @@ func (p *Plugin) tagFile(ctx context.Context, c db.OllamaTaggerConfig, path stri
 		return nil
 	}
 	sum := fmt.Sprintf("%x", sha256.Sum256([]byte(f.Content)))
-	state, _ := p.db.GetOllamaTaggerState(c.UserID, path)
+	state, _ := p.db.GetAITagsState(c.UserID, path)
 	if !force && state != nil && state.ContentHash == sum {
 		return nil
 	}
@@ -399,7 +399,7 @@ func (p *Plugin) tagFile(ctx context.Context, c db.OllamaTaggerConfig, path stri
 	}
 	tags, e := generate(ctx, provider, string(endpointRaw), apiKey, c.Model, content, relevantExisting, valueOr(c.MaxTags, defaultMaxTags))
 	if e != nil {
-		_ = p.db.UpsertOllamaTaggerState(c.UserID, path, sum, nil, time.Now(), e.Error())
+		_ = p.db.UpsertAITagsState(c.UserID, path, sum, nil, time.Now(), e.Error())
 		return e
 	}
 	existing := parseTags(f.FrontMatter["tags"])
@@ -445,7 +445,7 @@ func (p *Plugin) tagFile(ctx context.Context, c db.OllamaTaggerConfig, path stri
 		return e
 	}
 	p.ensureTagColors(path, combined)
-	return p.db.UpsertOllamaTaggerState(c.UserID, path, sum, managedTags, time.Now(), "")
+	return p.db.UpsertAITagsState(c.UserID, path, sum, managedTags, time.Now(), "")
 }
 
 // The editor normally assigns colors when a person adds a tag. Scheduled

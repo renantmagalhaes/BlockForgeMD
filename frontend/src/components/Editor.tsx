@@ -7598,7 +7598,7 @@ export const Editor: React.FC<
     setTaggingDocument(true);
     try {
       await executeAutoSave();
-      const res = await fetch("/api/plugins/ollama-tagger/tag-file", {
+      const res = await fetch("/api/plugins/ai-auto-tags/tag-file", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },

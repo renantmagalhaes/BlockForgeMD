@@ -9,7 +9,7 @@ import (
 // --- AI tagger: personal provider configuration and per-file ownership
 // state. managed_tags tracks only tags written by this plugin, never tags the
 // user added themselves.
-type OllamaTaggerConfig struct {
+type AITagsConfig struct {
 	UserID              string
 	Provider            string
 	EndpointEnc         []byte
@@ -21,8 +21,8 @@ type OllamaTaggerConfig struct {
 	Workspaces          string
 }
 
-func (db *DB) GetOllamaTaggerConfig(userID string) (*OllamaTaggerConfig, error) {
-	var c OllamaTaggerConfig
+func (db *DB) GetAITagsConfig(userID string) (*AITagsConfig, error) {
+	var c AITagsConfig
 	err := db.Conn.QueryRow(`SELECT user_id, provider, endpoint_enc, model, auto_enabled, recheck_on_change, poll_interval_seconds, max_tags, workspaces FROM plugin_ollama_tagger_user_config WHERE user_id = ?`, userID).
 		Scan(&c.UserID, &c.Provider, &c.EndpointEnc, &c.Model, &c.AutoEnabled, &c.RecheckOnChange, &c.PollIntervalSeconds, &c.MaxTags, &c.Workspaces)
 	if err == sql.ErrNoRows {
@@ -34,21 +34,21 @@ func (db *DB) GetOllamaTaggerConfig(userID string) (*OllamaTaggerConfig, error) 
 	return &c, nil
 }
 
-func (db *DB) UpsertOllamaTaggerConfig(c OllamaTaggerConfig) error {
+func (db *DB) UpsertAITagsConfig(c AITagsConfig) error {
 	_, err := db.Conn.Exec(`INSERT INTO plugin_ollama_tagger_user_config (user_id, provider, endpoint_enc, model, auto_enabled, recheck_on_change, poll_interval_seconds, max_tags, workspaces) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(user_id) DO UPDATE SET provider=excluded.provider, endpoint_enc=excluded.endpoint_enc, model=excluded.model, auto_enabled=excluded.auto_enabled, recheck_on_change=excluded.recheck_on_change, poll_interval_seconds=excluded.poll_interval_seconds, max_tags=excluded.max_tags, workspaces=excluded.workspaces`, c.UserID, c.Provider, c.EndpointEnc, c.Model, c.AutoEnabled, c.RecheckOnChange, c.PollIntervalSeconds, c.MaxTags, c.Workspaces)
 	return err
 }
 
-func (db *DB) ListEnabledOllamaTaggerConfigs() ([]OllamaTaggerConfig, error) {
+func (db *DB) ListEnabledAITagsConfigs() ([]AITagsConfig, error) {
 	rows, err := db.Conn.Query(`SELECT user_id, provider, endpoint_enc, model, auto_enabled, recheck_on_change, poll_interval_seconds, max_tags, workspaces FROM plugin_ollama_tagger_user_config WHERE auto_enabled = 1`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []OllamaTaggerConfig
+	var out []AITagsConfig
 	for rows.Next() {
-		var c OllamaTaggerConfig
+		var c AITagsConfig
 		if rows.Scan(&c.UserID, &c.Provider, &c.EndpointEnc, &c.Model, &c.AutoEnabled, &c.RecheckOnChange, &c.PollIntervalSeconds, &c.MaxTags, &c.Workspaces) == nil {
 			out = append(out, c)
 		}
@@ -56,15 +56,15 @@ func (db *DB) ListEnabledOllamaTaggerConfigs() ([]OllamaTaggerConfig, error) {
 	return out, rows.Err()
 }
 
-type OllamaTaggerState struct {
+type AITagsState struct {
 	ContentHash string
 	ManagedTags []string
 	LastRunAt   *time.Time
 	LastError   string
 }
 
-func (db *DB) GetOllamaTaggerState(userID, path string) (*OllamaTaggerState, error) {
-	var s OllamaTaggerState
+func (db *DB) GetAITagsState(userID, path string) (*AITagsState, error) {
+	var s AITagsState
 	var tags string
 	var last sql.NullTime
 	err := db.Conn.QueryRow(`SELECT content_hash, managed_tags, last_run_at, last_error FROM plugin_ollama_tagger_state WHERE user_id=? AND file_path=?`, userID, path).Scan(&s.ContentHash, &tags, &last, &s.LastError)
@@ -80,7 +80,7 @@ func (db *DB) GetOllamaTaggerState(userID, path string) (*OllamaTaggerState, err
 	}
 	return &s, nil
 }
-func (db *DB) UpsertOllamaTaggerState(userID, path, hash string, tags []string, run time.Time, lastError string) error {
+func (db *DB) UpsertAITagsState(userID, path, hash string, tags []string, run time.Time, lastError string) error {
 	b, _ := json.Marshal(tags)
 	_, err := db.Conn.Exec(`INSERT INTO plugin_ollama_tagger_state (user_id,file_path,content_hash,managed_tags,last_run_at,last_error) VALUES (?,?,?,?,?,?) ON CONFLICT(user_id,file_path) DO UPDATE SET content_hash=excluded.content_hash,managed_tags=excluded.managed_tags,last_run_at=excluded.last_run_at,last_error=excluded.last_error`, userID, path, hash, string(b), run, lastError)
 	return err
