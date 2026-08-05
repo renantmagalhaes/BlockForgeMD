@@ -207,6 +207,7 @@ func (db *DB) createTables() error {
 		);`,
 		`CREATE TABLE IF NOT EXISTS plugin_ollama_tagger_user_config (
 			user_id TEXT PRIMARY KEY,
+			provider TEXT NOT NULL DEFAULT 'ollama',
 			endpoint_enc BLOB,
 			model TEXT NOT NULL DEFAULT '',
 			auto_enabled BOOLEAN NOT NULL DEFAULT 0,
@@ -240,6 +241,7 @@ func (db *DB) createTables() error {
 	_, _ = db.Conn.Exec("ALTER TABLE files ADD COLUMN checklist TEXT;")
 	_, _ = db.Conn.Exec("ALTER TABLE search_history ADD COLUMN open_count INTEGER NOT NULL DEFAULT 1;")
 	_, _ = db.Conn.Exec("ALTER TABLE plugin_ollama_tagger_user_config ADD COLUMN workspaces TEXT NOT NULL DEFAULT '';")
+	_, _ = db.Conn.Exec("ALTER TABLE plugin_ollama_tagger_user_config ADD COLUMN provider TEXT NOT NULL DEFAULT 'ollama';")
 	_, _ = db.Conn.Exec("UPDATE files SET position = rowid WHERE position = 0 OR position IS NULL;")
 	_, _ = db.Conn.Exec("INSERT OR IGNORE INTO settings (key, value) VALUES ('history_limit', '50');")
 	if err := db.ensureSearchIndex(); err != nil {

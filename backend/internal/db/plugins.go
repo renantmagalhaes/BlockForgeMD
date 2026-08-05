@@ -6,11 +6,12 @@ import (
 	"time"
 )
 
-// --- Ollama tagger: personal provider configuration and per-file ownership
+// --- AI tagger: personal provider configuration and per-file ownership
 // state. managed_tags tracks only tags written by this plugin, never tags the
 // user added themselves.
 type OllamaTaggerConfig struct {
 	UserID              string
+	Provider            string
 	EndpointEnc         []byte
 	Model               string
 	AutoEnabled         bool
@@ -22,8 +23,8 @@ type OllamaTaggerConfig struct {
 
 func (db *DB) GetOllamaTaggerConfig(userID string) (*OllamaTaggerConfig, error) {
 	var c OllamaTaggerConfig
-	err := db.Conn.QueryRow(`SELECT user_id, endpoint_enc, model, auto_enabled, recheck_on_change, poll_interval_seconds, max_tags, workspaces FROM plugin_ollama_tagger_user_config WHERE user_id = ?`, userID).
-		Scan(&c.UserID, &c.EndpointEnc, &c.Model, &c.AutoEnabled, &c.RecheckOnChange, &c.PollIntervalSeconds, &c.MaxTags, &c.Workspaces)
+	err := db.Conn.QueryRow(`SELECT user_id, provider, endpoint_enc, model, auto_enabled, recheck_on_change, poll_interval_seconds, max_tags, workspaces FROM plugin_ollama_tagger_user_config WHERE user_id = ?`, userID).
+		Scan(&c.UserID, &c.Provider, &c.EndpointEnc, &c.Model, &c.AutoEnabled, &c.RecheckOnChange, &c.PollIntervalSeconds, &c.MaxTags, &c.Workspaces)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -34,13 +35,13 @@ func (db *DB) GetOllamaTaggerConfig(userID string) (*OllamaTaggerConfig, error) 
 }
 
 func (db *DB) UpsertOllamaTaggerConfig(c OllamaTaggerConfig) error {
-	_, err := db.Conn.Exec(`INSERT INTO plugin_ollama_tagger_user_config (user_id, endpoint_enc, model, auto_enabled, recheck_on_change, poll_interval_seconds, max_tags, workspaces) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(user_id) DO UPDATE SET endpoint_enc=excluded.endpoint_enc, model=excluded.model, auto_enabled=excluded.auto_enabled, recheck_on_change=excluded.recheck_on_change, poll_interval_seconds=excluded.poll_interval_seconds, max_tags=excluded.max_tags, workspaces=excluded.workspaces`, c.UserID, c.EndpointEnc, c.Model, c.AutoEnabled, c.RecheckOnChange, c.PollIntervalSeconds, c.MaxTags, c.Workspaces)
+	_, err := db.Conn.Exec(`INSERT INTO plugin_ollama_tagger_user_config (user_id, provider, endpoint_enc, model, auto_enabled, recheck_on_change, poll_interval_seconds, max_tags, workspaces) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(user_id) DO UPDATE SET provider=excluded.provider, endpoint_enc=excluded.endpoint_enc, model=excluded.model, auto_enabled=excluded.auto_enabled, recheck_on_change=excluded.recheck_on_change, poll_interval_seconds=excluded.poll_interval_seconds, max_tags=excluded.max_tags, workspaces=excluded.workspaces`, c.UserID, c.Provider, c.EndpointEnc, c.Model, c.AutoEnabled, c.RecheckOnChange, c.PollIntervalSeconds, c.MaxTags, c.Workspaces)
 	return err
 }
 
 func (db *DB) ListEnabledOllamaTaggerConfigs() ([]OllamaTaggerConfig, error) {
-	rows, err := db.Conn.Query(`SELECT user_id, endpoint_enc, model, auto_enabled, recheck_on_change, poll_interval_seconds, max_tags, workspaces FROM plugin_ollama_tagger_user_config WHERE auto_enabled = 1`)
+	rows, err := db.Conn.Query(`SELECT user_id, provider, endpoint_enc, model, auto_enabled, recheck_on_change, poll_interval_seconds, max_tags, workspaces FROM plugin_ollama_tagger_user_config WHERE auto_enabled = 1`)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +49,7 @@ func (db *DB) ListEnabledOllamaTaggerConfigs() ([]OllamaTaggerConfig, error) {
 	var out []OllamaTaggerConfig
 	for rows.Next() {
 		var c OllamaTaggerConfig
-		if rows.Scan(&c.UserID, &c.EndpointEnc, &c.Model, &c.AutoEnabled, &c.RecheckOnChange, &c.PollIntervalSeconds, &c.MaxTags, &c.Workspaces) == nil {
+		if rows.Scan(&c.UserID, &c.Provider, &c.EndpointEnc, &c.Model, &c.AutoEnabled, &c.RecheckOnChange, &c.PollIntervalSeconds, &c.MaxTags, &c.Workspaces) == nil {
 			out = append(out, c)
 		}
 	}

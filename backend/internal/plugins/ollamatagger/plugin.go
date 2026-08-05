@@ -1,5 +1,5 @@
-// Package ollamatagger classifies Markdown pages with a user-configured
-// Ollama server. It deliberately stores only the tags it owns, so users can
+// Package ollamatagger classifies Markdown pages with a user-configured AI
+// provider. It deliberately stores only the tags it owns, so users can
 // freely keep their own frontmatter tags alongside automated suggestions.
 package ollamatagger
 
@@ -26,6 +26,8 @@ const ID = "ollama-tagger"
 const minPollIntervalSeconds = 60
 const defaultPollIntervalSeconds = 900
 const defaultMaxTags = 5
+const ollamaProvider = "ollama"
+const openRouterProvider = "openrouter"
 
 type LocalWriter interface {
 	UpdateFrontMatter(string, map[string]interface{}) error
@@ -62,7 +64,7 @@ func New(database *db.DB, writer LocalWriter, encKey [32]byte) *Plugin {
 	return &Plugin{db: database, writer: writer, encKey: encKey, locks: newKeyedMutex(), inference: make(chan struct{}, 1)}
 }
 func (p *Plugin) Meta() plugins.Meta {
-	return plugins.Meta{ID: ID, Name: "Ollama Auto Tags", Category: "llm", Status: "available"}
+	return plugins.Meta{ID: ID, Name: "AI Auto Tags", Category: "llm", Status: "available"}
 }
 func (p *Plugin) Start(ctx context.Context) error {
 	p.wg.Add(1)
@@ -100,8 +102,10 @@ func (p *Plugin) OnFileChanged(path string) {
 }
 
 type ConfigResult struct {
+	Provider            string   `json:"provider"`
 	Endpoint            string   `json:"endpoint"`
 	HasEndpoint         bool     `json:"hasEndpoint"`
+	HasAPIKey           bool     `json:"hasApiKey"`
 	Model               string   `json:"model"`
 	AutoEnabled         bool     `json:"autoEnabled"`
 	RecheckOnChange     bool     `json:"recheckOnChange"`
@@ -110,16 +114,60 @@ type ConfigResult struct {
 	Workspaces          []string `json:"workspaces"` // empty = all workspaces
 }
 
-// ListModels asks the configured personal Ollama endpoint which models are
-// installed. It is intentionally a read-only, short-timeout request so the
-// settings page can verify connectivity before saving a model choice.
-func (p *Plugin) ListModels(ctx context.Context, userID, endpoint string) ([]string, error) {
-	if endpoint == "" {
+// ListModels gets the models available from the selected provider.
+func (p *Plugin) ListModels(ctx context.Context, userID, provider, endpoint, apiKey string) ([]string, error) {
+	if provider == "" {
 		cfg, err := p.GetConfig(userID)
 		if err != nil {
 			return nil, err
 		}
+		provider = cfg.Provider
 		endpoint = cfg.Endpoint
+		apiKey = ""
+	}
+	if provider == openRouterProvider {
+		if apiKey == "" {
+			var err error
+			apiKey, err = p.openRouterKey(userID)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if apiKey == "" {
+			return nil, errors.New("enter an OpenRouter API key first")
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://openrouter.ai/api/v1/models", nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+		res, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("could not reach OpenRouter: %w", err)
+		}
+		defer res.Body.Close()
+		if res.StatusCode < 200 || res.StatusCode >= 300 {
+			return nil, fmt.Errorf("OpenRouter returned %s", res.Status)
+		}
+		var payload struct {
+			Data []struct {
+				ID string `json:"id"`
+			} `json:"data"`
+		}
+		if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+			return nil, err
+		}
+		models := make([]string, 0, len(payload.Data))
+		for _, model := range payload.Data {
+			if model.ID != "" {
+				models = append(models, model.ID)
+			}
+		}
+		sort.Strings(models)
+		return models, nil
+	}
+	if provider != ollamaProvider {
+		return nil, errors.New("unsupported AI provider")
 	}
 	u, err := url.Parse(endpoint)
 	if err != nil || u.Scheme == "" || u.Host == "" {
@@ -151,6 +199,7 @@ func (p *Plugin) ListModels(ctx context.Context, userID, endpoint string) ([]str
 			models = append(models, model.Name)
 		}
 	}
+	sort.Strings(models)
 	return models, nil
 }
 
@@ -160,7 +209,7 @@ func (p *Plugin) GetConfig(userID string) (ConfigResult, error) {
 		return ConfigResult{}, e
 	}
 	if c == nil {
-		return ConfigResult{Model: "", RecheckOnChange: true, PollIntervalSeconds: defaultPollIntervalSeconds, MaxTags: defaultMaxTags, Workspaces: []string{}}, nil
+		return ConfigResult{Provider: ollamaProvider, Model: "", RecheckOnChange: true, PollIntervalSeconds: defaultPollIntervalSeconds, MaxTags: defaultMaxTags, Workspaces: []string{}}, nil
 	}
 	endpoint := ""
 	if len(c.EndpointEnc) > 0 {
@@ -175,7 +224,15 @@ func (p *Plugin) GetConfig(userID string) (ConfigResult, error) {
 	if workspaces == nil {
 		workspaces = []string{}
 	}
-	return ConfigResult{Endpoint: endpoint, HasEndpoint: endpoint != "", Model: c.Model, AutoEnabled: c.AutoEnabled, RecheckOnChange: c.RecheckOnChange, PollIntervalSeconds: valueOr(c.PollIntervalSeconds, defaultPollIntervalSeconds), MaxTags: valueOr(c.MaxTags, defaultMaxTags), Workspaces: workspaces}, nil
+	key, err := p.db.GetEncryptedSecret("ai_auto_tags_openrouter_key:" + userID)
+	if err != nil {
+		return ConfigResult{}, err
+	}
+	provider := c.Provider
+	if provider == "" {
+		provider = ollamaProvider
+	}
+	return ConfigResult{Provider: provider, Endpoint: endpoint, HasEndpoint: endpoint != "", HasAPIKey: len(key) > 0, Model: c.Model, AutoEnabled: c.AutoEnabled, RecheckOnChange: c.RecheckOnChange, PollIntervalSeconds: valueOr(c.PollIntervalSeconds, defaultPollIntervalSeconds), MaxTags: valueOr(c.MaxTags, defaultMaxTags), Workspaces: workspaces}, nil
 }
 func valueOr(v, d int) int {
 	if v > 0 {
@@ -183,16 +240,29 @@ func valueOr(v, d int) int {
 	}
 	return d
 }
-func (p *Plugin) SetConfig(userID, endpoint, model string, auto, recheck bool, interval, maxTags int, workspaces []string) error {
-	if endpoint == "" {
-		return errors.New("Ollama endpoint is required")
+func (p *Plugin) SetConfig(userID, provider, endpoint, apiKey, model string, auto, recheck bool, interval, maxTags int, workspaces []string) error {
+	if provider == "" {
+		provider = ollamaProvider
 	}
-	u, e := url.Parse(endpoint)
-	if e != nil || u.Scheme == "" || u.Host == "" {
-		return errors.New("endpoint must be a complete http(s) URL")
+	if provider != ollamaProvider && provider != openRouterProvider {
+		return errors.New("unsupported AI provider")
 	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return errors.New("endpoint must use http or https")
+	if provider == ollamaProvider {
+		if endpoint == "" {
+			return errors.New("Ollama endpoint is required")
+		}
+		u, e := url.Parse(endpoint)
+		if e != nil || u.Scheme == "" || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+			return errors.New("endpoint must be a complete http(s) URL")
+		}
+	} else if apiKey == "" {
+		key, err := p.openRouterKey(userID)
+		if err != nil {
+			return err
+		}
+		if key == "" {
+			return errors.New("OpenRouter API key is required")
+		}
 	}
 	if strings.TrimSpace(model) == "" {
 		return errors.New("Ollama model is required")
@@ -207,8 +277,26 @@ func (p *Plugin) SetConfig(userID, endpoint, model string, auto, recheck bool, i
 	if e != nil {
 		return e
 	}
+	if provider == openRouterProvider && apiKey != "" {
+		keyEnc, err := cryptoutil.Encrypt(p.encKey, []byte(apiKey))
+		if err != nil {
+			return err
+		}
+		if err = p.db.SetEncryptedSecret("ai_auto_tags_openrouter_key:"+userID, keyEnc); err != nil {
+			return err
+		}
+	}
 	encodedWorkspaces, _ := json.Marshal(workspaces)
-	return p.db.UpsertOllamaTaggerConfig(db.OllamaTaggerConfig{UserID: userID, EndpointEnc: enc, Model: strings.TrimSpace(model), AutoEnabled: auto, RecheckOnChange: recheck, PollIntervalSeconds: interval, MaxTags: maxTags, Workspaces: string(encodedWorkspaces)})
+	return p.db.UpsertOllamaTaggerConfig(db.OllamaTaggerConfig{UserID: userID, Provider: provider, EndpointEnc: enc, Model: strings.TrimSpace(model), AutoEnabled: auto, RecheckOnChange: recheck, PollIntervalSeconds: interval, MaxTags: maxTags, Workspaces: string(encodedWorkspaces)})
+}
+
+func (p *Plugin) openRouterKey(userID string) (string, error) {
+	enc, err := p.db.GetEncryptedSecret("ai_auto_tags_openrouter_key:" + userID)
+	if err != nil || len(enc) == 0 {
+		return "", err
+	}
+	key, err := cryptoutil.Decrypt(p.encKey, enc)
+	return string(key), err
 }
 
 func workspaceAllowed(cfg db.OllamaTaggerConfig, path string) bool {
@@ -232,8 +320,8 @@ func (p *Plugin) TagNow(ctx context.Context, userID, path string) error {
 	if e != nil {
 		return e
 	}
-	if c == nil || len(c.EndpointEnc) == 0 || c.Model == "" {
-		return errors.New("configure an Ollama endpoint and model first")
+	if c == nil || c.Model == "" {
+		return errors.New("configure an AI provider and model first")
 	}
 	if !workspaceAllowed(*c, path) {
 		return errors.New("this document is outside your Ollama Auto Tags workspace scope")
@@ -280,9 +368,23 @@ func (p *Plugin) tagFile(ctx context.Context, c db.OllamaTaggerConfig, path stri
 	if !force && state != nil && state.ContentHash == sum {
 		return nil
 	}
+	provider := c.Provider
+	if provider == "" {
+		provider = ollamaProvider
+	}
 	endpointRaw, e := cryptoutil.Decrypt(p.encKey, c.EndpointEnc)
 	if e != nil {
 		return e
+	}
+	apiKey := ""
+	if provider == openRouterProvider {
+		apiKey, e = p.openRouterKey(c.UserID)
+		if e != nil {
+			return e
+		}
+		if apiKey == "" {
+			return errors.New("OpenRouter API key is not configured")
+		}
 	}
 	content := markdownBody(f.Content)
 	allWorkspaceTags := workspaceTags(p, f.Path)
@@ -295,7 +397,7 @@ func (p *Plugin) tagFile(ctx context.Context, c db.OllamaTaggerConfig, path stri
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	tags, e := generate(ctx, string(endpointRaw), c.Model, content, relevantExisting, valueOr(c.MaxTags, defaultMaxTags))
+	tags, e := generate(ctx, provider, string(endpointRaw), apiKey, c.Model, content, relevantExisting, valueOr(c.MaxTags, defaultMaxTags))
 	if e != nil {
 		_ = p.db.UpsertOllamaTaggerState(c.UserID, path, sum, nil, time.Now(), e.Error())
 		return e
@@ -464,19 +566,34 @@ func markdownBody(content string) string {
 	}
 	return content
 }
-func generate(ctx context.Context, endpoint, model, document string, existingTags []string, max int) ([]string, error) {
+func generate(ctx context.Context, provider, endpoint, apiKey, model, document string, existingTags []string, max int) ([]string, error) {
 	vocabulary := "(no existing workspace tags)"
 	if len(existingTags) > 0 {
 		vocabulary = strings.Join(existingTags, ", ")
 	}
 	prompt := fmt.Sprintf("Return JSON only: an object with a `tags` array containing at most %d concise lowercase topical tags for this Markdown document. Reuse an exact item from Candidate existing tags only when it is central to this document. Do not output every candidate. Create a new tag only when no candidate accurately describes that concept. Do not include # or explanations. Candidate existing tags: %s\nDocument:\n%s", max, vocabulary, document[:min(len(document), 3500)])
 	schema := map[string]interface{}{"type": "object", "properties": map[string]interface{}{"tags": map[string]interface{}{"type": "array", "items": map[string]string{"type": "string"}}}, "required": []string{"tags"}}
-	body, _ := json.Marshal(map[string]interface{}{"model": model, "messages": []map[string]string{{"role": "user", "content": prompt}}, "stream": false, "keep_alive": "10m", "format": schema, "options": map[string]interface{}{"temperature": 0.1}})
-	req, e := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(endpoint, "/")+"/api/chat", bytes.NewReader(body))
+	payload := map[string]interface{}{"model": model, "messages": []map[string]string{{"role": "user", "content": prompt}}}
+	url := strings.TrimRight(endpoint, "/") + "/api/chat"
+	if provider == openRouterProvider {
+		url = "https://openrouter.ai/api/v1/chat/completions"
+		payload["response_format"] = map[string]string{"type": "json_object"}
+		payload["temperature"] = 0.1
+	} else {
+		payload["stream"] = false
+		payload["keep_alive"] = "10m"
+		payload["format"] = schema
+		payload["options"] = map[string]interface{}{"temperature": 0.1}
+	}
+	body, _ := json.Marshal(payload)
+	req, e := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if e != nil {
 		return nil, e
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if provider == openRouterProvider {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
 	client := &http.Client{Timeout: 2 * time.Minute}
 	res, e := client.Do(req)
 	if e != nil {
@@ -484,17 +601,26 @@ func generate(ctx context.Context, endpoint, model, document string, existingTag
 	}
 	defer res.Body.Close()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return nil, fmt.Errorf("Ollama returned %s", res.Status)
+		return nil, fmt.Errorf("%s returned %s", provider, res.Status)
 	}
 	var reply struct {
 		Message struct {
 			Content string `json:"content"`
 		} `json:"message"`
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
 	}
 	if e = json.NewDecoder(res.Body).Decode(&reply); e != nil {
 		return nil, e
 	}
-	tags, e := decodeTags(reply.Message.Content)
+	contentReply := reply.Message.Content
+	if provider == openRouterProvider && len(reply.Choices) > 0 {
+		contentReply = reply.Choices[0].Message.Content
+	}
+	tags, e := decodeTags(contentReply)
 	if e != nil {
 		return nil, e
 	}
@@ -519,11 +645,11 @@ func generate(ctx context.Context, endpoint, model, document string, existingTag
 func decodeTags(content string) ([]string, error) {
 	content = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(content), "```json"), "```"))
 	if content == "" {
-		return nil, errors.New("Ollama returned an empty model response; choose a different installed model")
+		return nil, errors.New("the AI provider returned an empty model response; choose a different model")
 	}
 	var data interface{}
 	if err := json.Unmarshal([]byte(content), &data); err != nil {
-		return nil, errors.New("Ollama did not return valid JSON tags")
+		return nil, errors.New("the AI provider did not return valid JSON tags")
 	}
 	var find func(interface{}) ([]string, bool)
 	find = func(v interface{}) ([]string, bool) {
@@ -557,7 +683,7 @@ func decodeTags(content string) ([]string, error) {
 	if tags, ok := find(data); ok {
 		return tags, nil
 	}
-	return nil, errors.New("Ollama returned JSON without a tag array")
+	return nil, errors.New("the AI provider returned JSON without a tag array")
 }
 func min(a, b int) int {
 	if a < b {

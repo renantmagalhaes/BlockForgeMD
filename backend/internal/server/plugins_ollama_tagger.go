@@ -33,7 +33,9 @@ func (s *Server) handleOllamaTaggerSetConfig(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var q struct {
+		Provider            string   `json:"provider"`
 		Endpoint            string   `json:"endpoint"`
+		APIKey              string   `json:"apiKey"`
 		Model               string   `json:"model"`
 		AutoEnabled         bool     `json:"autoEnabled"`
 		RecheckOnChange     bool     `json:"recheckOnChange"`
@@ -45,7 +47,7 @@ func (s *Server) handleOllamaTaggerSetConfig(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "invalid request body", 400)
 		return
 	}
-	if e := s.ollamaTaggerPlugin().SetConfig(u.ID, q.Endpoint, q.Model, q.AutoEnabled, q.RecheckOnChange, q.PollIntervalSeconds, q.MaxTags, q.Workspaces); e != nil {
+	if e := s.ollamaTaggerPlugin().SetConfig(u.ID, q.Provider, q.Endpoint, q.APIKey, q.Model, q.AutoEnabled, q.RecheckOnChange, q.PollIntervalSeconds, q.MaxTags, q.Workspaces); e != nil {
 		http.Error(w, e.Error(), 400)
 		return
 	}
@@ -58,7 +60,7 @@ func (s *Server) handleOllamaTaggerModels(w http.ResponseWriter, r *http.Request
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	models, err := s.ollamaTaggerPlugin().ListModels(r.Context(), u.ID, r.URL.Query().Get("endpoint"))
+	models, err := s.ollamaTaggerPlugin().ListModels(r.Context(), u.ID, r.URL.Query().Get("provider"), r.URL.Query().Get("endpoint"), r.Header.Get("X-OpenRouter-Key"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
