@@ -235,6 +235,8 @@ import {
   Activity,
   Plus,
   FileText,
+  FileCode2,
+  Printer,
   LayoutGrid,
   Brush,
   Maximize2,
@@ -401,6 +403,126 @@ turndownService.addRule("tables", {
     return content;
   }
 });
+
+// The backend renders this complete document with headless Chromium. Keeping
+// anchors as real <a href="#…"> links lets Chromium embed navigable PDF link
+// annotations instead of flattening the table of contents into plain text.
+async function pdfDocumentHTML(title: string, bodyHTML: string): Promise<string> {
+  const doc = new DOMParser().parseFromString(bodyHTML, "text/html");
+  // The PDF renderer runs in a separate headless browser. Make local vault
+  // images self-contained before sending the document there, which avoids
+  // any authentication, origin, or asset-loading timing differences.
+  await Promise.all(Array.from(doc.images).map(async (image) => {
+    const source = image.getAttribute("src");
+    if (!source || source.startsWith("data:")) return;
+    try {
+      const url = new URL(source, window.location.href);
+      if (url.origin !== window.location.origin) return;
+      const response = await fetch(url.href, { credentials: "include" });
+      if (!response.ok) return;
+      const blob = await response.blob();
+      if (!blob.type.startsWith("image/")) return;
+      const dataURL = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
+      });
+      image.setAttribute("src", dataURL);
+    } catch {
+      // Keep the original URL when an image cannot be embedded; the backend
+      // still has a local-file fallback for supported vault URLs.
+    }
+  }));
+  // Markdown such as `![](one.png)![](two.png)` becomes one paragraph of
+  // inline images. Split that into printable figures: an image can then use
+  // the available page space on its own instead of forcing the entire run to
+  // the next page.
+  doc.body.querySelectorAll("p").forEach((paragraph) => {
+    const children = Array.from(paragraph.children);
+    if (!children.length || children.some((child) => child.tagName !== "IMG") || paragraph.textContent?.trim()) return;
+    const figures = doc.createDocumentFragment();
+    children.forEach((image) => {
+      const figure = doc.createElement("figure");
+      figure.className = "pdf-image";
+      figure.append(image);
+      figures.append(figure);
+    });
+    paragraph.replaceWith(figures);
+  });
+  const ids = new Map<string, number>();
+  const headings = Array.from(doc.body.querySelectorAll("h1, h2, h3, h4, h5, h6"));
+  const slug = (value: string) => value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "section";
+  headings.forEach((heading) => {
+    if (!heading.id) {
+      const base = slug(heading.textContent || "section");
+      const count = ids.get(base) || 0;
+      ids.set(base, count + 1);
+      heading.id = count ? `${base}-${count + 1}` : base;
+    }
+  });
+  const toc = doc.createElement("nav");
+  toc.className = "pdf-toc";
+  toc.innerHTML = `<h2>Table of Contents</h2><ol>${headings.map((heading) => `<li class="level-${heading.tagName.slice(1)}"><a href="#${heading.id}">${heading.textContent || "Untitled section"}</a></li>`).join("")}</ol>`;
+  doc.body.querySelectorAll("toc-block").forEach((node) => node.replaceWith(toc.cloneNode(true)));
+  // Keep emoji font metrics out of normal prose. Applying Noto Color Emoji to
+  // the full body makes Chromium change line spacing and can clip ordered-list
+  // markers; only the emoji glyphs themselves need that font.
+  const emojiPattern = /(\p{Extended_Pictographic}(?:\uFE0F|\uFE0E)?(?:\u200D\p{Extended_Pictographic}(?:\uFE0F|\uFE0E)?)*|[\u{1F1E6}-\u{1F1FF}]{2}|[#*0-9]\uFE0F?\u20E3)/gu;
+  const textNodes: Text[] = [];
+  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) textNodes.push(walker.currentNode as Text);
+  textNodes.forEach((textNode) => {
+    const value = textNode.nodeValue || "";
+    if (!emojiPattern.test(value)) return;
+    emojiPattern.lastIndex = 0;
+    const fragment = doc.createDocumentFragment();
+    let offset = 0;
+    value.replace(emojiPattern, (emoji, index: number) => {
+      fragment.append(value.slice(offset, index));
+      const span = doc.createElement("span");
+      span.className = "pdf-emoji";
+      span.textContent = emoji;
+      fragment.append(span);
+      offset = index + emoji.length;
+      return emoji;
+    });
+    fragment.append(value.slice(offset));
+    textNode.replaceWith(fragment);
+  });
+  const safeTitle = title.replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]!));
+  // Do not add a second title when the Markdown already begins with an H1.
+  // Besides looking duplicated, that heading can leave too little room for a
+  // large first image and trigger an avoidable page break.
+  const hasDocumentTitle = doc.body.firstElementChild?.tagName === "H1";
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${safeTitle}</title><style>
+    @page { size: A4; margin: 18mm 16mm; }
+    body { color:#172033; font: 11pt/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    .pdf-emoji { font-family:"Noto Color Emoji"; font-size:.9em; line-height:1; vertical-align:-.08em; }
+    h1,h2,h3,h4 { color:#111827; break-after:avoid; } h1 { font-size:24pt; margin:0 0 .55em; } h2 { font-size:17pt; margin-top:1.35em; }
+    a { color:#4f46e5; text-decoration:underline; } img { display:block; max-width:100%; max-height:215mm; height:auto; margin:.4em auto; break-inside:avoid; page-break-inside:avoid; } figure.pdf-image { display:block; margin:6mm 0; break-inside:avoid; page-break-inside:avoid; } figure.pdf-image img { margin:0 auto; object-fit:contain; } pre { white-space:pre-wrap; background:#f3f4f6; padding:10pt; border-radius:4pt; }
+    table { width:100%; border-collapse:collapse; margin:1em 0; break-inside:avoid; } th,td { border:1px solid #cbd5e1; padding:6pt 8pt; vertical-align:top; } th { background:#f1f5f9; }
+    .pdf-toc { break-after:page; } .pdf-toc ol { padding-left:0; list-style-position:inside; } .pdf-toc li { margin:.25em 0; } .pdf-toc .level-3 { margin-left:1em; } .pdf-toc .level-4,.pdf-toc .level-5,.pdf-toc .level-6 { margin-left:2em; }
+    .no-print, button, .bf-toolbar, .ProseMirror-gapcursor { display:none !important; }
+  </style></head><body>${hasDocumentTitle ? "" : `<h1>${safeTitle}</h1>`}${doc.body.innerHTML}</body></html>`;
+}
+
+async function downloadPortableExport(name: string, format: "md" | "html", content: string) {
+  const response = await fetch("/api/export/archive", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, format, content })
+  });
+  if (!response.ok) throw new Error(await response.text());
+  const isArchive = response.headers.get("Content-Type")?.includes("application/zip");
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${name}.${isArchive ? "zip" : format}`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
 
 // Custom rule for iframes in Turndown
 turndownService.addRule("iframe", {
@@ -10165,11 +10287,22 @@ export const Editor: React.FC<
                         }}
                         className="w-44 bg-[#161b22] border border-slate-800 rounded-xl shadow-2xl p-1.5 flex flex-col space-y-0.5 z-[9999] no-scrollbar select-none text-slate-200">
                       <button
-                        onClick={() => {
+                        onClick={async () => {
                           setExportDropdownOpen(
                             false
                           );
-                          window.print();
+                          try {
+                            const title = filePath.split("/").pop()?.replace(/\.md$/, "") || "document";
+                            const res = await fetch("/api/export/pdf", {
+                              method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ name: title, html: await pdfDocumentHTML(title, editor?.getHTML() || "") })
+                            });
+                            if (!res.ok) throw new Error(await res.text());
+                            const url = URL.createObjectURL(await res.blob());
+                            const link = document.createElement("a");
+                            link.href = url; link.download = `${title}.pdf`; link.click();
+                            URL.revokeObjectURL(url);
+                          } catch (err) { await alertDialog(`PDF export failed: ${String(err)}`); }
                         }}
                         className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold hover:bg-slate-800 text-slate-305 hover:text-white transition flex items-center gap-2 cursor-pointer"
                       >
@@ -10182,7 +10315,14 @@ export const Editor: React.FC<
                         </span>
                       </button>
                       <button
-                        onClick={() => {
+                        onClick={() => { setExportDropdownOpen(false); window.print(); }}
+                        className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold hover:bg-slate-800 text-slate-305 hover:text-white transition flex items-center gap-2 cursor-pointer"
+                      >
+                        <Printer size={12} className="text-slate-400" />
+                        <span>Just print</span>
+                      </button>
+                      <button
+                        onClick={async () => {
                           setExportDropdownOpen(
                             false
                           );
@@ -10227,40 +10367,16 @@ export const Editor: React.FC<
                           const fullContent =
                             fmString +
                             markdownBody;
-                          const blob =
-                            new Blob(
-                              [
-                                fullContent
-                              ],
-                              {
-                                type: "text/markdown;charset=utf-8"
-                              }
-                            );
-                          const url =
-                            URL.createObjectURL(
-                              blob
-                            );
-                          const link =
-                            document.createElement(
-                              "a"
-                            );
-                          link.href =
-                            url;
-                          link.download =
-                            filePath
-                              .split(
-                                "/"
-                              )
-                              .pop() ||
-                            "note.md";
-                          link.click();
-                          URL.revokeObjectURL(
-                            url
-                          );
+                          try {
+                            const name = filePath.split("/").pop()?.replace(/\.md$/, "") || "note";
+                            await downloadPortableExport(name, "md", fullContent);
+                          } catch (err) {
+                            await alertDialog(`Markdown export failed: ${String(err)}`);
+                          }
                         }}
                         className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold hover:bg-slate-800 text-slate-305 hover:text-white transition flex items-center gap-2 cursor-pointer"
                       >
-                        <FileText
+                        <FileCode2
                           size={12}
                           className="text-violet-450"
                         />
@@ -10270,7 +10386,7 @@ export const Editor: React.FC<
                         </span>
                       </button>
                       <button
-                        onClick={() => {
+                        onClick={async () => {
                           setExportDropdownOpen(
                             false
                           );
@@ -10328,45 +10444,16 @@ export const Editor: React.FC<
   ${html}
 </body>
 </html>`;
-                          const blob =
-                            new Blob(
-                              [
-                                htmlContent
-                              ],
-                              {
-                                type: "text/html;charset=utf-8"
-                              }
-                            );
-                          const url =
-                            URL.createObjectURL(
-                              blob
-                            );
-                          const link =
-                            document.createElement(
-                              "a"
-                            );
-                          link.href =
-                            url;
-                          link.download =
-                            (filePath
-                              .split(
-                                "/"
-                              )
-                              .pop()
-                              ?.replace(
-                                ".md",
-                                ""
-                              ) ||
-                              "note") +
-                            ".html";
-                          link.click();
-                          URL.revokeObjectURL(
-                            url
-                          );
+                          try {
+                            const name = filePath.split("/").pop()?.replace(/\.md$/, "") || "note";
+                            await downloadPortableExport(name, "html", htmlContent);
+                          } catch (err) {
+                            await alertDialog(`HTML export failed: ${String(err)}`);
+                          }
                         }}
                         className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold hover:bg-slate-800 text-slate-305 hover:text-white transition flex items-center gap-2 cursor-pointer"
                       >
-                        <FileText
+                        <Code2
                           size={12}
                           className="text-emerald-450"
                         />

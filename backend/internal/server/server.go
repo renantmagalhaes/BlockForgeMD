@@ -128,6 +128,8 @@ func (s *Server) setupRoutes() {
 		r.Get("/link-preview", s.handleLinkPreview)
 		r.Get("/embed-check", s.handleEmbedCheck)
 		r.Get("/screenshot", s.handleScreenshot)
+		r.Post("/export/pdf", s.handleExportPDF)
+		r.Post("/export/archive", s.handleExportArchive)
 		r.Get("/search", s.handleSearch)
 		r.Post("/search/open", s.handleRecordSearchOpen)
 		r.Get("/settings", s.handleGetSettings)

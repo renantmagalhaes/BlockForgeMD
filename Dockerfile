@@ -22,7 +22,7 @@ FROM debian:bookworm-slim
 WORKDIR /app
 # Install runtime libraries + gosu for privilege dropping + a headless
 # Chromium (used to render screenshots of sites that block iframe embedding)
-RUN apt-get update && apt-get install -y ca-certificates gosu chromium && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y ca-certificates gosu chromium fonts-noto-color-emoji && rm -rf /var/lib/apt/lists/*
 # Copy compiled backend binary
 COPY --from=backend-builder /app/backend/blockforgemd-backend ./
 # Copy compiled frontend assets
