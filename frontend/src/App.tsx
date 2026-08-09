@@ -1134,6 +1134,8 @@ const App: React.FC = () => {
   // resets can read/restore it without an extra round trip. Populated by
   // the fetch effect below.
   const persistedFolderCollapseRef = useRef<Record<string, boolean>>({})
+  // Per-folder queue: two quick clicks must reach the server in click order.
+  const folderCollapseSaveQueuesRef = useRef<Map<string, Promise<void>>>(new Map())
 
   // ── Workspace state ────────────────────────────────────────────────────────
   const [workspaces, setWorkspaces] = useState<string[]>([])
@@ -1263,11 +1265,29 @@ const App: React.FC = () => {
       if (node.type === 'folder') {
         const persisted = { ...persistedFolderCollapseRef.current, [path]: nextVal }
         persistedFolderCollapseRef.current = persisted
-        fetch(`${API_BASE}/api/folder-collapse`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ collapsed: persisted }),
-        }).catch(e => console.error('Failed to save folder collapse state', e))
+        const previousSave = folderCollapseSaveQueuesRef.current.get(path) || Promise.resolve()
+        const save = previousSave.catch(() => {}).then(async () => {
+          const res = await fetch(`${API_BASE}/api/folder-collapse`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path, collapsed: nextVal }),
+          })
+          if (!res.ok) throw new Error(`Failed to save folder collapse state (${res.status})`)
+        })
+        folderCollapseSaveQueuesRef.current.set(path, save)
+        save.catch(e => {
+          console.error('Failed to save folder collapse state', e)
+          // Do not undo a later click for this same folder.
+          if (persistedFolderCollapseRef.current[path] === nextVal) {
+            const reverted = { ...persistedFolderCollapseRef.current, [path]: !nextVal }
+            persistedFolderCollapseRef.current = reverted
+            setCollapsedPaths(current => ({ ...current, [path]: !nextVal }))
+          }
+        }).finally(() => {
+          if (folderCollapseSaveQueuesRef.current.get(path) === save) {
+            folderCollapseSaveQueuesRef.current.delete(path)
+          }
+        })
       }
       return { ...prev, [path]: nextVal }
     })

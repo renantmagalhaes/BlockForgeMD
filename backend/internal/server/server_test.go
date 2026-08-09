@@ -141,6 +141,40 @@ func newTestServer(t *testing.T) (*Server, string) {
 	return NewServer(tempDir, database, w, encKey), tempDir
 }
 
+func TestFolderCollapseUpdatesOnlyTheTargetFolder(t *testing.T) {
+	s, _ := newTestServer(t)
+
+	setCollapse := func(body string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/api/folder-collapse", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("save folder collapse: expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+	}
+
+	setCollapse(`{"path":"Default/Documents/Projects.md","collapsed":false}`)
+	setCollapse(`{"path":"Default/Documents/Archive.md","collapsed":true}`)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/folder-collapse", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	var response struct {
+		Collapsed map[string]bool `json:"collapsed"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode folder collapse response: %v", err)
+	}
+	if response.Collapsed["Default/Documents/Projects.md"] {
+		t.Fatal("expected Projects folder to remain open")
+	}
+	if !response.Collapsed["Default/Documents/Archive.md"] {
+		t.Fatal("expected Archive folder to remain collapsed")
+	}
+}
+
 // noteWithRelativeAsset writes a note plus a physical asset under it,
 // mirroring how the app actually stores things on disk: the note's body
 // references the asset with a path relative to the note's own directory

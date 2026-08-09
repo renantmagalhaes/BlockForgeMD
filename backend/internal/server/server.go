@@ -35,8 +35,10 @@ type Server struct {
 	rootPath  string
 	clients   map[chan string]bool
 	clientsMu sync.Mutex
-	router    *chi.Mux
-	plugins   *plugins.Registry
+	// Makes updates to the shared folder-collapse map atomic.
+	folderCollapseMu sync.Mutex
+	router           *chi.Mux
+	plugins          *plugins.Registry
 }
 
 func NewServer(rootPath string, database *db.DB, w *watcher.Watcher, encKey [32]byte) *Server {
@@ -1845,13 +1847,41 @@ func (s *Server) handleGetFolderCollapse(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) handleSetFolderCollapse(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Collapsed map[string]bool `json:"collapsed"`
+		Path      string          `json:"path"`
+		Collapsed json.RawMessage `json:"collapsed"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	data, err := json.Marshal(req.Collapsed)
+
+	// A one-folder update avoids overwriting another device's newer state with
+	// a stale full-map snapshot. Retain the old map form for rolling upgrades.
+	s.folderCollapseMu.Lock()
+	defer s.folderCollapseMu.Unlock()
+	stored, _ := s.db.GetSetting("folder_collapsed", "{}")
+	collapsed := map[string]bool{}
+	_ = json.Unmarshal([]byte(stored), &collapsed)
+
+	if req.Path != "" {
+		var isCollapsed bool
+		if err := json.Unmarshal(req.Collapsed, &isCollapsed); err != nil {
+			http.Error(w, "collapsed must be a boolean", http.StatusBadRequest)
+			return
+		}
+		collapsed[req.Path] = isCollapsed
+	} else {
+		var legacy map[string]bool
+		if err := json.Unmarshal(req.Collapsed, &legacy); err != nil {
+			http.Error(w, "path is required and collapsed must be a boolean", http.StatusBadRequest)
+			return
+		}
+		for path, isCollapsed := range legacy {
+			collapsed[path] = isCollapsed
+		}
+	}
+
+	data, err := json.Marshal(collapsed)
 	if err != nil {
 		http.Error(w, "invalid collapsed map", http.StatusBadRequest)
 		return
@@ -1860,7 +1890,7 @@ func (s *Server) handleSetFolderCollapse(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "failed to save folder collapse state", http.StatusInternalServerError)
 		return
 	}
-	respondJSON(w, map[string]string{"status": "success"})
+	respondJSON(w, map[string]interface{}{"status": "success", "collapsed": collapsed})
 }
 
 func (s *Server) handleGetTagColors(w http.ResponseWriter, r *http.Request) {
