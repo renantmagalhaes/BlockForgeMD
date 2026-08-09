@@ -759,19 +759,27 @@ func (db *DB) Search(query, wsPrefix, userID string) ([]FileRecord, error) {
 	scope := ""
 	args := []interface{}{}
 	if wsPrefix != "" {
-		scope = "WHERE path LIKE ?"
+		scope = "WHERE f.path LIKE ?"
 		args = append(args, wsPrefix+"%")
 	}
 	rows, err := db.Conn.Query(`
-		SELECT path, title, type, content_hash, updated_at
-		FROM files `+scope+` ORDER BY title ASC;`, args...)
+		SELECT f.path, f.title, f.type, f.content_hash, f.updated_at,
+			COALESCE(status.value, '')
+		FROM files f
+		LEFT JOIN front_matter status
+			ON status.file_path = f.path AND status.key = 'status' `+scope+`
+		ORDER BY f.title ASC;`, args...)
 	if err != nil {
 		return nil, err
 	}
 	var records []FileRecord
 	for rows.Next() {
 		var record FileRecord
-		if err := rows.Scan(&record.Path, &record.Title, &record.Type, &record.ContentHash, &record.UpdatedAt); err == nil {
+		var status string
+		if err := rows.Scan(&record.Path, &record.Title, &record.Type, &record.ContentHash, &record.UpdatedAt, &status); err == nil {
+			if status != "" {
+				record.FrontMatter = map[string]string{"status": status}
+			}
 			records = append(records, record)
 		}
 	}
@@ -881,6 +889,13 @@ func (db *DB) rankResults(records []FileRecord, query, userID string) []FileReco
 		age := now.Sub(rec.UpdatedAt)
 		if age > 0 {
 			score += 0.4 * math.Exp(-age.Hours()/(24*90)) // half-decay ~62 days
+		}
+
+		// Completed Kanban cards remain searchable, but when otherwise equally
+		// relevant they should sit behind active work. Keep the adjustment small
+		// so an exact title match still outranks an unrelated in-progress card.
+		if rec.Type == "task" && normalize(rec.FrontMatter["status"]) == "completed" {
+			score *= 0.85
 		}
 
 		// Historical searches: opening this file from a search before boosts it,

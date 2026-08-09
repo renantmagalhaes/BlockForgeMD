@@ -71,6 +71,25 @@ func TestRankingPrioritizesTitle(t *testing.T) {
 	}
 }
 
+func TestRankingDemotesCompletedKanbanCards(t *testing.T) {
+	now := time.Now()
+	recs := []FileRecord{
+		{Path: "Default/Boards/active.md", Title: "Ship release", Type: "task", UpdatedAt: now, FrontMatter: map[string]string{"status": "In Progress"}},
+		{Path: "Default/Boards/completed.md", Title: "Ship release", Type: "task", UpdatedAt: now, FrontMatter: map[string]string{"status": "Completed"}},
+	}
+
+	out := (&DB{}).rankResults(recs, "ship release", "")
+	if len(out) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(out))
+	}
+	if out[0].Path != "Default/Boards/active.md" {
+		t.Errorf("active card should rank ahead of completed card, got %s", out[0].Path)
+	}
+	if out[0].Score <= out[1].Score {
+		t.Errorf("active score (%v) should exceed completed score (%v)", out[0].Score, out[1].Score)
+	}
+}
+
 func TestSearchIndexesContentAndLearnsRepeatedOpens(t *testing.T) {
 	db, err := NewDB(filepath.Join(t.TempDir(), "blockforge.db"))
 	if err != nil {
