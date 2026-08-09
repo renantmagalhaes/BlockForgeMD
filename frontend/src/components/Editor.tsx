@@ -5550,6 +5550,11 @@ export const Editor: React.FC<
   );
   const emojiQueryRef =
     useRef(emojiQuery);
+  // A colon already present in the document is ordinary text. Track the
+  // position only when the user actually types a colon so Backspace, Delete,
+  // and cursor movement can never open emoji suggestions at an old colon.
+  const typedEmojiTriggerPosRef =
+    useRef<number | null>(null);
   const inlineEmojiPickerRef =
     useRef<HTMLDivElement>(null);
 
@@ -5920,6 +5925,13 @@ export const Editor: React.FC<
       attributes: {
         class:
           "prose prose-invert max-w-none focus:outline-none min-h-[450px] text-slate-200 px-4 py-2"
+      },
+      handleTextInput: (_view, from, to, text) => {
+        typedEmojiTriggerPosRef.current =
+          text === ":" && from === to
+            ? from + 1
+            : null;
+        return false;
       },
       handlePaste: (view, event) => {
         const items =
@@ -6761,7 +6773,9 @@ export const Editor: React.FC<
   useEffect(() => {
     if (!editor) return;
 
-    const handleUpdate = () => {
+    const handleUpdate = (event?: {
+      transaction?: { docChanged: boolean };
+    }) => {
       const { selection } =
         editor.state;
       const textBeforeCursor =
@@ -6786,6 +6800,9 @@ export const Editor: React.FC<
         textBeforeCursor.match(
           /(?:^|\s):([a-zA-Z0-9_+-]*)$/
         );
+      const emojiWasJustTyped =
+        typedEmojiTriggerPosRef.current ===
+        selection.from;
 
       if (slashMatch) {
         setCommandActive(true);
@@ -6853,7 +6870,21 @@ export const Editor: React.FC<
             )
           });
         } catch (e) {}
-      } else if (emojiMatch) {
+      } else if (
+        emojiMatch &&
+        (emojiWasJustTyped ||
+          (emojiActiveRef.current &&
+            event?.transaction?.docChanged))
+      ) {
+        // Both ProseMirror's update and selectionUpdate notifications can
+        // fire for one keystroke. Leave the marker in place until they have
+        // both run, then clear it before any later cursor movement.
+        if (emojiWasJustTyped) {
+          queueMicrotask(() => {
+            typedEmojiTriggerPosRef.current = null;
+          });
+        }
+        emojiActiveRef.current = true;
         setEmojiActive(true);
         setEmojiQuery(emojiMatch[1]);
         setCommandActive(false);
@@ -6888,6 +6919,7 @@ export const Editor: React.FC<
       } else {
         setCommandActive(false);
         setMentionActive(false);
+        emojiActiveRef.current = false;
         setEmojiActive(false);
       }
     };
